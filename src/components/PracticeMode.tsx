@@ -278,11 +278,10 @@ export default function PracticeMode({ sections }: PracticeModeProps) {
                 >
                   Try Again
                 </button>
-                {comparison && isTTSAvailable() && (
+                {comparison && isTTSAvailable() && !isSpeakingCorrection && (
                   <button
                     onClick={speakCorrections}
-                    disabled={isSpeakingCorrection}
-                    className="px-6 py-3 bg-amber-600 hover:bg-amber-500 disabled:bg-zinc-700 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+                    className="px-6 py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
                   >
                     <svg
                       className="w-5 h-5"
@@ -297,7 +296,21 @@ export default function PracticeMode({ sections }: PracticeModeProps) {
                         d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"
                       />
                     </svg>
-                    {isSpeakingCorrection ? "Speaking..." : "Hear Corrections"}
+                    Hear Corrections
+                  </button>
+                )}
+                {isSpeakingCorrection && (
+                  <button
+                    onClick={() => {
+                      stopSpeaking();
+                      setIsSpeakingCorrection(false);
+                    }}
+                    className="px-6 py-3 bg-red-600 hover:bg-red-500 text-white rounded-lg font-medium transition-colors flex items-center gap-2 animate-pulse"
+                  >
+                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                      <rect x="6" y="6" width="12" height="12" rx="2" />
+                    </svg>
+                    Stop Speaking
                   </button>
                 )}
               </>
