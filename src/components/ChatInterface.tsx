@@ -15,13 +15,16 @@ interface ChatInterfaceProps {
 }
 
 export default function ChatInterface({ ritualContext }: ChatInterfaceProps) {
+  const ritualContextRef = useRef(ritualContext);
+  ritualContextRef.current = ritualContext;
+
   const transport = useMemo(
     () =>
       new TextStreamChatTransport({
         api: "/api/chat",
-        body: { ritualContext },
+        body: () => ({ ritualContext: ritualContextRef.current }),
       }),
-    [ritualContext]
+    []
   );
 
   const { messages, sendMessage, status } = useChat({ transport });
