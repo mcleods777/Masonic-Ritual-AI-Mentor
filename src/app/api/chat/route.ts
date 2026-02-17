@@ -6,9 +6,30 @@
  */
 
 import { anthropic } from "@ai-sdk/anthropic";
-import { streamText, convertToModelMessages } from "ai";
+import { streamText } from "ai";
 
 export const maxDuration = 30;
+
+// Convert UIMessage format (parts array) to CoreMessage format (content string)
+// that streamText expects.
+interface UIMessageInput {
+  role: "user" | "assistant";
+  parts?: Array<{ type: string; text?: string }>;
+  content?: string;
+}
+
+function convertMessages(messages: UIMessageInput[]) {
+  return messages.map((msg) => {
+    let content = msg.content;
+    if (!content && msg.parts) {
+      content = msg.parts
+        .filter((p) => p.type === "text" && p.text)
+        .map((p) => p.text)
+        .join("");
+    }
+    return { role: msg.role, content: content || "" };
+  });
+}
 
 const COACH_SYSTEM_PROMPT = `You are a patient, encouraging Past Master serving as a Masonic ritual memorization coach. Your role is to help Brothers practice and memorize their ritual work.
 
@@ -41,7 +62,7 @@ export async function POST(req: Request) {
   const result = streamText({
     model: anthropic("claude-3-5-haiku-latest"),
     system: systemPrompt,
-    messages: await convertToModelMessages(messages),
+    messages: convertMessages(messages),
     temperature: 0.4,
     maxOutputTokens: 1024,
   });
