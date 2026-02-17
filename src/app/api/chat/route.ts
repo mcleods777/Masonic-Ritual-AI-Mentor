@@ -6,7 +6,7 @@
  */
 
 import { anthropic } from "@ai-sdk/anthropic";
-import { streamText } from "ai";
+import { streamText, convertToModelMessages } from "ai";
 
 export const maxDuration = 30;
 
@@ -41,7 +41,7 @@ export async function POST(req: Request) {
   const result = streamText({
     model: anthropic("claude-3-5-haiku-latest"),
     system: systemPrompt,
-    messages,
+    messages: await convertToModelMessages(messages),
     temperature: 0.4,
     maxOutputTokens: 1024,
   });
