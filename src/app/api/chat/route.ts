@@ -10,6 +10,27 @@ import { streamText } from "ai";
 
 export const maxDuration = 30;
 
+// Convert UIMessage format (parts array) to CoreMessage format (content string)
+// that streamText expects.
+interface UIMessageInput {
+  role: "user" | "assistant";
+  parts?: Array<{ type: string; text?: string }>;
+  content?: string;
+}
+
+function convertMessages(messages: UIMessageInput[]) {
+  return messages.map((msg) => {
+    let content = msg.content;
+    if (!content && msg.parts) {
+      content = msg.parts
+        .filter((p) => p.type === "text" && p.text)
+        .map((p) => p.text)
+        .join("");
+    }
+    return { role: msg.role, content: content || "" };
+  });
+}
+
 const COACH_SYSTEM_PROMPT = `You are a patient, encouraging Past Master serving as a Masonic ritual memorization coach. Your role is to help Brothers practice and memorize their ritual work.
 
 CRITICAL RULES:
@@ -30,8 +51,17 @@ RITUAL TEXT FOR REFERENCE:
 
 If no ritual text is provided above, inform the Brother that they need to upload their ritual document first before you can help with practice.`;
 
+const ALLOWED_MODELS = new Set([
+  "claude-3-5-haiku-latest",
+  "claude-haiku-4-5-20251001",
+  "claude-sonnet-4-5-20250929",
+  "claude-opus-4-6",
+]);
+
 export async function POST(req: Request) {
-  const { messages, ritualContext } = await req.json();
+  const { messages, ritualContext, model } = await req.json();
+
+  const modelId = ALLOWED_MODELS.has(model) ? model : "claude-3-5-haiku-latest";
 
   const systemPrompt = COACH_SYSTEM_PROMPT.replace(
     "{RITUAL_TEXT}",
@@ -39,9 +69,9 @@ export async function POST(req: Request) {
   );
 
   const result = streamText({
-    model: anthropic("claude-3-5-haiku-latest"),
+    model: anthropic(modelId),
     system: systemPrompt,
-    messages,
+    messages: convertMessages(messages),
     temperature: 0.4,
     maxOutputTokens: 1024,
   });

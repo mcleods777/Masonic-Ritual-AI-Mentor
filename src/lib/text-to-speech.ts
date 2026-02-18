@@ -1,7 +1,59 @@
 /**
- * Text-to-speech engine using the Web Speech Synthesis API.
- * Speaks corrections and coaching feedback aloud to the user.
+ * Text-to-speech — multi-engine support.
+ *
+ * Three engines:
+ *   1. "browser"     — Web Speech Synthesis API (free, works offline)
+ *   2. "elevenlabs"  — ElevenLabs cloud API (high-quality)
+ *   3. "google-cloud" — Google Cloud TTS Neural2 (high-quality)
+ *
+ * The public API (speak, speakAsRole, stopSpeaking, etc.) stays the same.
+ * Components don't need to know which engine is active — they just call
+ * these functions and the current engine handles playback.
  */
+
+import {
+  speakElevenLabs,
+  speakElevenLabsAsRole,
+  speakGoogleCloud,
+  speakGoogleCloudAsRole,
+  stopCloudAudio,
+  isCloudAudioPlaying,
+} from "./tts-cloud";
+
+// ============================================================
+// Engine selection
+// ============================================================
+
+export type TTSEngineName = "browser" | "elevenlabs" | "google-cloud";
+
+const TTS_ENGINE_STORAGE_KEY = "tts-engine";
+
+let currentEngine: TTSEngineName = "browser";
+
+// Restore persisted engine on module load (client only)
+if (typeof window !== "undefined") {
+  const stored = localStorage.getItem(TTS_ENGINE_STORAGE_KEY);
+  if (stored === "elevenlabs" || stored === "google-cloud") {
+    currentEngine = stored;
+  }
+}
+
+/** Get the currently active TTS engine. */
+export function getTTSEngine(): TTSEngineName {
+  return currentEngine;
+}
+
+/** Set the active TTS engine. Persists to localStorage. */
+export function setTTSEngine(engine: TTSEngineName): void {
+  currentEngine = engine;
+  if (typeof window !== "undefined") {
+    localStorage.setItem(TTS_ENGINE_STORAGE_KEY, engine);
+  }
+}
+
+// ============================================================
+// Types (unchanged)
+// ============================================================
 
 export interface TTSOptions {
   rate?: number; // 0.1 - 10 (default 0.9 for ritual — slightly slow and clear)
@@ -16,19 +68,114 @@ const DEFAULT_OPTIONS: TTSOptions = {
   volume: 1,
 };
 
+// ============================================================
+// Role-based voice profiles (for the browser engine)
+// ============================================================
+
+/** Voice profile for a specific officer role */
+export interface RoleVoiceProfile {
+  pitch: number;
+  rate: number;
+  voiceName?: string;
+}
+
 /**
- * Check if TTS is available in this browser
+ * Default voice profiles per role — pitch and rate vary to distinguish speakers.
+ * Pitch range: 0.7 (deep) to 1.3 (higher).
+ * Rate range: 0.8 (slow/formal) to 1.0 (normal).
  */
-export function isTTSAvailable(): boolean {
+const ROLE_VOICE_PROFILES: Record<string, RoleVoiceProfile> = {
+  // Principal officers — deeper, more deliberate
+  WM:        { pitch: 0.75, rate: 0.82 },
+  'W.M.':    { pitch: 0.75, rate: 0.82 },
+  'W. M.':   { pitch: 0.75, rate: 0.82 },
+  SW:        { pitch: 0.88, rate: 0.87 },
+  'S.W.':    { pitch: 0.88, rate: 0.87 },
+  'S. W.':   { pitch: 0.88, rate: 0.87 },
+  JW:        { pitch: 1.0,  rate: 0.87 },
+  'J.W.':    { pitch: 1.0,  rate: 0.87 },
+  'J. W.':   { pitch: 1.0,  rate: 0.87 },
+  // Deacons — slightly higher, a bit quicker
+  SD:        { pitch: 1.05, rate: 0.92 },
+  'S.D.':    { pitch: 1.05, rate: 0.92 },
+  'S. D.':   { pitch: 1.05, rate: 0.92 },
+  JD:        { pitch: 1.15, rate: 0.92 },
+  'J.D.':    { pitch: 1.15, rate: 0.92 },
+  'J. D.':   { pitch: 1.15, rate: 0.92 },
+  'S(orJ)D': { pitch: 1.1,  rate: 0.92 },
+  'S/J D':   { pitch: 1.1,  rate: 0.92 },
+  // Other officers
+  'S/Sec':   { pitch: 0.95, rate: 0.95 },
+  Sec:       { pitch: 0.95, rate: 0.95 },
+  'Sec.':    { pitch: 0.95, rate: 0.95 },
+  S:         { pitch: 0.95, rate: 0.95 },
+  Tr:        { pitch: 0.92, rate: 0.90 },
+  Treas:     { pitch: 0.92, rate: 0.90 },
+  'Treas.':  { pitch: 0.92, rate: 0.90 },
+  Ch:        { pitch: 0.80, rate: 0.78 },
+  Chap:      { pitch: 0.80, rate: 0.78 },
+  'Chap.':   { pitch: 0.80, rate: 0.78 },
+  Marshal:   { pitch: 1.0,  rate: 0.90 },
+  T:         { pitch: 1.20, rate: 0.90 },
+  Tyler:     { pitch: 1.20, rate: 0.90 },
+  Candidate: { pitch: 1.10, rate: 0.85 },
+  // Group/other
+  ALL:       { pitch: 0.95, rate: 0.80 },
+  All:       { pitch: 0.95, rate: 0.80 },
+  BR:        { pitch: 1.08, rate: 0.90 },
+  Bro:       { pitch: 1.08, rate: 0.90 },
+  'Bro.':    { pitch: 1.08, rate: 0.90 },
+  'SW/WM':   { pitch: 0.82, rate: 0.85 },
+};
+
+/**
+ * Get the voice profile for a given role.
+ * Falls back to neutral defaults if the role isn't mapped.
+ */
+export function getVoiceForRole(role: string): RoleVoiceProfile {
+  return ROLE_VOICE_PROFILES[role] || { pitch: 1.0, rate: 0.9 };
+}
+
+/**
+ * Assign distinct voices from the available voice list to each role.
+ * Spreads voices across roles for maximum variety.
+ * (Only meaningful for the "browser" engine.)
+ */
+export function assignVoicesToRoles(roles: string[]): Map<string, RoleVoiceProfile> {
+  const voices = getVoices();
+  const map = new Map<string, RoleVoiceProfile>();
+
+  for (let i = 0; i < roles.length; i++) {
+    const role = roles[i];
+    const profile = getVoiceForRole(role);
+
+    // Spread available voices across roles
+    if (voices.length > 0) {
+      const voiceIndex = i % voices.length;
+      map.set(role, { ...profile, voiceName: voices[voiceIndex].name });
+    } else {
+      map.set(role, profile);
+    }
+  }
+
+  return map;
+}
+
+// ============================================================
+// Browser Web Speech helpers
+// ============================================================
+
+/** Whether the native Web Speech Synthesis API is present. */
+function isWebSpeechPresent(): boolean {
   if (typeof window === "undefined") return false;
   return "speechSynthesis" in window;
 }
 
 /**
- * Get available voices, preferring English voices
+ * Get available browser voices, preferring English voices
  */
 export function getVoices(): SpeechSynthesisVoice[] {
-  if (!isTTSAvailable()) return [];
+  if (!isWebSpeechPresent()) return [];
   return speechSynthesis
     .getVoices()
     .filter((v) => v.lang.startsWith("en"))
@@ -41,19 +188,17 @@ export function getVoices(): SpeechSynthesisVoice[] {
 }
 
 /**
- * Pick the best default voice
+ * Pick the best default browser voice
  */
 function getBestVoice(preferredName?: string): SpeechSynthesisVoice | null {
   const voices = getVoices();
   if (voices.length === 0) return null;
 
-  // If a preferred voice is specified, try to find it
   if (preferredName) {
     const preferred = voices.find((v) => v.name === preferredName);
     if (preferred) return preferred;
   }
 
-  // Prefer specific high-quality voices if available
   const preferredVoices = [
     "Google UK English Male",
     "Google US English",
@@ -67,24 +212,17 @@ function getBestVoice(preferredName?: string): SpeechSynthesisVoice | null {
     if (voice) return voice;
   }
 
-  // Fall back to first English voice
   return voices[0] || null;
 }
 
-/**
- * Speak the given text aloud
- */
-export function speak(
-  text: string,
-  options: TTSOptions = {}
-): Promise<void> {
+/** Speak using the browser Web Speech API. */
+function speakBrowser(text: string, options: TTSOptions = {}): Promise<void> {
   return new Promise((resolve, reject) => {
-    if (!isTTSAvailable()) {
+    if (!isWebSpeechPresent()) {
       reject(new Error("Text-to-speech is not available in this browser"));
       return;
     }
 
-    // Cancel any ongoing speech
     speechSynthesis.cancel();
 
     const opts = { ...DEFAULT_OPTIONS, ...options };
@@ -102,7 +240,7 @@ export function speak(
     utterance.onend = () => resolve();
     utterance.onerror = (event) => {
       if (event.error === "canceled") {
-        resolve(); // Don't treat cancellation as an error
+        resolve();
       } else {
         reject(new Error(`Speech synthesis error: ${event.error}`));
       }
@@ -112,21 +250,83 @@ export function speak(
   });
 }
 
+// ============================================================
+// Public API — routes to the active engine
+// ============================================================
+
 /**
- * Stop any ongoing speech
+ * Check if TTS is available.
+ * Cloud engines are always "available" (the server call will fail gracefully
+ * if the API key is missing). Browser engine needs the Web Speech API.
+ */
+export function isTTSAvailable(): boolean {
+  if (typeof window === "undefined") return false;
+  if (currentEngine !== "browser") return true;
+  return isWebSpeechPresent();
+}
+
+/**
+ * Speak the given text aloud using the current engine.
+ */
+export async function speak(
+  text: string,
+  options: TTSOptions = {}
+): Promise<void> {
+  switch (currentEngine) {
+    case "elevenlabs":
+      return speakElevenLabs(text);
+    case "google-cloud":
+      return speakGoogleCloud(text);
+    default:
+      return speakBrowser(text, options);
+  }
+}
+
+/**
+ * Speak text as a specific officer role using the current engine.
+ * For browser, uses pitch/rate voice profiles.
+ * For cloud engines, uses distinct voices per role.
+ */
+export function speakAsRole(
+  text: string,
+  role: string,
+  voiceMap?: Map<string, RoleVoiceProfile>
+): Promise<void> {
+  switch (currentEngine) {
+    case "elevenlabs":
+      return speakElevenLabsAsRole(text, role);
+    case "google-cloud":
+      return speakGoogleCloudAsRole(text, role);
+    default: {
+      const profile = voiceMap?.get(role) || getVoiceForRole(role);
+      return speakBrowser(text, {
+        pitch: profile.pitch,
+        rate: profile.rate,
+        voiceName: profile.voiceName,
+      });
+    }
+  }
+}
+
+/**
+ * Stop any ongoing speech (works across all engines).
  */
 export function stopSpeaking(): void {
-  if (isTTSAvailable()) {
+  // Stop cloud audio
+  stopCloudAudio();
+  // Stop browser speech
+  if (isWebSpeechPresent()) {
     speechSynthesis.cancel();
   }
 }
 
 /**
- * Check if currently speaking
+ * Check if currently speaking (any engine).
  */
 export function isSpeaking(): boolean {
-  if (!isTTSAvailable()) return false;
-  return speechSynthesis.speaking;
+  if (isCloudAudioPlaying()) return true;
+  if (isWebSpeechPresent()) return speechSynthesis.speaking;
+  return false;
 }
 
 /**

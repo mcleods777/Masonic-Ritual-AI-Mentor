@@ -117,12 +117,66 @@ export default function PracticeMode({ sections }: PracticeModeProps) {
 
     setIsSpeakingCorrection(true);
     try {
-      // Speak the correct version of trouble spots
-      if (comparison.troubleSpots.length > 0) {
-        await speak(
-          `Let me read the correct words for the parts you missed. ${selectedSection.text}`,
-          { rate: 0.85 }
-        );
+      // Build targeted correction phrases from the diffs.
+      // Walk through the diff array, find wrong/missing words, and grab
+      // a few surrounding correct words for context.
+      const diffs = comparison.diffs;
+      const phrases: string[] = [];
+      const CONTEXT = 3; // words of context on each side
+
+      let i = 0;
+      while (i < diffs.length) {
+        const d = diffs[i];
+        if (d.type === "wrong" || d.type === "missing") {
+          // Gather the contiguous block of errors
+          const errorStart = i;
+          while (
+            i < diffs.length &&
+            (diffs[i].type === "wrong" || diffs[i].type === "missing" || diffs[i].type === "extra")
+          ) {
+            i++;
+          }
+          const errorEnd = i;
+
+          // Collect the correct version of the error words
+          const correctedWords = diffs
+            .slice(errorStart, errorEnd)
+            .filter((dd) => dd.type === "wrong" || dd.type === "missing")
+            .map((dd) => dd.expected || dd.word);
+
+          // Grab a few correct words before and after for context
+          const before: string[] = [];
+          for (let b = errorStart - 1; b >= Math.max(0, errorStart - CONTEXT); b--) {
+            if (diffs[b].type === "correct" || diffs[b].type === "phonetic_match" || diffs[b].type === "fuzzy_match") {
+              before.unshift(diffs[b].word);
+            }
+          }
+
+          const after: string[] = [];
+          for (let a = errorEnd; a < Math.min(diffs.length, errorEnd + CONTEXT); a++) {
+            if (diffs[a].type === "correct" || diffs[a].type === "phonetic_match" || diffs[a].type === "fuzzy_match") {
+              after.push(diffs[a].word);
+            }
+          }
+
+          const phrase = [...before, ...correctedWords, ...after].join(" ");
+          if (phrase.trim()) {
+            phrases.push(phrase);
+          }
+        } else {
+          i++;
+        }
+      }
+
+      if (phrases.length > 0) {
+        const intro =
+          phrases.length === 1
+            ? "Here is the correction."
+            : `Here are ${phrases.length} corrections.`;
+        const script = phrases
+          .map((p, idx) => (phrases.length > 1 ? `Number ${idx + 1}. ${p}` : p))
+          .join(". ... ");
+        await speak(`${intro} ... ${script}`, { rate: 0.85 });
       }
       await speakFeedback(comparison.accuracy);
     } finally {
@@ -278,11 +332,10 @@ export default function PracticeMode({ sections }: PracticeModeProps) {
                 >
                   Try Again
                 </button>
-                {comparison && isTTSAvailable() && (
+                {comparison && isTTSAvailable() && !isSpeakingCorrection && (
                   <button
                     onClick={speakCorrections}
-                    disabled={isSpeakingCorrection}
-                    className="px-6 py-3 bg-amber-600 hover:bg-amber-500 disabled:bg-zinc-700 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+                    className="px-6 py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
                   >
                     <svg
                       className="w-5 h-5"
@@ -297,7 +350,21 @@ export default function PracticeMode({ sections }: PracticeModeProps) {
                         d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"
                       />
                     </svg>
-                    {isSpeakingCorrection ? "Speaking..." : "Hear Corrections"}
+                    Hear Corrections
+                  </button>
+                )}
+                {isSpeakingCorrection && (
+                  <button
+                    onClick={() => {
+                      stopSpeaking();
+                      setIsSpeakingCorrection(false);
+                    }}
+                    className="px-6 py-3 bg-red-600 hover:bg-red-500 text-white rounded-lg font-medium transition-colors flex items-center gap-2 animate-pulse"
+                  >
+                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                      <rect x="6" y="6" width="12" height="12" rx="2" />
+                    </svg>
+                    Stop Speaking
                   </button>
                 )}
               </>

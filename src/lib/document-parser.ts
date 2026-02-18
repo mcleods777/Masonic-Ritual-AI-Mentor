@@ -27,6 +27,9 @@ const DEGREE_PATTERNS = [
   /first\s*degree/i,
   /second\s*degree/i,
   /third\s*degree/i,
+  /opening\s+on\s+the\s+first/i,
+  /opening\s+on\s+the\s+second/i,
+  /opening\s+on\s+the\s+third/i,
 ];
 
 // Section markers commonly found in ritual texts
@@ -50,9 +53,56 @@ const SECTION_PATTERNS = [
   /proficiency/i,
 ];
 
-// Speaker role prefixes (W.M., S.W., J.W., S.D., J.D., Sec., Treas., Chap., Marshal, Tyler)
+// Speaker role prefixes — supports both dotted (W.M.:) and abbreviated (WM:) forms,
+// as well as markdown bold (**WM**:) format
 const SPEAKER_PATTERN =
-  /^(W\.?\s?M\.?|S\.?\s?W\.?|J\.?\s?W\.?|S\.?\s?D\.?|J\.?\s?D\.?|Sec\.?|Treas\.?|Chap\.?|Marshal|Tyler|Candidate|All|Bros?\.?)\s*[:\-–—]+\s*/i;
+  /^\*{0,2}(W\.?\s?M\.?|WM|S\.?\s?W\.?|SW|J\.?\s?W\.?|JW|S\.?\s?D\.?|SD|J\.?\s?D\.?|JD|S\/Sec|S\/J\s?D|S\s?\(orJ\)\s?D|Sec\.?|Treas\.?|Tr|Chap\.?|Ch|Marshal|Tyler|Candidate|All|ALL|Bros?\.?|BR|T|SW\/WM)\*{0,2}\s*[:\-–—]+\s*/i;
+
+// Markdown heading pattern for ceremony/section structure
+const MARKDOWN_HEADING_PATTERN = /^#{1,4}\s+(.+)$/;
+
+// Role display name mapping
+export const ROLE_DISPLAY_NAMES: Record<string, string> = {
+  'WM': 'Worshipful Master',
+  'W.M.': 'Worshipful Master',
+  'W. M.': 'Worshipful Master',
+  'SW': 'Senior Warden',
+  'S.W.': 'Senior Warden',
+  'S. W.': 'Senior Warden',
+  'JW': 'Junior Warden',
+  'J.W.': 'Junior Warden',
+  'J. W.': 'Junior Warden',
+  'SD': 'Senior Deacon',
+  'S.D.': 'Senior Deacon',
+  'S. D.': 'Senior Deacon',
+  'JD': 'Junior Deacon',
+  'J.D.': 'Junior Deacon',
+  'J. D.': 'Junior Deacon',
+  'S/Sec': 'Secretary',
+  'Sec': 'Secretary',
+  'Sec.': 'Secretary',
+  'S': 'Secretary',
+  'Tr': 'Treasurer',
+  'Treas': 'Treasurer',
+  'Treas.': 'Treasurer',
+  'T': 'Tiler',
+  'Tyler': 'Tiler',
+  'Ch': 'Chaplain',
+  'Chap': 'Chaplain',
+  'Chap.': 'Chaplain',
+  'Marshal': 'Marshal',
+  'Candidate': 'Candidate',
+  'ALL': 'All Brethren',
+  'All': 'All Brethren',
+  'BR': 'Brother',
+  'Bro': 'Brother',
+  'Bro.': 'Brother',
+  'Bros': 'Brethren',
+  'Bros.': 'Brethren',
+  'SW/WM': 'SW & WM',
+  'S(orJ)D': 'Sr. or Jr. Deacon',
+  'S/J D': 'Sr. or Jr. Deacon',
+};
 
 /**
  * Extract text from a PDF file using pdf.js
@@ -61,7 +111,7 @@ async function extractFromPDF(file: File): Promise<string> {
   const pdfjsLib = await import("pdfjs-dist");
 
   // Set up the worker
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
@@ -137,6 +187,28 @@ function extractSpeaker(line: string): { speaker: string | null; text: string } 
 }
 
 /**
+ * Strip markdown formatting from text for clean display/TTS
+ */
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/\*{1,2}([^*]+)\*{1,2}/g, '$1')  // **bold** or *italic*
+    .replace(/\[Action:\s*[^\]]*\]/gi, '')       // [Action: ...]
+    .trim();
+}
+
+/**
+ * Clean ritual line text for TTS/comparison — removes gavel marks and actions
+ */
+export function cleanRitualText(text: string): string {
+  return text
+    .replace(/^\*{1,3}\s*/, '')                  // Leading gavel marks (* ** ***)
+    .replace(/\s*\*{1,3}$/, '')                  // Trailing gavel marks
+    .replace(/\[Action:\s*[^\]]*\]/gi, '')       // [Action: ...]
+    .replace(/\s{2,}/g, ' ')                     // Collapse multiple spaces
+    .trim();
+}
+
+/**
  * Parse raw text into structured ritual sections
  */
 function structureText(rawText: string): RitualSection[] {
@@ -149,45 +221,117 @@ function structureText(rawText: string): RitualSection[] {
   let currentText: string[] = [];
   let order = 0;
 
+  // Track whether we're in a metadata block (## ROLES, ## DOCUMENT header, etc.)
+  let inMetadataBlock = false;
+
   function flushSection() {
     if (currentText.length > 0) {
-      sections.push({
-        id: `section-${order}`,
-        degree: currentDegree,
-        sectionName: currentSection,
-        speaker: currentSpeaker,
-        text: currentText.join(" ").trim(),
-        order: order++,
-      });
+      const joinedText = currentText.join(" ").trim();
+      if (joinedText) {
+        sections.push({
+          id: `section-${order}`,
+          degree: currentDegree,
+          sectionName: currentSection,
+          speaker: currentSpeaker,
+          text: joinedText,
+          order: order++,
+        });
+      }
       currentText = [];
     }
   }
 
   for (const line of lines) {
-    // Check for degree heading
-    const degreeMatch = detectDegree(line);
-    if (degreeMatch !== "General" && line.length < 80) {
+    // Check for markdown headings (## or ###)
+    const headingMatch = line.match(MARKDOWN_HEADING_PATTERN);
+    if (headingMatch) {
+      const headingText = headingMatch[1].trim();
+      const headingLevel = (line.match(/^#+/) || [''])[0].length;
+
+      // Skip metadata sections (## ROLES, ## DOCUMENT, etc.)
+      if (/^(ROLES|DOCUMENT|IMPORTANT)/i.test(headingText)) {
+        inMetadataBlock = true;
+        continue;
+      }
+
+      // ## CEREMONY: heading → treat as degree/ceremony context
+      if (/^CEREMONY/i.test(headingText)) {
+        flushSection();
+        inMetadataBlock = false;
+        const ceremonyName = headingText.replace(/^CEREMONY:\s*/i, '').trim();
+        // Check if it contains a degree reference
+        const degreeInCeremony = detectDegree(ceremonyName);
+        if (degreeInCeremony !== "General") {
+          currentDegree = degreeInCeremony;
+        }
+        currentSection = ceremonyName;
+        continue;
+      }
+
+      // ### Section heading (e.g., "### I. Purgation and Tiling")
+      if (headingLevel >= 3) {
+        flushSection();
+        inMetadataBlock = false;
+        // Strip Roman numeral prefix (I., II., III., IV., V., etc.)
+        const sectionName = headingText.replace(/^[IVXLC]+\.\s*/, '').trim();
+        currentSection = sectionName || headingText;
+        continue;
+      }
+
+      // Other ## headings → check for degree or section
+      flushSection();
+      inMetadataBlock = false;
+      const degreeMatch = detectDegree(headingText);
+      if (degreeMatch !== "General") {
+        currentDegree = degreeMatch;
+      }
+      const sectionMatch = detectSectionName(headingText);
+      if (sectionMatch) {
+        currentSection = sectionMatch;
+      }
+      continue;
+    }
+
+    // Skip lines inside metadata blocks (role descriptions, etc.)
+    if (inMetadataBlock) {
+      // Check if this line starts with a speaker — if so, we've left metadata
+      const stripped = stripMarkdown(line);
+      const { speaker } = extractSpeaker(stripped);
+      if (speaker) {
+        inMetadataBlock = false;
+        // Fall through to speaker handling below
+      } else {
+        continue;
+      }
+    }
+
+    // Strip markdown bold markers before processing
+    const stripped = stripMarkdown(line);
+
+    // Check for degree heading (non-markdown)
+    const degreeMatch = detectDegree(stripped);
+    if (degreeMatch !== "General" && stripped.length < 80) {
       flushSection();
       currentDegree = degreeMatch;
       continue;
     }
 
-    // Check for section heading
-    const sectionMatch = detectSectionName(line);
-    if (sectionMatch && line.length < 80) {
+    // Check for section heading (non-markdown)
+    const sectionMatch = detectSectionName(stripped);
+    if (sectionMatch && stripped.length < 80) {
       flushSection();
       currentSection = sectionMatch;
       continue;
     }
 
     // Check for speaker prefix
-    const { speaker, text } = extractSpeaker(line);
+    const { speaker, text } = extractSpeaker(stripped);
     if (speaker) {
       flushSection();
       currentSpeaker = speaker;
-      currentText.push(text);
-    } else {
-      currentText.push(line);
+      if (text) currentText.push(text);
+    } else if (stripped) {
+      currentText.push(stripped);
     }
   }
 

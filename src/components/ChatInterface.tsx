@@ -9,19 +9,37 @@ import {
   type STTEngine,
 } from "@/lib/speech-to-text";
 import { speak, stopSpeaking, isTTSAvailable } from "@/lib/text-to-speech";
+import TTSEngineSelector from "@/components/TTSEngineSelector";
+
+const AVAILABLE_MODELS = [
+  { id: "claude-3-5-haiku-latest", label: "Haiku 3.5", description: "Fastest" },
+  { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5", description: "Fast" },
+  { id: "claude-sonnet-4-5-20250929", label: "Sonnet 4.5", description: "Balanced" },
+  { id: "claude-opus-4-6", label: "Opus 4.6", description: "Most capable" },
+] as const;
 
 interface ChatInterfaceProps {
   ritualContext: string;
 }
 
 export default function ChatInterface({ ritualContext }: ChatInterfaceProps) {
+  const ritualContextRef = useRef(ritualContext);
+  ritualContextRef.current = ritualContext;
+
+  const [selectedModel, setSelectedModel] = useState<string>(AVAILABLE_MODELS[0].id);
+  const selectedModelRef = useRef(selectedModel);
+  selectedModelRef.current = selectedModel;
+
   const transport = useMemo(
     () =>
       new TextStreamChatTransport({
         api: "/api/chat",
-        body: { ritualContext },
+        body: () => ({
+          ritualContext: ritualContextRef.current,
+          model: selectedModelRef.current,
+        }),
       }),
-    [ritualContext]
+    []
   );
 
   const { messages, sendMessage, status } = useChat({ transport });
@@ -118,6 +136,18 @@ export default function ChatInterface({ ritualContext }: ChatInterfaceProps) {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <select
+            value={selectedModel}
+            onChange={(e) => setSelectedModel(e.target.value)}
+            className="px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-300 text-xs focus:outline-none focus:border-amber-500"
+          >
+            {AVAILABLE_MODELS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label} — {m.description}
+              </option>
+            ))}
+          </select>
+          <TTSEngineSelector />
           {isTTSAvailable() && (
             <button
               onClick={() => {
