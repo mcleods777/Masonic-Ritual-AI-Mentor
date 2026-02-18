@@ -9,6 +9,7 @@ import {
   type STTEngine,
 } from "@/lib/speech-to-text";
 import { speak, stopSpeaking, isTTSAvailable } from "@/lib/text-to-speech";
+import TTSEngineSelector from "@/components/TTSEngineSelector";
 
 const AVAILABLE_MODELS = [
   { id: "claude-3-5-haiku-latest", label: "Haiku 3.5", description: "Fastest" },
@@ -146,6 +147,7 @@ export default function ChatInterface({ ritualContext }: ChatInterfaceProps) {
               </option>
             ))}
           </select>
+          <TTSEngineSelector />
           {isTTSAvailable() && (
             <button
               onClick={() => {
