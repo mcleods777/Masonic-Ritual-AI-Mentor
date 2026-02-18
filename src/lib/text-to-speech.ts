@@ -1,6 +1,9 @@
 /**
  * Text-to-speech engine using the Web Speech Synthesis API.
- * Speaks corrections and coaching feedback aloud to the user.
+ * Speaks corrections, coaching feedback, and role-based dialog aloud.
+ *
+ * Role voice system: each officer gets a distinct pitch/rate combination
+ * to help the user distinguish who is speaking during rehearsal mode.
  */
 
 export interface TTSOptions {
@@ -15,6 +18,102 @@ const DEFAULT_OPTIONS: TTSOptions = {
   pitch: 1,
   volume: 1,
 };
+
+// ============================================================
+// Role-based voice profiles
+// ============================================================
+
+/** Voice profile for a specific officer role */
+export interface RoleVoiceProfile {
+  pitch: number;
+  rate: number;
+  voiceName?: string;
+}
+
+/**
+ * Default voice profiles per role — pitch and rate vary to distinguish speakers.
+ * Pitch range: 0.7 (deep) to 1.3 (higher).
+ * Rate range: 0.8 (slow/formal) to 1.0 (normal).
+ */
+const ROLE_VOICE_PROFILES: Record<string, RoleVoiceProfile> = {
+  // Principal officers — deeper, more deliberate
+  WM:        { pitch: 0.75, rate: 0.82 },
+  'W.M.':    { pitch: 0.75, rate: 0.82 },
+  'W. M.':   { pitch: 0.75, rate: 0.82 },
+  SW:        { pitch: 0.88, rate: 0.87 },
+  'S.W.':    { pitch: 0.88, rate: 0.87 },
+  'S. W.':   { pitch: 0.88, rate: 0.87 },
+  JW:        { pitch: 1.0,  rate: 0.87 },
+  'J.W.':    { pitch: 1.0,  rate: 0.87 },
+  'J. W.':   { pitch: 1.0,  rate: 0.87 },
+  // Deacons — slightly higher, a bit quicker
+  SD:        { pitch: 1.05, rate: 0.92 },
+  'S.D.':    { pitch: 1.05, rate: 0.92 },
+  'S. D.':   { pitch: 1.05, rate: 0.92 },
+  JD:        { pitch: 1.15, rate: 0.92 },
+  'J.D.':    { pitch: 1.15, rate: 0.92 },
+  'J. D.':   { pitch: 1.15, rate: 0.92 },
+  'S(orJ)D': { pitch: 1.1,  rate: 0.92 },
+  'S/J D':   { pitch: 1.1,  rate: 0.92 },
+  // Other officers
+  'S/Sec':   { pitch: 0.95, rate: 0.95 },
+  Sec:       { pitch: 0.95, rate: 0.95 },
+  'Sec.':    { pitch: 0.95, rate: 0.95 },
+  S:         { pitch: 0.95, rate: 0.95 },
+  Tr:        { pitch: 0.92, rate: 0.90 },
+  Treas:     { pitch: 0.92, rate: 0.90 },
+  'Treas.':  { pitch: 0.92, rate: 0.90 },
+  Ch:        { pitch: 0.80, rate: 0.78 },
+  Chap:      { pitch: 0.80, rate: 0.78 },
+  'Chap.':   { pitch: 0.80, rate: 0.78 },
+  Marshal:   { pitch: 1.0,  rate: 0.90 },
+  T:         { pitch: 1.20, rate: 0.90 },
+  Tyler:     { pitch: 1.20, rate: 0.90 },
+  Candidate: { pitch: 1.10, rate: 0.85 },
+  // Group/other
+  ALL:       { pitch: 0.95, rate: 0.80 },
+  All:       { pitch: 0.95, rate: 0.80 },
+  BR:        { pitch: 1.08, rate: 0.90 },
+  Bro:       { pitch: 1.08, rate: 0.90 },
+  'Bro.':    { pitch: 1.08, rate: 0.90 },
+  'SW/WM':   { pitch: 0.82, rate: 0.85 },
+};
+
+/**
+ * Get the voice profile for a given role.
+ * Falls back to neutral defaults if the role isn't mapped.
+ */
+export function getVoiceForRole(role: string): RoleVoiceProfile {
+  return ROLE_VOICE_PROFILES[role] || { pitch: 1.0, rate: 0.9 };
+}
+
+/**
+ * Assign distinct voices from the available voice list to each role.
+ * Spreads voices across roles for maximum variety.
+ */
+export function assignVoicesToRoles(roles: string[]): Map<string, RoleVoiceProfile> {
+  const voices = getVoices();
+  const map = new Map<string, RoleVoiceProfile>();
+
+  for (let i = 0; i < roles.length; i++) {
+    const role = roles[i];
+    const profile = getVoiceForRole(role);
+
+    // Spread available voices across roles
+    if (voices.length > 0) {
+      const voiceIndex = i % voices.length;
+      map.set(role, { ...profile, voiceName: voices[voiceIndex].name });
+    } else {
+      map.set(role, profile);
+    }
+  }
+
+  return map;
+}
+
+// ============================================================
+// Core TTS functions
+// ============================================================
 
 /**
  * Check if TTS is available in this browser
@@ -109,6 +208,22 @@ export function speak(
     };
 
     speechSynthesis.speak(utterance);
+  });
+}
+
+/**
+ * Speak text as a specific officer role, using that role's voice profile
+ */
+export function speakAsRole(
+  text: string,
+  role: string,
+  voiceMap?: Map<string, RoleVoiceProfile>
+): Promise<void> {
+  const profile = voiceMap?.get(role) || getVoiceForRole(role);
+  return speak(text, {
+    pitch: profile.pitch,
+    rate: profile.rate,
+    voiceName: profile.voiceName,
   });
 }
 
