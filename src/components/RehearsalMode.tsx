@@ -16,6 +16,7 @@ import {
   isTTSAvailable,
   type RoleVoiceProfile,
 } from "@/lib/text-to-speech";
+import { playGavelKnocks, countGavelMarks } from "@/lib/gavel-sound";
 import DiffDisplay from "./DiffDisplay";
 
 interface RehearsalModeProps {
@@ -122,6 +123,14 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
     setSttError(null);
 
     const section = sections[index];
+
+    // Check for gavel marks and play knock sounds
+    const gavelCount = countGavelMarks(section.text);
+    if (gavelCount > 0 && !cancelledRef.current) {
+      await playGavelKnocks(gavelCount);
+    }
+
+    if (cancelledRef.current) return;
 
     if (section.speaker === selectedRole) {
       // It's the user's turn
@@ -481,6 +490,8 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
           const isPast = i < currentIndex;
           const isCurrent = i === currentIndex;
           const isUserSection = section.speaker === selectedRole;
+          const gavels = countGavelMarks(section.text);
+          const cleanText = cleanRitualText(section.text);
 
           return (
             <div
@@ -512,10 +523,17 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
                   ${isPast ? "text-zinc-600" : "text-zinc-400"}
                 `}
               >
+                {gavels > 0 && (
+                  <span className="inline-flex gap-0.5 mr-1.5 align-middle" title={`${gavels} gavel knock${gavels !== 1 ? "s" : ""}`}>
+                    {Array.from({ length: gavels }).map((_, g) => (
+                      <span key={g} className="inline-block w-2 h-2 rounded-full bg-yellow-600/70" />
+                    ))}
+                  </span>
+                )}
                 {isCurrent && isUserSection && rehearsalState !== "checking"
                   ? "[ Your line — recite from memory ]"
-                  : cleanRitualText(section.text).slice(0, 120) +
-                    (cleanRitualText(section.text).length > 120 ? "..." : "")}
+                  : cleanText.slice(0, 120) +
+                    (cleanText.length > 120 ? "..." : "")}
               </span>
             </div>
           );
