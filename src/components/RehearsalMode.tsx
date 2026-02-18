@@ -144,8 +144,10 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
         if (cleanText) {
           await speakAsRole(cleanText, section.speaker, voiceMapRef.current);
         }
-      } catch {
-        // TTS failed — just skip ahead
+      } catch (err) {
+        console.warn(`TTS failed for line ${index} (${section.speaker}):`, err);
+        // Brief pause so we don't zip through the script on repeated failures
+        await new Promise((r) => setTimeout(r, 800));
       }
 
       if (!cancelledRef.current) {

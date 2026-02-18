@@ -207,30 +207,46 @@ export function getGoogleVoiceForRole(role: string): GoogleVoiceProfile {
   return GOOGLE_ROLE_VOICES[role] || GOOGLE_DEFAULT_VOICE;
 }
 
-/** Speak text using Google Cloud TTS. */
+/** Speak text using Google Cloud TTS (with retry for transient errors). */
 export async function speakGoogleCloud(
   text: string,
   voiceName?: string,
   pitch?: number,
   speakingRate?: number
 ): Promise<void> {
-  const resp = await fetch("/api/tts/google", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      text,
-      voiceName: voiceName ?? GOOGLE_DEFAULT_VOICE.name,
-      pitch: pitch ?? GOOGLE_DEFAULT_VOICE.pitch,
-      speakingRate: speakingRate ?? GOOGLE_DEFAULT_VOICE.rate,
-    }),
-  });
+  const MAX_RETRIES = 2;
+  const RETRY_DELAYS = [500, 1500]; // ms backoff between retries
 
-  if (!resp.ok) {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const resp = await fetch("/api/tts/google", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text,
+        voiceName: voiceName ?? GOOGLE_DEFAULT_VOICE.name,
+        pitch: pitch ?? GOOGLE_DEFAULT_VOICE.pitch,
+        speakingRate: speakingRate ?? GOOGLE_DEFAULT_VOICE.rate,
+      }),
+    });
+
+    if (resp.ok) {
+      await playAudioBlob(await resp.blob());
+      return;
+    }
+
+    // Retry on transient errors (429 rate limit, 500/503 server errors)
+    const isRetryable = resp.status === 429 || resp.status >= 500;
+    if (isRetryable && attempt < MAX_RETRIES) {
+      console.warn(
+        `Google TTS returned ${resp.status}, retrying in ${RETRY_DELAYS[attempt]}ms (attempt ${attempt + 1}/${MAX_RETRIES})...`
+      );
+      await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+      continue;
+    }
+
     const err = await resp.json().catch(() => ({ error: resp.statusText }));
     throw new Error((err as { error?: string }).error || "Google Cloud TTS failed");
   }
-
-  await playAudioBlob(await resp.blob());
 }
 
 /** Speak text as a Masonic officer role using Google Cloud TTS. */

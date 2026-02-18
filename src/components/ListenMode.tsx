@@ -92,8 +92,10 @@ export default function ListenMode({ sections }: ListenModeProps) {
           if (cleanText) {
             try {
               await speakAsRole(cleanText, section.speaker, voiceMapRef.current);
-            } catch {
-              // TTS error — continue to next line
+            } catch (err) {
+              console.warn(`TTS failed for line ${i} (${section.speaker}):`, err);
+              // Brief pause so we don't zip through the script on repeated failures
+              await new Promise((r) => setTimeout(r, 800));
             }
           }
         }
