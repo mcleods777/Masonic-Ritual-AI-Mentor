@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import PracticeMode from "@/components/PracticeMode";
 import RehearsalMode from "@/components/RehearsalMode";
+import ListenMode from "@/components/ListenMode";
 import {
   listDocuments,
   getDocumentSections,
@@ -12,7 +13,7 @@ import {
 } from "@/lib/storage";
 import type { RitualSection } from "@/lib/document-parser";
 
-type PracticeTab = "solo" | "rehearsal";
+type PracticeTab = "solo" | "rehearsal" | "listen";
 
 function PracticeContent() {
   const searchParams = useSearchParams();
@@ -104,7 +105,9 @@ function PracticeContent() {
           <p className="text-zinc-500 mt-1">
             {activeTab === "rehearsal"
               ? "Pick your role and rehearse the full ceremony with AI reading the other parts."
-              : "Select a section, then speak or type from memory."}
+              : activeTab === "listen"
+                ? "Listen to the full ceremony read aloud, each officer in a distinct voice."
+                : "Select a section, then speak or type from memory."}
           </p>
         </div>
 
@@ -143,6 +146,22 @@ function PracticeContent() {
           </span>
         </button>
         <button
+          onClick={() => setActiveTab("listen")}
+          className={`
+            px-5 py-2 rounded-md text-sm font-medium transition-all
+            ${activeTab === "listen"
+              ? "bg-amber-600 text-white shadow-sm"
+              : "text-zinc-400 hover:text-zinc-200"}
+          `}
+        >
+          <span className="flex items-center gap-2">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M12 12h.01M9 10a3 3 0 016 0v4a3 3 0 01-6 0v-4z" />
+            </svg>
+            Listen
+          </span>
+        </button>
+        <button
           onClick={() => setActiveTab("solo")}
           className={`
             px-5 py-2 rounded-md text-sm font-medium transition-all
@@ -169,6 +188,20 @@ function PracticeContent() {
             <p className="text-zinc-400">
               Rehearsal mode requires a document with multiple speaker roles.
               This document doesn&apos;t have distinct speaker prefixes.
+            </p>
+            <button
+              onClick={() => setActiveTab("solo")}
+              className="mt-4 px-6 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-medium transition-colors"
+            >
+              Switch to Solo Practice
+            </button>
+          </div>
+        ) : activeTab === "listen" && hasMultipleSpeakers ? (
+          <ListenMode sections={sections} />
+        ) : activeTab === "listen" && !hasMultipleSpeakers ? (
+          <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-6 text-center">
+            <p className="text-zinc-400">
+              Listen mode requires a document with multiple speaker roles.
             </p>
             <button
               onClick={() => setActiveTab("solo")}
