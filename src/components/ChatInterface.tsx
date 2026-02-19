@@ -15,7 +15,7 @@ import { speak, stopSpeaking, isTTSAvailable } from "@/lib/text-to-speech";
 import TTSEngineSelector from "@/components/TTSEngineSelector";
 
 const AVAILABLE_MODELS = [
-  { id: "claude-sonnet-4-6-20250514", label: "Sonnet 4.6", description: "Fast & capable (default)" },
+  { id: "claude-sonnet-4-6", label: "Sonnet 4.6", description: "Fast & capable (default)" },
   { id: "claude-3-5-haiku-latest", label: "Haiku 3.5", description: "Fastest" },
   { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5", description: "Fast" },
   { id: "claude-sonnet-4-5-20250929", label: "Sonnet 4.5", description: "Balanced" },
