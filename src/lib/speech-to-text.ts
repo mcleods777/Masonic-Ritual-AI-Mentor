@@ -1,7 +1,10 @@
 /**
- * Speech-to-text engine using the Web Speech API.
- * Designed with a provider interface so Whisper-Web or cloud STT
- * can be swapped in later.
+ * Speech-to-text engines.
+ *
+ * Two providers:
+ *   1. Web Speech API  — free, real-time interim results, browser-native
+ *   2. Groq Whisper    — higher accuracy, Masonic vocabulary hints,
+ *                        requires GROQ_API_KEY on the server
  */
 
 export interface STTResult {
@@ -19,17 +22,26 @@ export interface STTEngine {
   onEnd: (() => void) | null;
 }
 
-/**
- * Check if the Web Speech API is available in this browser
- */
+export type STTProvider = "browser" | "whisper";
+
+// ============================================================
+// Availability checks
+// ============================================================
+
 export function isWebSpeechAvailable(): boolean {
   if (typeof window === "undefined") return false;
   return "SpeechRecognition" in window || "webkitSpeechRecognition" in window;
 }
 
-/**
- * Web Speech API implementation (works in Chrome, Edge, Safari)
- */
+export function isMediaRecorderAvailable(): boolean {
+  if (typeof window === "undefined") return false;
+  return "MediaRecorder" in window && "mediaDevices" in navigator;
+}
+
+// ============================================================
+// Web Speech API engine (works in Chrome, Edge, Safari)
+// ============================================================
+
 export function createWebSpeechEngine(): STTEngine {
   if (typeof window === "undefined") {
     throw new Error("Web Speech API is only available in the browser");
@@ -83,7 +95,6 @@ export function createWebSpeechEngine(): STTEngine {
   recognition.onresult = (event: any) => {
     if (!engine.onResult) return;
 
-    // Collect all results into a full transcript
     let finalTranscript = "";
     let interimTranscript = "";
 
@@ -96,7 +107,6 @@ export function createWebSpeechEngine(): STTEngine {
       }
     }
 
-    // Send the complete transcript (final + interim)
     engine.onResult({
       transcript: finalTranscript + interimTranscript,
       isFinal: interimTranscript.length === 0 && finalTranscript.length > 0,
@@ -108,8 +118,8 @@ export function createWebSpeechEngine(): STTEngine {
   };
 
   recognition.onerror = (event: any) => {
-    if (event.error === "no-speech") return; // Ignore no-speech errors
-    if (event.error === "aborted") return; // Ignore intentional stops
+    if (event.error === "no-speech") return;
+    if (event.error === "aborted") return;
     listening = false;
     engine.onError?.(
       `Speech recognition error: ${event.error}. ${event.message || ""}`
@@ -119,6 +129,135 @@ export function createWebSpeechEngine(): STTEngine {
   recognition.onend = () => {
     listening = false;
     engine.onEnd?.();
+  };
+
+  return engine;
+}
+
+// ============================================================
+// Groq Whisper engine (MediaRecorder → server → Groq API)
+// ============================================================
+
+export function createWhisperEngine(): STTEngine {
+  if (typeof window === "undefined") {
+    throw new Error("Whisper engine is only available in the browser");
+  }
+
+  if (!isMediaRecorderAvailable()) {
+    throw new Error("MediaRecorder is not supported in this browser.");
+  }
+
+  let listening = false;
+  let mediaRecorder: MediaRecorder | null = null;
+  let audioChunks: Blob[] = [];
+  let stream: MediaStream | null = null;
+
+  const engine: STTEngine = {
+    onResult: null,
+    onError: null,
+    onEnd: null,
+
+    async start() {
+      if (listening) return;
+
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+        // Pick a supported MIME type
+        const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+          ? "audio/webm;codecs=opus"
+          : MediaRecorder.isTypeSupported("audio/webm")
+            ? "audio/webm"
+            : "audio/mp4";
+
+        mediaRecorder = new MediaRecorder(stream, { mimeType });
+        audioChunks = [];
+
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            audioChunks.push(event.data);
+          }
+        };
+
+        mediaRecorder.onstop = async () => {
+          // Release mic
+          stream?.getTracks().forEach((t) => t.stop());
+          stream = null;
+
+          if (audioChunks.length === 0) {
+            engine.onEnd?.();
+            return;
+          }
+
+          const audioBlob = new Blob(audioChunks, { type: mimeType });
+          audioChunks = [];
+
+          // Send to our server-side transcription route
+          try {
+            const formData = new FormData();
+            formData.append("audio", audioBlob, "recording.webm");
+
+            const response = await fetch("/api/transcribe", {
+              method: "POST",
+              body: formData,
+            });
+
+            if (!response.ok) {
+              const err = await response.json().catch(() => ({ error: response.statusText }));
+              engine.onError?.(err.error || "Transcription failed");
+              engine.onEnd?.();
+              return;
+            }
+
+            const { transcript } = await response.json();
+
+            if (transcript) {
+              engine.onResult?.({
+                transcript,
+                isFinal: true,
+                confidence: 1.0,
+              });
+            }
+          } catch (err) {
+            engine.onError?.(
+              err instanceof Error ? err.message : "Failed to transcribe audio"
+            );
+          }
+
+          engine.onEnd?.();
+        };
+
+        mediaRecorder.onerror = () => {
+          listening = false;
+          stream?.getTracks().forEach((t) => t.stop());
+          stream = null;
+          engine.onError?.("Recording failed");
+          engine.onEnd?.();
+        };
+
+        mediaRecorder.start();
+        listening = true;
+      } catch (err) {
+        listening = false;
+        stream?.getTracks().forEach((t) => t.stop());
+        stream = null;
+        engine.onError?.(
+          err instanceof Error ? err.message : "Failed to access microphone"
+        );
+      }
+    },
+
+    stop() {
+      if (!listening) return;
+      listening = false;
+      if (mediaRecorder && mediaRecorder.state !== "inactive") {
+        mediaRecorder.stop();
+      }
+    },
+
+    isListening() {
+      return listening;
+    },
   };
 
   return engine;

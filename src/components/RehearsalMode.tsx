@@ -6,8 +6,11 @@ import { ROLE_DISPLAY_NAMES, cleanRitualText } from "@/lib/document-parser";
 import { compareTexts, type ComparisonResult } from "@/lib/text-comparison";
 import {
   createWebSpeechEngine,
+  createWhisperEngine,
   isWebSpeechAvailable,
+  isMediaRecorderAvailable,
   type STTEngine,
+  type STTProvider,
 } from "@/lib/speech-to-text";
 import {
   speakAsRole,
@@ -24,13 +27,14 @@ interface RehearsalModeProps {
 }
 
 type RehearsalState =
-  | "setup"       // Picking a role
-  | "ready"       // Role picked, ready to start
-  | "ai-speaking" // AI is reading another officer's line
-  | "user-turn"   // Waiting for user to recite
-  | "listening"   // User is speaking (STT active)
-  | "checking"    // Showing accuracy for user's line
-  | "complete";   // Rehearsal finished
+  | "setup"         // Picking a role
+  | "ready"         // Role picked, ready to start
+  | "ai-speaking"   // AI is reading another officer's line
+  | "user-turn"     // Waiting for user to recite
+  | "listening"     // User is speaking (STT active)
+  | "transcribing"  // Whisper: recording done, waiting for server transcript
+  | "checking"      // Showing accuracy for user's line
+  | "complete";     // Rehearsal finished
 
 interface LineResult {
   sectionIndex: number;
@@ -48,8 +52,11 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
   const [lineResults, setLineResults] = useState<LineResult[]>([]);
   const [sttError, setSttError] = useState<string | null>(null);
   const [inputMode, setInputMode] = useState<"voice" | "type">("voice");
+  const [sttProvider, setSTTProvider] = useState<STTProvider>("browser");
 
   const engineRef = useRef<STTEngine | null>(null);
+  const sttProviderRef = useRef<STTProvider>(sttProvider);
+  sttProviderRef.current = sttProvider;
   const voiceMapRef = useRef<Map<string, RoleVoiceProfile>>(new Map());
   const cancelledRef = useRef(false);
   const scriptContainerRef = useRef<HTMLDivElement>(null);
@@ -167,10 +174,16 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
     }
   }, [rehearsalState, advanceToLine]);
 
-  // Start listening (voice input)
+  // Start listening (voice input) — uses either Web Speech or Whisper engine
   const startListening = useCallback(() => {
-    if (!isWebSpeechAvailable()) {
+    const provider = sttProviderRef.current;
+
+    if (provider === "browser" && !isWebSpeechAvailable()) {
       setSttError("Speech recognition not available. Use Chrome, Edge, or Safari.");
+      return;
+    }
+    if (provider === "whisper" && !isMediaRecorderAvailable()) {
+      setSttError("MediaRecorder not available in this browser.");
       return;
     }
 
@@ -178,11 +191,19 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
     setTranscript("");
 
     try {
-      const engine = createWebSpeechEngine();
+      const engine = provider === "whisper"
+        ? createWhisperEngine()
+        : createWebSpeechEngine();
+
       engineRef.current = engine;
 
       engine.onResult = (result) => {
         setTranscript(result.transcript);
+        // Whisper returns a single final result after transcription completes.
+        // Automatically move to checking state.
+        if (provider === "whisper" && result.isFinal) {
+          setRehearsalState("listening"); // briefly show transcript before check runs
+        }
       };
 
       engine.onError = (error) => {
@@ -191,7 +212,8 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
       };
 
       engine.onEnd = () => {
-        // Browser may auto-stop after silence
+        // Browser engine: may auto-stop after silence (no action needed)
+        // Whisper engine: recording stopped, transcript delivered via onResult
       };
 
       engine.start();
@@ -203,12 +225,38 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
 
   // Stop listening and check accuracy
   const stopListening = useCallback(() => {
+    const provider = sttProviderRef.current;
+
     if (engineRef.current) {
       engineRef.current.stop();
-      engineRef.current = null;
     }
 
-    if (transcript && currentSection) {
+    if (provider === "whisper") {
+      // Whisper: recording stopped, now waiting for server transcription.
+      // The engine's onResult callback will fire once the transcript arrives.
+      // We show a "transcribing" spinner in the meantime.
+      setRehearsalState("transcribing");
+    } else {
+      // Browser STT: transcript is already available in state
+      engineRef.current = null;
+      if (transcript && currentSection) {
+        const cleanRef = cleanRitualText(currentSection.text);
+        const result = compareTexts(transcript, cleanRef);
+        setCurrentComparison(result);
+        setLineResults((prev) => [
+          ...prev,
+          { sectionIndex: currentIndex, accuracy: result.accuracy, comparison: result },
+        ]);
+      }
+      setRehearsalState("checking");
+    }
+  }, [transcript, currentSection, currentIndex]);
+
+  // When Whisper finishes transcribing, the transcript state updates.
+  // This effect detects that and moves from "transcribing" → "checking".
+  useEffect(() => {
+    if (rehearsalState === "transcribing" && transcript && currentSection) {
+      engineRef.current = null;
       const cleanRef = cleanRitualText(currentSection.text);
       const result = compareTexts(transcript, cleanRef);
       setCurrentComparison(result);
@@ -216,10 +264,9 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
         ...prev,
         { sectionIndex: currentIndex, accuracy: result.accuracy, comparison: result },
       ]);
+      setRehearsalState("checking");
     }
-
-    setRehearsalState("checking");
-  }, [transcript, currentSection, currentIndex]);
+  }, [rehearsalState, transcript, currentSection, currentIndex]);
 
   // Check typed input
   const handleCheckTyped = useCallback(() => {
@@ -345,21 +392,55 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
           </div>
 
           {selectedRole && (
-            <div className="mt-6 flex items-center gap-4">
-              <button
-                onClick={startRehearsal}
-                className="px-8 py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-semibold transition-colors flex items-center gap-2"
-              >
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M8 5v14l11-7z" />
-                </svg>
-                Start Rehearsal
-              </button>
-              {!isTTSAvailable() && (
-                <p className="text-xs text-red-400">
-                  Text-to-speech is not available in this browser. AI lines will be shown but not spoken.
-                </p>
-              )}
+            <div className="mt-6 space-y-4">
+              {/* STT engine selector */}
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-zinc-500 uppercase tracking-wide">Voice Engine:</span>
+                <div className="flex rounded-lg border border-zinc-700 overflow-hidden">
+                  <button
+                    onClick={() => setSTTProvider("browser")}
+                    className={`px-4 py-2 text-xs font-medium transition-colors ${
+                      sttProvider === "browser"
+                        ? "bg-amber-600 text-white"
+                        : "bg-zinc-800 text-zinc-400 hover:text-zinc-200"
+                    }`}
+                  >
+                    Browser
+                  </button>
+                  <button
+                    onClick={() => setSTTProvider("whisper")}
+                    className={`px-4 py-2 text-xs font-medium transition-colors ${
+                      sttProvider === "whisper"
+                        ? "bg-amber-600 text-white"
+                        : "bg-zinc-800 text-zinc-400 hover:text-zinc-200"
+                    }`}
+                  >
+                    Whisper (Groq)
+                  </button>
+                </div>
+                <span className="text-xs text-zinc-600">
+                  {sttProvider === "whisper"
+                    ? "Higher accuracy, Masonic vocabulary hints"
+                    : "Free, real-time, browser-native"}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={startRehearsal}
+                  className="px-8 py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-semibold transition-colors flex items-center gap-2"
+                >
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                  Start Rehearsal
+                </button>
+                {!isTTSAvailable() && (
+                  <p className="text-xs text-red-400">
+                    Text-to-speech is not available in this browser. AI lines will be shown but not spoken.
+                  </p>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -669,6 +750,24 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
                 Done Speaking
               </button>
             </div>
+          </div>
+        )}
+
+        {/* Transcribing — Whisper processing audio */}
+        {rehearsalState === "transcribing" && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-center gap-3 text-purple-400">
+              <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              <span className="text-sm font-medium">
+                Transcribing with Whisper...
+              </span>
+            </div>
+            <p className="text-xs text-zinc-500 text-center">
+              Sending audio to Groq for high-accuracy transcription
+            </p>
           </div>
         )}
 

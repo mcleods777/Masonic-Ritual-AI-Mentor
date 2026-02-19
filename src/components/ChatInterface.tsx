@@ -5,8 +5,11 @@ import { TextStreamChatTransport } from "ai";
 import { useState, useRef, useEffect, useMemo } from "react";
 import {
   createWebSpeechEngine,
+  createWhisperEngine,
   isWebSpeechAvailable,
+  isMediaRecorderAvailable,
   type STTEngine,
+  type STTProvider,
 } from "@/lib/speech-to-text";
 import { speak, stopSpeaking, isTTSAvailable } from "@/lib/text-to-speech";
 import TTSEngineSelector from "@/components/TTSEngineSelector";
@@ -46,7 +49,9 @@ export default function ChatInterface({ ritualContext }: ChatInterfaceProps) {
 
   const [inputValue, setInputValue] = useState("");
   const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [autoSpeak, setAutoSpeak] = useState(false);
+  const [sttProvider, setSTTProvider] = useState<STTProvider>("browser");
   const engineRef = useRef<STTEngine | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -89,19 +94,31 @@ export default function ChatInterface({ ritualContext }: ChatInterfaceProps) {
     if (isRecording) {
       if (engineRef.current) {
         engineRef.current.stop();
-        engineRef.current = null;
       }
-      setIsRecording(false);
+      if (sttProvider === "whisper") {
+        // Whisper: recording stopped, wait for async transcription
+        setIsRecording(false);
+        setIsTranscribing(true);
+      } else {
+        engineRef.current = null;
+        setIsRecording(false);
+      }
     } else {
-      if (!isWebSpeechAvailable()) return;
+      const canUse = sttProvider === "whisper"
+        ? isMediaRecorderAvailable()
+        : isWebSpeechAvailable();
+      if (!canUse) return;
 
-      const engine = createWebSpeechEngine();
+      const engine = sttProvider === "whisper"
+        ? createWhisperEngine()
+        : createWebSpeechEngine();
       engineRef.current = engine;
 
       engine.onResult = (result) => {
         setInputValue(result.transcript);
 
         if (result.isFinal && result.transcript.trim()) {
+          setIsTranscribing(false);
           setTimeout(() => {
             sendMessage({ text: result.transcript.trim() });
             setInputValue("");
@@ -114,6 +131,7 @@ export default function ChatInterface({ ritualContext }: ChatInterfaceProps) {
 
       engine.onError = () => {
         setIsRecording(false);
+        setIsTranscribing(false);
       };
 
       engine.onEnd = () => {
@@ -273,17 +291,57 @@ export default function ChatInterface({ ritualContext }: ChatInterfaceProps) {
 
       {/* Input */}
       <form onSubmit={handleSubmit} className="p-4 border-t border-zinc-800">
+        {/* STT provider toggle */}
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-xs text-zinc-600">Voice:</span>
+          <div className="flex rounded border border-zinc-700 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setSTTProvider("browser")}
+              className={`px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                sttProvider === "browser"
+                  ? "bg-amber-600 text-white"
+                  : "bg-zinc-800 text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              Browser
+            </button>
+            <button
+              type="button"
+              onClick={() => setSTTProvider("whisper")}
+              className={`px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                sttProvider === "whisper"
+                  ? "bg-amber-600 text-white"
+                  : "bg-zinc-800 text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              Whisper
+            </button>
+          </div>
+          {isTranscribing && (
+            <span className="text-xs text-purple-400 flex items-center gap-1">
+              <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              Transcribing...
+            </span>
+          )}
+        </div>
         <div className="flex gap-2">
-          {isWebSpeechAvailable() && (
+          {(isWebSpeechAvailable() || isMediaRecorderAvailable()) && (
             <button
               type="button"
               onClick={toggleRecording}
+              disabled={isTranscribing}
               className={`p-3 rounded-lg transition-colors ${
                 isRecording
                   ? "bg-red-600 text-white animate-pulse"
-                  : "bg-zinc-800 text-zinc-400 hover:text-zinc-200"
+                  : isTranscribing
+                    ? "bg-purple-900/50 text-purple-400"
+                    : "bg-zinc-800 text-zinc-400 hover:text-zinc-200"
               }`}
-              title={isRecording ? "Stop recording" : "Speak your question"}
+              title={isRecording ? "Stop recording" : isTranscribing ? "Transcribing..." : "Speak your question"}
             >
               <svg
                 className="w-5 h-5"
