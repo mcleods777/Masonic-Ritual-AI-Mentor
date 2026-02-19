@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import type { RitualSection } from "@/lib/document-parser";
+import type { RitualSectionWithCipher } from "@/lib/storage";
 import { ROLE_DISPLAY_NAMES, cleanRitualText } from "@/lib/document-parser";
 import { compareTexts, type ComparisonResult } from "@/lib/text-comparison";
 import {
@@ -20,7 +20,7 @@ import { playGavelKnocks, countGavelMarks } from "@/lib/gavel-sound";
 import DiffDisplay from "./DiffDisplay";
 
 interface RehearsalModeProps {
-  sections: RitualSection[];
+  sections: RitualSectionWithCipher[];
 }
 
 type RehearsalState =
@@ -425,8 +425,8 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
                       {result.accuracy}%
                     </span>
                     <span className="text-zinc-500">|</span>
-                    <span className="text-zinc-300 text-sm truncate flex-1">
-                      {cleanRitualText(section?.text || "").slice(0, 80)}...
+                    <span className="text-zinc-300 text-sm truncate flex-1 font-mono">
+                      {(section?.cipherText || cleanRitualText(section?.text || "")).slice(0, 80)}...
                     </span>
                   </div>
                 );
@@ -534,8 +534,12 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
                 )}
                 {isCurrent && isUserSection && rehearsalState !== "checking"
                   ? "[ Your line — recite from memory ]"
-                  : cleanText.slice(0, 120) +
-                    (cleanText.length > 120 ? "..." : "")}
+                  : (() => {
+                      // Show cipher text in script view (never plain)
+                      const displayText = section.cipherText || cleanText;
+                      return displayText.slice(0, 120) +
+                        (displayText.length > 120 ? "..." : "");
+                    })()}
               </span>
             </div>
           );
@@ -558,8 +562,8 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
                 {currentSection.speaker} ({getRoleDisplayName(currentSection.speaker!)}) is speaking...
               </span>
             </div>
-            <p className="text-zinc-400 text-sm max-w-lg mx-auto">
-              {cleanRitualText(currentSection.text)}
+            <p className="text-zinc-400 text-sm max-w-lg mx-auto font-mono">
+              {currentSection.cipherText || cleanRitualText(currentSection.text)}
             </p>
           </div>
         )}

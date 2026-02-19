@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import type { RitualSection } from "@/lib/document-parser";
+import type { RitualSectionWithCipher } from "@/lib/storage";
 import { ROLE_DISPLAY_NAMES, cleanRitualText } from "@/lib/document-parser";
 import {
   speakAsRole,
@@ -13,7 +13,7 @@ import {
 import { playGavelKnocks, countGavelMarks } from "@/lib/gavel-sound";
 
 interface ListenModeProps {
-  sections: RitualSection[];
+  sections: RitualSectionWithCipher[];
 }
 
 type PlayState = "idle" | "playing" | "paused" | "finished";
@@ -309,7 +309,8 @@ export default function ListenMode({ sections }: ListenModeProps) {
                     ))}
                   </span>
                 )}
-                {cleanText || (
+                {/* Show cipher text in script view */}
+                {section.cipherText || cleanText || (
                   <span className="italic text-zinc-600">[stage direction]</span>
                 )}
               </span>

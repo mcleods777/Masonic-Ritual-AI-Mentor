@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import type { RitualSection } from "@/lib/document-parser";
+import type { RitualSectionWithCipher } from "@/lib/storage";
 import { compareTexts, type ComparisonResult } from "@/lib/text-comparison";
 import {
   createWebSpeechEngine,
@@ -17,26 +17,26 @@ import {
 import DiffDisplay from "./DiffDisplay";
 
 interface PracticeModeProps {
-  sections: RitualSection[];
+  sections: RitualSectionWithCipher[];
 }
 
 type PracticeState = "idle" | "listening" | "reviewing";
 
 export default function PracticeMode({ sections }: PracticeModeProps) {
-  const [selectedSection, setSelectedSection] = useState<RitualSection | null>(
+  const [selectedSection, setSelectedSection] = useState<RitualSectionWithCipher | null>(
     null
   );
   const [practiceState, setPracticeState] = useState<PracticeState>("idle");
   const [transcript, setTranscript] = useState("");
   const [comparison, setComparison] = useState<ComparisonResult | null>(null);
   const [sttError, setSttError] = useState<string | null>(null);
-  const [showReference, setShowReference] = useState(false);
+  const [showPlainText, setShowPlainText] = useState(false);
   const [isSpeakingCorrection, setIsSpeakingCorrection] = useState(false);
 
   const engineRef = useRef<STTEngine | null>(null);
 
   // Group sections by degree
-  const sectionsByDegree = sections.reduce<Record<string, RitualSection[]>>(
+  const sectionsByDegree = sections.reduce<Record<string, RitualSectionWithCipher[]>>(
     (acc, section) => {
       if (!acc[section.degree]) acc[section.degree] = [];
       acc[section.degree].push(section);
@@ -97,7 +97,7 @@ export default function PracticeMode({ sections }: PracticeModeProps) {
     }
     setPracticeState("reviewing");
 
-    // Run comparison if we have both transcript and reference
+    // Compare against PLAIN text (never cipher)
     if (transcript && selectedSection) {
       const result = compareTexts(transcript, selectedSection.text);
       setComparison(result);
@@ -117,18 +117,14 @@ export default function PracticeMode({ sections }: PracticeModeProps) {
 
     setIsSpeakingCorrection(true);
     try {
-      // Build targeted correction phrases from the diffs.
-      // Walk through the diff array, find wrong/missing words, and grab
-      // a few surrounding correct words for context.
       const diffs = comparison.diffs;
       const phrases: string[] = [];
-      const CONTEXT = 3; // words of context on each side
+      const CONTEXT = 3;
 
       let i = 0;
       while (i < diffs.length) {
         const d = diffs[i];
         if (d.type === "wrong" || d.type === "missing") {
-          // Gather the contiguous block of errors
           const errorStart = i;
           while (
             i < diffs.length &&
@@ -138,13 +134,11 @@ export default function PracticeMode({ sections }: PracticeModeProps) {
           }
           const errorEnd = i;
 
-          // Collect the correct version of the error words
           const correctedWords = diffs
             .slice(errorStart, errorEnd)
             .filter((dd) => dd.type === "wrong" || dd.type === "missing")
             .map((dd) => dd.expected || dd.word);
 
-          // Grab a few correct words before and after for context
           const before: string[] = [];
           for (let b = errorStart - 1; b >= Math.max(0, errorStart - CONTEXT); b--) {
             if (diffs[b].type === "correct" || diffs[b].type === "phonetic_match" || diffs[b].type === "fuzzy_match") {
@@ -243,8 +237,9 @@ export default function PracticeMode({ sections }: PracticeModeProps) {
                       ({section.speaker})
                     </span>
                   )}
-                  <span className="block text-xs text-zinc-600 mt-1">
-                    {section.text.slice(0, 80)}...
+                  {/* Show cipher text preview by default */}
+                  <span className="block text-xs text-zinc-600 mt-1 font-mono">
+                    {section.cipherText.slice(0, 80)}...
                   </span>
                 </button>
               ))}
@@ -266,21 +261,33 @@ export default function PracticeMode({ sections }: PracticeModeProps) {
               )}
             </h2>
             <button
-              onClick={() => setShowReference(!showReference)}
-              className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors"
+              onClick={() => setShowPlainText(!showPlainText)}
+              className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors flex items-center gap-1.5"
             >
-              {showReference ? "Hide" : "Show"} Reference Text
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                {showPlainText ? (
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878L21 21" />
+                ) : (
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                )}
+              </svg>
+              {showPlainText ? "Show Cipher" : "Reveal Plain Text"}
             </button>
           </div>
 
-          {/* Reference text (collapsible) */}
-          {showReference && (
-            <div className="mb-4 p-4 bg-zinc-800/50 rounded-lg border border-zinc-700">
-              <p className="text-zinc-300 text-sm leading-relaxed whitespace-pre-wrap">
-                {selectedSection.text}
+          {/* Reference text — cipher by default, plain on toggle */}
+          <div className="mb-4 p-4 bg-zinc-800/50 rounded-lg border border-zinc-700">
+            <p className={`text-sm leading-relaxed whitespace-pre-wrap ${
+              showPlainText ? "text-zinc-300" : "text-amber-200/80 font-mono"
+            }`}>
+              {showPlainText ? selectedSection.text : selectedSection.cipherText}
+            </p>
+            {!showPlainText && (
+              <p className="text-xs text-zinc-600 mt-2 italic">
+                Cipher text shown — tap &quot;Reveal Plain Text&quot; to see full text
               </p>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Controls */}
           <div className="flex gap-3 mb-6">
@@ -302,7 +309,6 @@ export default function PracticeMode({ sections }: PracticeModeProps) {
                 </button>
                 <button
                   onClick={() => {
-                    // Allow typing instead of speaking
                     setPracticeState("reviewing");
                   }}
                   className="px-6 py-3 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 rounded-lg font-medium transition-colors"

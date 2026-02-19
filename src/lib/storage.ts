@@ -1,12 +1,17 @@
 /**
  * Encrypted IndexedDB storage for ritual documents.
  * All ritual text stays on the user's device, encrypted at rest.
+ *
+ * v2: Supports .mram files with separate cipher/plain text per line.
+ *     Cipher text (user-facing) and plain text (AI-facing) are stored
+ *     in separate encrypted fields so they never accidentally cross contexts.
  */
 
-import type { ParsedDocument, RitualSection } from "./document-parser";
+import type { MRAMDocument, MRAMRitualSection } from "./mram-format";
+import { mramToSections, mramToPlainText } from "./mram-format";
 
 const DB_NAME = "masonic-ritual-mentor";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const DOCUMENTS_STORE = "documents";
 const SECTIONS_STORE = "sections";
 const SETTINGS_STORE = "settings";
@@ -120,6 +125,7 @@ export interface StoredDocument {
   title: string;
   createdAt: string;
   sectionCount: number;
+  isMRAM: boolean;
 }
 
 interface StoredDocumentRecord {
@@ -129,6 +135,7 @@ interface StoredDocumentRecord {
   rawTextIv: Uint8Array;
   createdAt: string;
   sectionCount: number;
+  isMRAM: boolean;
 }
 
 interface StoredSectionRecord {
@@ -137,20 +144,31 @@ interface StoredSectionRecord {
   degree: string;
   sectionName: string;
   speaker: string | null;
+  // Plain text (for AI, comparison, TTS)
   textCipher: ArrayBuffer;
   textIv: Uint8Array;
+  // Cipher text (for display to user) — only present for .mram documents
+  cipherTextCipher?: ArrayBuffer;
+  cipherTextIv?: Uint8Array;
   order: number;
+  gavels: number;
+  action: string | null;
 }
 
 /**
- * Save a parsed document to IndexedDB with encryption
+ * Save an MRAM document to IndexedDB with encryption.
+ * Cipher text and plain text are encrypted into separate fields.
  */
-export async function saveDocument(doc: ParsedDocument): Promise<string> {
+export async function saveMRAMDocument(mramDoc: MRAMDocument): Promise<string> {
   const id = crypto.randomUUID();
   const db = await openDB();
 
-  // Encrypt the raw text
-  const { ciphertext: rawTextCipher, iv: rawTextIv } = await encrypt(doc.rawText);
+  // Build plain-text-only representation for AI context
+  const plainText = mramToPlainText(mramDoc);
+  const { ciphertext: rawTextCipher, iv: rawTextIv } = await encrypt(plainText);
+
+  const sections = mramToSections(mramDoc);
+  const title = `${mramDoc.metadata.degree} - ${mramDoc.metadata.ceremony}`;
 
   // Save document record
   await new Promise<void>((resolve, reject) => {
@@ -158,19 +176,22 @@ export async function saveDocument(doc: ParsedDocument): Promise<string> {
     const store = tx.objectStore(DOCUMENTS_STORE);
     const request = store.put({
       id,
-      title: doc.title,
+      title,
       rawTextCipher,
       rawTextIv,
       createdAt: new Date().toISOString(),
-      sectionCount: doc.sections.length,
+      sectionCount: sections.length,
+      isMRAM: true,
     } as StoredDocumentRecord);
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve();
   });
 
-  // Encrypt and save each section
-  for (const section of doc.sections) {
+  // Encrypt and save each section (cipher + plain separately)
+  for (const section of sections) {
     const { ciphertext: textCipher, iv: textIv } = await encrypt(section.text);
+    const { ciphertext: cipherTextCipher, iv: cipherTextIv } = await encrypt(section.cipherText);
+
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(SECTIONS_STORE, "readwrite");
       const store = tx.objectStore(SECTIONS_STORE);
@@ -182,7 +203,11 @@ export async function saveDocument(doc: ParsedDocument): Promise<string> {
         speaker: section.speaker,
         textCipher,
         textIv,
+        cipherTextCipher,
+        cipherTextIv,
         order: section.order,
+        gavels: section.gavels,
+        action: section.action,
       } as StoredSectionRecord);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => resolve();
@@ -191,6 +216,21 @@ export async function saveDocument(doc: ParsedDocument): Promise<string> {
 
   db.close();
   return id;
+}
+
+/**
+ * Section data returned to the UI — includes both cipher and plain text.
+ */
+export interface RitualSectionWithCipher {
+  id: string;
+  degree: string;
+  sectionName: string;
+  speaker: string | null;
+  text: string;        // Plain text (for comparison, TTS, AI)
+  cipherText: string;  // Cipher text (for display to user)
+  order: number;
+  gavels: number;
+  action: string | null;
 }
 
 /**
@@ -210,6 +250,7 @@ export async function listDocuments(): Promise<StoredDocument[]> {
           title: d.title,
           createdAt: d.createdAt,
           sectionCount: d.sectionCount,
+          isMRAM: d.isMRAM || false,
         }))
       );
     };
@@ -219,9 +260,9 @@ export async function listDocuments(): Promise<StoredDocument[]> {
 }
 
 /**
- * Get sections for a document (decrypted)
+ * Get sections for a document (decrypted) — returns both cipher and plain text.
  */
-export async function getDocumentSections(documentId: string): Promise<RitualSection[]> {
+export async function getDocumentSections(documentId: string): Promise<RitualSectionWithCipher[]> {
   const db = await openDB();
   const records = await new Promise<StoredSectionRecord[]>((resolve, reject) => {
     const tx = db.transaction(SECTIONS_STORE, "readonly");
@@ -234,16 +275,26 @@ export async function getDocumentSections(documentId: string): Promise<RitualSec
   db.close();
 
   // Decrypt each section
-  const sections: RitualSection[] = [];
+  const sections: RitualSectionWithCipher[] = [];
   for (const record of records) {
     const text = await decrypt(record.textCipher, record.textIv);
+
+    // Decrypt cipher text if available (MRAM docs), otherwise use plain text
+    let cipherText = text;
+    if (record.cipherTextCipher && record.cipherTextIv) {
+      cipherText = await decrypt(record.cipherTextCipher, record.cipherTextIv);
+    }
+
     sections.push({
       id: record.id,
       degree: record.degree,
       sectionName: record.sectionName,
       speaker: record.speaker,
       text,
+      cipherText,
       order: record.order,
+      gavels: record.gavels ?? 0,
+      action: record.action ?? null,
     });
   }
 
@@ -251,9 +302,10 @@ export async function getDocumentSections(documentId: string): Promise<RitualSec
 }
 
 /**
- * Get full document raw text (decrypted)
+ * Get full document plain text only (decrypted) — for AI context.
+ * NEVER returns cipher text.
  */
-export async function getDocumentRawText(documentId: string): Promise<string> {
+export async function getDocumentPlainText(documentId: string): Promise<string> {
   const db = await openDB();
   const record = await new Promise<StoredDocumentRecord | undefined>((resolve, reject) => {
     const tx = db.transaction(DOCUMENTS_STORE, "readonly");
