@@ -62,7 +62,7 @@ const ALLOWED_MODELS = new Set([
 export async function POST(req: Request) {
   const { messages, ritualContext, model } = await req.json();
 
-  const modelId = ALLOWED_MODELS.has(model) ? model : "claude-3-5-haiku-latest";
+  const modelId = ALLOWED_MODELS.has(model) ? model : "claude-sonnet-4-6-20250514";
 
   const systemPrompt = COACH_SYSTEM_PROMPT.replace(
     "{RITUAL_TEXT}",
