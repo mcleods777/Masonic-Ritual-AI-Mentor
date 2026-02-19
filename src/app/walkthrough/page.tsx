@@ -128,40 +128,39 @@ export default function WalkthroughPage() {
       {/* ================================================================ */}
       {/* 2. DOCUMENT UPLOAD                                               */}
       {/* ================================================================ */}
-      <Section id="upload" title="Document Upload & Storage" subtitle="How your ritual file gets processed and secured">
+      <Section id="upload" title="Encrypted .mram Upload" subtitle="How your encrypted ritual file gets decrypted, split, and re-secured">
         <div className="max-w-lg mx-auto">
           <FlowStep
-            icon="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"
+            icon="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"
             color="blue"
-            title="You upload a file"
-            desc="Drop or select a PDF, DOCX, or TXT file. Everything happens in your browser."
+            title="You upload a .mram file"
+            desc="Drop or select your encrypted .mram ritual file. The app validates the magic bytes (MRAM header) before proceeding."
           />
           <DownArrow />
           <FlowStep
-            icon="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"
+            icon="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"
             color="amber"
-            title="Text is extracted"
-            desc="PDFs are read with pdfjs, Word docs with mammoth, and text files directly."
+            title="Enter your lodge passphrase"
+            desc="Your passphrase is used with PBKDF2 (310,000 iterations) to derive the decryption key. The file is decrypted with AES-256-GCM."
           />
           <DownArrow />
           <FlowStep
-            icon="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z"
+            icon="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
             color="amber"
-            title="Ritual is structured"
-            desc="The app detects degrees (EA, FC, MM), sections (Opening, Lecture, Closing), and speakers (WM, SW, JD)."
+            title="Validated & structured"
+            desc="The decrypted JSON is checked against a SHA-256 checksum to detect tampering. Each line has separate cipher text (abbreviated) and plain text (full English), plus role, gavels, and actions."
           >
             <div className="flex flex-wrap gap-2 mt-3">
-              <Tag>Entered Apprentice</Tag>
-              <Tag>Fellow Craft</Tag>
-              <Tag>Master Mason</Tag>
+              <Tag>Cipher text (shown to you)</Tag>
+              <Tag>Plain text (for AI only)</Tag>
             </div>
           </FlowStep>
           <DownArrow />
           <FlowStep
             icon="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"
             color="green"
-            title="Encrypted & stored locally"
-            desc="All text is encrypted with AES-256-GCM and stored in your browser's IndexedDB. It never leaves your device."
+            title="Re-encrypted & stored locally"
+            desc="Cipher text and plain text are encrypted into separate fields with AES-256-GCM and stored in IndexedDB. They never cross contexts — cipher is for display, plain is for AI and comparison."
           />
         </div>
       </Section>
@@ -489,7 +488,7 @@ export default function WalkthroughPage() {
             icon="M5.25 14.25h13.5m-13.5 0a3 3 0 01-3-3m3 3a3 3 0 100 6h13.5a3 3 0 100-6m-16.5-3a3 3 0 013-3h13.5a3 3 0 013 3m-19.5 0a4.5 4.5 0 01.9-2.7L5.737 5.1a3.375 3.375 0 012.7-1.35h7.126c1.062 0 2.062.5 2.7 1.35l2.587 3.45a4.5 4.5 0 01.9 2.7m0 0a3 3 0 01-3 3m0 3h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008zm-3 6h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008z"
             color="purple"
             title="Sent to your server"
-            desc="Your question goes to the app's server along with your ritual text (as context for the AI)."
+            desc="Your question goes to the app's server along with the plain text of your ritual (as context for the AI). Cipher text is never sent."
           >
             <div className="bg-purple-500/5 border border-purple-500/20 rounded-lg p-3 mt-3 text-xs text-purple-300/70">
               <span className="text-purple-400 font-semibold">System prompt:</span> &ldquo;You are a patient Past Master and Masonic ritual coach. ONLY quote from this ritual text. NEVER reveal grips or passwords...&rdquo;
@@ -549,7 +548,7 @@ export default function WalkthroughPage() {
               </div>
             </div>
             <ul className="space-y-3">
-              <PrivacyItem color="green" text="Ritual text (AES-256 encrypted)" />
+              <PrivacyItem color="green" text="Ritual cipher + plain text (AES-256, separate fields)" />
               <PrivacyItem color="green" text="Encryption key" />
               <PrivacyItem color="green" text="Practice scores & history" />
               <PrivacyItem color="green" text="Voice engine preference" />
@@ -572,7 +571,7 @@ export default function WalkthroughPage() {
               </div>
             </div>
             <ul className="space-y-3">
-              <PrivacyItem color="amber" text="AI Coach: ritual text goes to Claude API" />
+              <PrivacyItem color="amber" text="AI Coach: plain text only goes to Claude API (never cipher)" />
               <PrivacyItem color="amber" text="Google TTS: line text for voice synthesis" />
               <PrivacyItem color="amber" text="ElevenLabs: line text for voice synthesis" />
             </ul>

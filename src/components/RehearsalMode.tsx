@@ -124,8 +124,8 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
 
     const section = sections[index];
 
-    // Check for gavel marks and play knock sounds
-    const gavelCount = countGavelMarks(section.text);
+    // Check for gavel marks and play knock sounds (use MRAM field first)
+    const gavelCount = section.gavels > 0 ? section.gavels : countGavelMarks(section.text);
     if (gavelCount > 0 && !cancelledRef.current) {
       await playGavelKnocks(gavelCount);
     }
@@ -492,7 +492,8 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
           const isPast = i < currentIndex;
           const isCurrent = i === currentIndex;
           const isUserSection = section.speaker === selectedRole;
-          const gavels = countGavelMarks(section.text);
+          // Use MRAM gavels field when available, fall back to parsing from text
+          const gavels = section.gavels > 0 ? section.gavels : countGavelMarks(section.text);
           const cleanText = cleanRitualText(section.text);
 
           return (
@@ -535,8 +536,10 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
                 {isCurrent && isUserSection && rehearsalState !== "checking"
                   ? "[ Your line — recite from memory ]"
                   : (() => {
-                      // Show cipher text in script view (never plain)
-                      const displayText = section.cipherText || cleanText;
+                      // Show cipher text in script view; fall back to clean plain text for non-MRAM docs
+                      const displayText = (section.cipherText && section.cipherText !== section.text)
+                        ? section.cipherText
+                        : cleanText;
                       return displayText.slice(0, 120) +
                         (displayText.length > 120 ? "..." : "");
                     })()}

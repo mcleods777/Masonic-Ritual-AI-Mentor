@@ -79,8 +79,8 @@ export default function ListenMode({ sections }: ListenModeProps) {
         setCurrentIndex(i);
         const section = sections[i];
 
-        // Play gavel knocks if present
-        const gavelCount = countGavelMarks(section.text);
+        // Play gavel knocks if present (use MRAM field first, then parse from text)
+        const gavelCount = section.gavels > 0 ? section.gavels : countGavelMarks(section.text);
         if (gavelCount > 0 && !cancelledRef.current) {
           await playGavelKnocks(gavelCount);
         }
@@ -267,8 +267,12 @@ export default function ListenMode({ sections }: ListenModeProps) {
         {sections.map((section, i) => {
           const isPast = i < currentIndex && playState !== "idle";
           const isCurrent = i === currentIndex && playState !== "idle";
-          const gavels = countGavelMarks(section.text);
+          // Use MRAM gavels field when available, fall back to parsing from text
+          const gavels = section.gavels > 0 ? section.gavels : countGavelMarks(section.text);
           const cleanText = cleanRitualText(section.text);
+          const displayText = section.cipherText && section.cipherText !== section.text
+            ? section.cipherText
+            : cleanText;
 
           return (
             <div
@@ -309,8 +313,8 @@ export default function ListenMode({ sections }: ListenModeProps) {
                     ))}
                   </span>
                 )}
-                {/* Show cipher text in script view */}
-                {section.cipherText || cleanText || (
+                {/* Show cipher text in script view (falls back to clean plain text for non-MRAM docs) */}
+                {displayText || (
                   <span className="italic text-zinc-600">[stage direction]</span>
                 )}
               </span>

@@ -31,8 +31,8 @@ export default function HomePage() {
         </h1>
         <p className="text-lg text-zinc-400 mt-4 max-w-2xl mx-auto">
           A privacy-first practice tool for memorizing your ritual work.
-          Upload your ritual, speak your lines, and get instant feedback
-          with AI coaching.
+          Load your encrypted .mram ritual file, practice from cipher text,
+          and get instant feedback with AI coaching.
         </p>
       </div>
 
@@ -61,8 +61,8 @@ export default function HomePage() {
             Upload Ritual
           </h3>
           <p className="text-sm text-zinc-500 mt-2">
-            Upload your ritual document. It&apos;s parsed and encrypted entirely
-            on your device — it never leaves your browser.
+            Upload your encrypted .mram ritual file. Enter your lodge
+            passphrase to decrypt it — the data stays on your device.
           </p>
         </Link>
 
@@ -163,12 +163,12 @@ export default function HomePage() {
             {
               step: "1",
               title: "Upload",
-              desc: "Upload your Iowa Masonic ritual (PDF, DOCX, or TXT). It's parsed entirely on your device.",
+              desc: "Upload your encrypted .mram ritual file and enter your lodge passphrase. Decrypted on your device.",
             },
             {
               step: "2",
               title: "Select",
-              desc: "Choose a degree and section to practice. The app automatically detects sections and speakers.",
+              desc: "Choose a section to practice. Cipher text is shown by default — toggle to reveal plain text.",
             },
             {
               step: "3",
@@ -215,12 +215,11 @@ export default function HomePage() {
               Privacy First
             </h3>
             <p className="text-sm text-zinc-500 mt-1">
-              Your ritual document is parsed and encrypted entirely on your device
-              using AES-256-GCM encryption. It is stored in your browser&apos;s
-              IndexedDB and never sent to any server. Speech recognition runs
-              on-device when possible. The AI coach only receives the specific
-              section you&apos;re practicing, and Anthropic does not use API data for
-              training.
+              Your .mram ritual file is decrypted on your device, then re-encrypted
+              with AES-256-GCM and stored in IndexedDB. Cipher text and plain text are
+              kept in separate encrypted fields — cipher is shown to you, plain text
+              is only used for AI coaching and accuracy comparison. The AI coach never
+              sees cipher text, and Anthropic does not use API data for training.
             </p>
           </div>
         </div>
