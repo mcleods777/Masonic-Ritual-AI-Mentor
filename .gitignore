@@ -38,3 +38,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# encrypted ritual files (lodge-specific, should not be committed)
+*.mram
+rituals/

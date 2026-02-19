@@ -254,28 +254,56 @@ function parseDocument(content: string): MRAMDocument {
       while (j < rawParsedLines.length && rawParsedLines[j].type === "empty") j++;
 
       if (j < rawParsedLines.length && rawParsedLines[j].type === "speaker" && rawParsedLines[j].parsed) {
-        // This is a cipher/plain pair
         const cipherLine = entry.parsed;
         const plainLine = rawParsedLines[j].parsed!;
 
-        rolesUsed.add(cipherLine.role);
+        // Only pair if the roles match — otherwise they're separate standalone lines
+        if (cipherLine.role === plainLine.role) {
+          // This is a cipher/plain pair
+          rolesUsed.add(cipherLine.role);
 
+          doc.lines.push({
+            id: lineId++,
+            section: currentSectionId,
+            role: cipherLine.role,
+            gavels: cipherLine.gavels || plainLine.gavels,
+            action: cipherLine.action || plainLine.action,
+            cipher: cipherLine.rawText,
+            plain: plainLine.rawText,
+          });
+
+          i = j + 1;
+          continue;
+        }
+
+        // Roles don't match — treat the first as a standalone line (cipher = plain)
+        rolesUsed.add(cipherLine.role);
         doc.lines.push({
           id: lineId++,
           section: currentSectionId,
           role: cipherLine.role,
-          gavels: cipherLine.gavels || plainLine.gavels,
-          action: cipherLine.action || plainLine.action,
+          gavels: cipherLine.gavels,
+          action: cipherLine.action,
           cipher: cipherLine.rawText,
-          plain: plainLine.rawText,
+          plain: cipherLine.rawText,
         });
 
-        i = j + 1;
+        i++;
         continue;
       }
 
-      // Unpaired speaker line — treat as a cipher-only line (shouldn't happen in well-formed input)
-      console.warn(`Warning: Unpaired speaker line at position ${i}: ${entry.content}`);
+      // Unpaired speaker line at end — treat as standalone (cipher = plain)
+      const standaloneLine = entry.parsed;
+      rolesUsed.add(standaloneLine.role);
+      doc.lines.push({
+        id: lineId++,
+        section: currentSectionId,
+        role: standaloneLine.role,
+        gavels: standaloneLine.gavels,
+        action: standaloneLine.action,
+        cipher: standaloneLine.rawText,
+        plain: standaloneLine.rawText,
+      });
       i++;
       continue;
     }
