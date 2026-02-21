@@ -13,6 +13,7 @@ import {
   type STTProvider,
 } from "@/lib/speech-to-text";
 import {
+  speak,
   speakAsRole,
   assignVoicesToRoles,
   stopSpeaking,
@@ -21,6 +22,7 @@ import {
 } from "@/lib/text-to-speech";
 import { playGavelKnocks, countGavelMarks } from "@/lib/gavel-sound";
 import DiffDisplay from "./DiffDisplay";
+import RitualScriptDisplay from "./RitualScriptDisplay";
 
 interface RehearsalModeProps {
   sections: RitualSectionWithCipher[];
@@ -59,7 +61,6 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
   sttProviderRef.current = sttProvider;
   const voiceMapRef = useRef<Map<string, RoleVoiceProfile>>(new Map());
   const cancelledRef = useRef(false);
-  const scriptContainerRef = useRef<HTMLDivElement>(null);
 
   // Extract unique roles from sections (only those with speaker lines)
   const availableRoles = useMemo(() => {
@@ -79,13 +80,7 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
     }
   }, [availableRoles]);
 
-  // Scroll current line into view
-  useEffect(() => {
-    const el = document.getElementById(`rehearsal-line-${currentIndex}`);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
-  }, [currentIndex]);
+  // (Scroll handled by RitualScriptDisplay)
 
   const currentSection = sections[currentIndex] || null;
   const isUserLine = currentSection?.speaker === selectedRole;
@@ -337,6 +332,23 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
     startRehearsal();
   }, [startRehearsal]);
 
+  // Click-to-speak: tap any word in the script view
+  const handleWordClick = useCallback(
+    async (word: string, role: string | null) => {
+      stopSpeaking();
+      if (role) {
+        try {
+          await speakAsRole(word, role, voiceMapRef.current);
+        } catch {
+          await speak(word);
+        }
+      } else {
+        await speak(word);
+      }
+    },
+    [],
+  );
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -564,71 +576,17 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
         />
       </div>
 
-      {/* Script view — shows a few lines of context */}
-      <div
-        ref={scriptContainerRef}
-        className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 max-h-60 overflow-y-auto"
-      >
-        {sections.map((section, i) => {
-          const isPast = i < currentIndex;
-          const isCurrent = i === currentIndex;
-          const isUserSection = section.speaker === selectedRole;
-          // Use MRAM gavels field when available, fall back to parsing from text
-          const gavels = section.gavels > 0 ? section.gavels : countGavelMarks(section.text);
-          const cleanText = cleanRitualText(section.text);
-
-          return (
-            <div
-              key={section.id}
-              id={`rehearsal-line-${i}`}
-              className={`
-                flex gap-3 px-3 py-2 rounded-lg mb-1 transition-all
-                ${isPast ? "opacity-30" : ""}
-                ${isCurrent && isUserSection ? "bg-amber-500/10 border border-amber-500/30" : ""}
-                ${isCurrent && !isUserSection ? "bg-blue-500/10 border border-blue-500/20" : ""}
-                ${!isCurrent && !isPast ? "opacity-60" : ""}
-              `}
-            >
-              <span
-                className={`
-                  text-xs font-mono font-bold w-10 flex-shrink-0 pt-0.5 text-right
-                  ${isCurrent && isUserSection ? "text-amber-400" : ""}
-                  ${isCurrent && !isUserSection ? "text-blue-400" : ""}
-                  ${!isCurrent ? "text-zinc-600" : ""}
-                `}
-              >
-                {section.speaker || "---"}
-              </span>
-              <span
-                className={`
-                  text-sm flex-1
-                  ${isCurrent && isUserSection ? "text-amber-200" : ""}
-                  ${isCurrent && !isUserSection ? "text-blue-200" : ""}
-                  ${isPast ? "text-zinc-600" : "text-zinc-400"}
-                `}
-              >
-                {gavels > 0 && (
-                  <span className="inline-flex gap-0.5 mr-1.5 align-middle" title={`${gavels} gavel knock${gavels !== 1 ? "s" : ""}`}>
-                    {Array.from({ length: gavels }).map((_, g) => (
-                      <span key={g} className="inline-block w-2 h-2 rounded-full bg-yellow-600/70" />
-                    ))}
-                  </span>
-                )}
-                {isCurrent && isUserSection && rehearsalState !== "checking"
-                  ? "[ Your line — recite from memory ]"
-                  : (() => {
-                      // Show cipher text in script view; fall back to clean plain text for non-MRAM docs
-                      const displayText = (section.cipherText && section.cipherText !== section.text)
-                        ? section.cipherText
-                        : cleanText;
-                      return displayText.slice(0, 120) +
-                        (displayText.length > 120 ? "..." : "");
-                    })()}
-              </span>
-            </div>
-          );
-        })}
-      </div>
+      {/* Script view — premium reel display */}
+      <RitualScriptDisplay
+        sections={sections}
+        currentIndex={currentIndex}
+        isActive={true}
+        selectedRole={selectedRole}
+        hideCurrentUserLine={rehearsalState !== "checking"}
+        onWordClick={handleWordClick}
+        lineIdPrefix="rehearsal-line"
+        maxHeight="22rem"
+      />
 
       {/* Active area */}
       <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-6">
