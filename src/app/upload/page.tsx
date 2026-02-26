@@ -8,7 +8,6 @@ import {
   deleteDocument,
   type StoredDocument,
 } from "@/lib/storage";
-import type { ParsedDocument } from "@/lib/document-parser";
 
 export default function UploadPage() {
   const router = useRouter();
@@ -19,9 +18,9 @@ export default function UploadPage() {
     listDocuments().then(setDocuments).catch(console.error);
   }, []);
 
-  const handleDocumentSaved = (docId: string, doc: ParsedDocument) => {
+  const handleDocumentSaved = (docId: string, title: string, sectionCount: number) => {
     setSuccessMessage(
-      `"${doc.title}" uploaded successfully with ${doc.sections.length} sections detected.`
+      `"${title}" uploaded successfully with ${sectionCount} lines detected.`
     );
     listDocuments().then(setDocuments);
 
@@ -41,8 +40,8 @@ export default function UploadPage() {
       <div>
         <h1 className="text-2xl font-bold text-zinc-100">Upload Ritual</h1>
         <p className="text-zinc-500 mt-2">
-          Upload your Iowa Masonic ritual document. It will be parsed,
-          structured into practice sections, and encrypted on your device.
+          Upload your encrypted ritual file (.mram). It will be decrypted,
+          structured into practice sections, and re-encrypted on your device.
         </p>
       </div>
 
@@ -72,8 +71,11 @@ export default function UploadPage() {
                 <div>
                   <p className="text-zinc-200 font-medium">{doc.title}</p>
                   <p className="text-xs text-zinc-500">
-                    {doc.sectionCount} sections &middot;{" "}
+                    {doc.sectionCount} lines &middot;{" "}
                     {new Date(doc.createdAt).toLocaleDateString()}
+                    {doc.isMRAM && (
+                      <span className="ml-2 text-amber-500/70">.mram</span>
+                    )}
                   </p>
                 </div>
                 <div className="flex gap-2">
@@ -96,30 +98,20 @@ export default function UploadPage() {
         </div>
       )}
 
-      {/* Supported formats */}
+      {/* File format info */}
       <div className="bg-zinc-900/50 rounded-xl border border-zinc-800 p-6">
         <h3 className="text-sm font-semibold text-zinc-300 mb-3">
-          Supported Formats
+          About .mram Files
         </h3>
-        <div className="grid grid-cols-3 gap-3">
-          {[
-            { ext: ".pdf", desc: "PDF documents" },
-            { ext: ".docx", desc: "Word documents" },
-            { ext: ".txt", desc: "Plain text files" },
-          ].map((fmt) => (
-            <div
-              key={fmt.ext}
-              className="px-3 py-2 bg-zinc-800/50 rounded-lg text-center"
-            >
-              <p className="text-amber-400 font-mono font-bold">{fmt.ext}</p>
-              <p className="text-xs text-zinc-500 mt-1">{fmt.desc}</p>
-            </div>
-          ))}
+        <div className="px-3 py-2 bg-zinc-800/50 rounded-lg text-center mb-4">
+          <p className="text-amber-400 font-mono font-bold">.mram</p>
+          <p className="text-xs text-zinc-500 mt-1">Encrypted ritual file</p>
         </div>
-        <p className="text-xs text-zinc-600 mt-4">
-          The parser automatically detects degree names, section headings, and
-          speaker roles (W.M., S.W., J.D., etc.) to structure your text into
-          practice-able segments.
+        <p className="text-xs text-zinc-600">
+          Ritual files (.mram) are encrypted and can only be opened with the
+          correct passphrase from your lodge. They contain both the cipher text
+          for practice and the full text for AI coaching, securely bundled
+          together. Contact your lodge secretary for the file and passphrase.
         </p>
       </div>
     </div>

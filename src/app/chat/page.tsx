@@ -5,7 +5,7 @@ import Link from "next/link";
 import ChatInterface from "@/components/ChatInterface";
 import {
   listDocuments,
-  getDocumentRawText,
+  getDocumentPlainText,
   type StoredDocument,
 } from "@/lib/storage";
 
@@ -28,10 +28,10 @@ export default function ChatPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Load ritual text when document changes
+  // Load plain text only (NEVER cipher) for AI context
   useEffect(() => {
     if (!selectedDocId) return;
-    getDocumentRawText(selectedDocId)
+    getDocumentPlainText(selectedDocId)
       .then(setRitualContext)
       .catch(console.error);
   }, [selectedDocId]);

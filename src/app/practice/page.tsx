@@ -10,8 +10,8 @@ import {
   listDocuments,
   getDocumentSections,
   type StoredDocument,
+  type RitualSectionWithCipher,
 } from "@/lib/storage";
-import type { RitualSection } from "@/lib/document-parser";
 import TTSEngineSelector from "@/components/TTSEngineSelector";
 
 type PracticeTab = "solo" | "rehearsal" | "listen";
@@ -22,7 +22,7 @@ function PracticeContent() {
 
   const [documents, setDocuments] = useState<StoredDocument[]>([]);
   const [selectedDocId, setSelectedDocId] = useState<string | null>(docId);
-  const [sections, setSections] = useState<RitualSection[]>([]);
+  const [sections, setSections] = useState<RitualSectionWithCipher[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<PracticeTab>("rehearsal");
 
@@ -85,7 +85,7 @@ function PracticeContent() {
           No Documents Uploaded
         </h2>
         <p className="text-zinc-500 mt-2 max-w-md mx-auto">
-          Upload your ritual document first so you can practice reciting
+          Upload your encrypted ritual file first so you can practice reciting
           from memory.
         </p>
         <Link
@@ -223,8 +223,7 @@ function PracticeContent() {
         <div className="text-center py-12 text-zinc-500">
           <p>No sections found in this document.</p>
           <p className="text-sm mt-1">
-            Try uploading a different format or check that the document contains
-            ritual text.
+            Try uploading a different file or check that the document is a valid .mram file.
           </p>
         </div>
       )}

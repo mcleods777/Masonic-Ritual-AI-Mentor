@@ -35,3 +35,39 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #52525b;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Ritual Script Display — "slot machine reel" animations             */
+/* ------------------------------------------------------------------ */
+
+/* Pop-in when a line becomes active (slight overshoot for satisfying settle) */
+@keyframes ritual-line-pop {
+  0%   { transform: scale(0.96); opacity: 0.6; }
+  60%  { transform: scale(1.012); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.ritual-line-active {
+  animation: ritual-line-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+/* Gentle breathing glow on the active line */
+@keyframes ritual-glow-pulse {
+  0%, 100% { opacity: 0.6; }
+  50%      { opacity: 1; }
+}
+
+.ritual-glow-pulse {
+  animation: ritual-glow-pulse 2.5s ease-in-out infinite;
+}
+
+/* Smooth word highlight on click */
+@keyframes word-tap {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+
+.word-tapped {
+  animation: word-tap 0.25s ease-out;
+}

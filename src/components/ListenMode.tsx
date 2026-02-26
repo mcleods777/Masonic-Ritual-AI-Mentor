@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import type { RitualSection } from "@/lib/document-parser";
+import type { RitualSectionWithCipher } from "@/lib/storage";
 import { ROLE_DISPLAY_NAMES, cleanRitualText } from "@/lib/document-parser";
 import {
+  speak,
   speakAsRole,
   assignVoicesToRoles,
   stopSpeaking,
@@ -11,9 +12,10 @@ import {
   type RoleVoiceProfile,
 } from "@/lib/text-to-speech";
 import { playGavelKnocks, countGavelMarks } from "@/lib/gavel-sound";
+import RitualScriptDisplay from "./RitualScriptDisplay";
 
 interface ListenModeProps {
-  sections: RitualSection[];
+  sections: RitualSectionWithCipher[];
 }
 
 type PlayState = "idle" | "playing" | "paused" | "finished";
@@ -25,7 +27,6 @@ export default function ListenMode({ sections }: ListenModeProps) {
   const pausedRef = useRef(false);
   const resumeRef = useRef<(() => void) | null>(null);
   const voiceMapRef = useRef<Map<string, RoleVoiceProfile>>(new Map());
-  const scriptContainerRef = useRef<HTMLDivElement>(null);
 
   // Extract unique roles
   const availableRoles = useMemo(() => {
@@ -42,14 +43,6 @@ export default function ListenMode({ sections }: ListenModeProps) {
       voiceMapRef.current = assignVoicesToRoles(availableRoles);
     }
   }, [availableRoles]);
-
-  // Scroll current line into view
-  useEffect(() => {
-    const el = document.getElementById(`listen-line-${currentIndex}`);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
-  }, [currentIndex]);
 
   // Get display name for a role
   const getRoleDisplayName = useCallback((role: string): string => {
@@ -79,8 +72,8 @@ export default function ListenMode({ sections }: ListenModeProps) {
         setCurrentIndex(i);
         const section = sections[i];
 
-        // Play gavel knocks if present
-        const gavelCount = countGavelMarks(section.text);
+        // Play gavel knocks if present (use MRAM field first, then parse from text)
+        const gavelCount = section.gavels > 0 ? section.gavels : countGavelMarks(section.text);
         if (gavelCount > 0 && !cancelledRef.current) {
           await playGavelKnocks(gavelCount);
         }
@@ -143,6 +136,65 @@ export default function ListenMode({ sections }: ListenModeProps) {
     setCurrentIndex(0);
   }, []);
 
+  /* -------------------------------------------------------------- */
+  /*  Click-to-play: tap any line bar to hear it                     */
+  /* -------------------------------------------------------------- */
+  const handleLineClick = useCallback(
+    async (index: number) => {
+      const section = sections[index];
+      if (!section) return;
+
+      if (playState === "idle" || playState === "finished") {
+        // One-shot: speak just this line
+        stopSpeaking();
+        setCurrentIndex(index);
+        const gavelCount = section.gavels > 0 ? section.gavels : countGavelMarks(section.text);
+        if (gavelCount > 0) await playGavelKnocks(gavelCount);
+        if (section.speaker) {
+          const cleanText = cleanRitualText(section.text);
+          if (cleanText) {
+            try {
+              await speakAsRole(cleanText, section.speaker, voiceMapRef.current);
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+      } else if (playState === "playing" || playState === "paused") {
+        // Jump playback to this line and continue from here
+        cancelledRef.current = true;
+        stopSpeaking();
+        if (resumeRef.current) {
+          resumeRef.current();
+          resumeRef.current = null;
+        }
+        // Small delay to let the current playback stop cleanly
+        await new Promise((r) => setTimeout(r, 100));
+        playFrom(index);
+      }
+    },
+    [playState, sections, playFrom],
+  );
+
+  /* -------------------------------------------------------------- */
+  /*  Click-to-speak: tap any individual word to hear it             */
+  /* -------------------------------------------------------------- */
+  const handleWordClick = useCallback(
+    async (word: string, role: string | null) => {
+      stopSpeaking();
+      if (role) {
+        try {
+          await speakAsRole(word, role, voiceMapRef.current);
+        } catch {
+          await speak(word);
+        }
+      } else {
+        await speak(word);
+      }
+    },
+    [],
+  );
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -165,6 +217,7 @@ export default function ListenMode({ sections }: ListenModeProps) {
             </h2>
             <p className="text-sm text-zinc-500 mt-1">
               Sit back and listen to the full ceremony read aloud, each officer in a distinct voice.
+              Tap any line to hear it, or tap a single word.
             </p>
           </div>
           {!isTTSAvailable() && (
@@ -259,64 +312,16 @@ export default function ListenMode({ sections }: ListenModeProps) {
         )}
       </div>
 
-      {/* Script view */}
-      <div
-        ref={scriptContainerRef}
-        className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 max-h-[28rem] overflow-y-auto"
-      >
-        {sections.map((section, i) => {
-          const isPast = i < currentIndex && playState !== "idle";
-          const isCurrent = i === currentIndex && playState !== "idle";
-          const gavels = countGavelMarks(section.text);
-          const cleanText = cleanRitualText(section.text);
-
-          return (
-            <div
-              key={section.id}
-              id={`listen-line-${i}`}
-              className={`
-                flex gap-3 px-3 py-2 rounded-lg mb-1 transition-all
-                ${isPast ? "opacity-30" : ""}
-                ${isCurrent ? "bg-amber-500/10 border border-amber-500/30" : ""}
-                ${!isCurrent && !isPast ? "" : ""}
-              `}
-            >
-              <span
-                className={`
-                  text-xs font-mono font-bold w-10 flex-shrink-0 pt-0.5 text-right
-                  ${isCurrent ? "text-amber-400" : "text-zinc-600"}
-                `}
-              >
-                {section.speaker || "---"}
-              </span>
-              <span
-                className={`
-                  text-sm flex-1
-                  ${isCurrent ? "text-amber-200" : ""}
-                  ${isPast ? "text-zinc-600" : "text-zinc-400"}
-                `}
-              >
-                {gavels > 0 && (
-                  <span
-                    className="inline-flex gap-0.5 mr-1.5 align-middle"
-                    title={`${gavels} gavel knock${gavels !== 1 ? "s" : ""}`}
-                  >
-                    {Array.from({ length: gavels }).map((_, g) => (
-                      <span
-                        key={g}
-                        className="inline-block w-2 h-2 rounded-full bg-yellow-600/70"
-                      />
-                    ))}
-                  </span>
-                )}
-                {cleanText || (
-                  <span className="italic text-zinc-600">[stage direction]</span>
-                )}
-              </span>
-            </div>
-          );
-        })}
-      </div>
+      {/* Ritual Reel — the new premium script display */}
+      <RitualScriptDisplay
+        sections={sections}
+        currentIndex={currentIndex}
+        isActive={playState !== "idle"}
+        onLineClick={handleLineClick}
+        onWordClick={handleWordClick}
+        lineIdPrefix="listen-line"
+        maxHeight="32rem"
+      />
     </div>
   );
 }
