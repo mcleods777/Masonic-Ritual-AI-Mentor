@@ -1,8 +1,15 @@
 @import "tailwindcss";
 
 :root {
-  --background: #09090b;
-  --foreground: #fafafa;
+  /* Hermetic/Pythagorean theme: Deep lapis/charcoal background, off-white text */
+  --background: #0b0f19;
+  --foreground: #f4f4f5;
+
+  /* Masonic Gold accents */
+  --gold-300: #fcd34d;
+  --gold-400: #fbbf24;
+  --gold-500: #f59e0b;
+  --gold-600: #d97706;
 }
 
 @theme inline {
@@ -10,6 +17,7 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-cinzel: var(--font-cinzel);
 }
 
 body {
@@ -18,7 +26,11 @@ body {
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }
 
-/* Custom scrollbar for dark theme */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-cinzel), serif;
+}
+
+/* Custom scrollbar for dark/hermetic theme */
 ::-webkit-scrollbar {
   width: 6px;
 }
@@ -28,11 +40,10 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #3f3f46;
+  background: #1e293b;
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #52525b;
+  background: #334155;
 }
-

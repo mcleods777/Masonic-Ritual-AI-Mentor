@@ -4,6 +4,7 @@ import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import type { RitualSectionWithCipher } from "@/lib/storage";
 import { ROLE_DISPLAY_NAMES, cleanRitualText } from "@/lib/document-parser";
 import { compareTexts, type ComparisonResult } from "@/lib/text-comparison";
+import { getRoleIcon } from "./MasonicIcons";
 import {
   createWebSpeechEngine,
   createWhisperEngine,
@@ -392,26 +393,46 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
             turn to recite.
           </p>
 
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {availableRoles.map((role) => {
               const lineCount = sections.filter((s) => s.speaker === role).length;
+              const Icon = getRoleIcon(role);
               return (
                 <button
                   key={role}
                   onClick={() => setSelectedRole(role)}
                   className={`
-                    text-left px-5 py-4 rounded-lg border transition-all
-                    ${
-                      selectedRole === role
-                        ? "border-amber-500 bg-amber-500/10 text-amber-200 ring-1 ring-amber-500/30"
-                        : "border-zinc-700 hover:border-zinc-600 text-zinc-300 hover:text-zinc-200"
+                    flex items-start gap-4 text-left px-5 py-5 rounded-xl border-2 transition-all relative overflow-hidden group
+                    ${selectedRole === role
+                      ? "border-amber-500 bg-amber-500/10 text-amber-200 shadow-[0_0_15px_rgba(245,158,11,0.15)]"
+                      : "border-zinc-800 bg-zinc-900 hover:border-amber-600/50 hover:bg-zinc-800 text-zinc-300"
                     }
                   `}
                 >
-                  <span className="font-semibold text-base">{role}</span>
-                  <span className="block text-sm text-zinc-500 mt-1">
-                    {getRoleDisplayName(role)} &middot; {lineCount} line{lineCount !== 1 ? "s" : ""}
-                  </span>
+                  {/* Icon Area */}
+                  <div className={`
+                    p-3 rounded-lg flex-shrink-0 transition-colors
+                    ${selectedRole === role ? "bg-amber-500" : "bg-zinc-800 group-hover:bg-amber-900/40 text-zinc-400 group-hover:text-amber-500"}
+                  `}>
+                    {Icon ? (
+                      <Icon className={`w-8 h-8 ${selectedRole === role ? "text-zinc-900" : ""}`} />
+                    ) : (
+                      <div className="w-8 h-8 flex items-center justify-center font-serif text-xl opacity-50">
+                        {role.charAt(0)}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Text Area */}
+                  <div>
+                    <span className="font-serif font-bold tracking-wider text-lg block">{role}</span>
+                    <span className="block text-sm text-zinc-400 mt-1 font-medium">
+                      {getRoleDisplayName(role)}
+                    </span>
+                    <span className="block text-xs text-zinc-600 mt-1 uppercase tracking-widest font-semibold">
+                      {lineCount} Line{lineCount !== 1 ? "s" : ""}
+                    </span>
+                  </div>
                 </button>
               );
             })}
@@ -425,21 +446,19 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
                 <div className="flex rounded-lg border border-zinc-700 overflow-hidden">
                   <button
                     onClick={() => setSTTProvider("browser")}
-                    className={`px-4 py-2 text-xs font-medium transition-colors ${
-                      sttProvider === "browser"
+                    className={`px-4 py-2 text-xs font-medium transition-colors ${sttProvider === "browser"
                         ? "bg-amber-600 text-white"
                         : "bg-zinc-800 text-zinc-400 hover:text-zinc-200"
-                    }`}
+                      }`}
                   >
                     Browser
                   </button>
                   <button
                     onClick={() => setSTTProvider("whisper")}
-                    className={`px-4 py-2 text-xs font-medium transition-colors ${
-                      sttProvider === "whisper"
+                    className={`px-4 py-2 text-xs font-medium transition-colors ${sttProvider === "whisper"
                         ? "bg-amber-600 text-white"
                         : "bg-zinc-800 text-zinc-400 hover:text-zinc-200"
-                    }`}
+                      }`}
                   >
                     Whisper (Groq)
                   </button>
@@ -490,11 +509,10 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
           {/* Overall score */}
           <div className="grid grid-cols-3 gap-4 mb-6">
             <div className="bg-zinc-800 rounded-lg p-4 text-center">
-              <p className={`text-3xl font-bold ${
-                overallAccuracy >= 85 ? "text-green-400" :
-                overallAccuracy >= 70 ? "text-amber-400" :
-                overallAccuracy >= 50 ? "text-orange-400" : "text-red-400"
-              }`}>
+              <p className={`text-3xl font-bold ${overallAccuracy >= 85 ? "text-green-400" :
+                  overallAccuracy >= 70 ? "text-amber-400" :
+                    overallAccuracy >= 50 ? "text-orange-400" : "text-red-400"
+                }`}>
                 {overallAccuracy}%
               </p>
               <p className="text-xs text-zinc-500 mt-1">Overall Accuracy</p>
@@ -524,11 +542,10 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
                     key={i}
                     className="flex items-center gap-3 px-4 py-3 bg-zinc-800/50 rounded-lg"
                   >
-                    <span className={`text-lg font-bold w-12 text-right ${
-                      result.accuracy >= 90 ? "text-green-400" :
-                      result.accuracy >= 70 ? "text-amber-400" :
-                      result.accuracy >= 50 ? "text-orange-400" : "text-red-400"
-                    }`}>
+                    <span className={`text-lg font-bold w-12 text-right ${result.accuracy >= 90 ? "text-green-400" :
+                        result.accuracy >= 70 ? "text-amber-400" :
+                          result.accuracy >= 50 ? "text-orange-400" : "text-red-400"
+                      }`}>
                       {result.accuracy}%
                     </span>
                     <span className="text-zinc-500">|</span>

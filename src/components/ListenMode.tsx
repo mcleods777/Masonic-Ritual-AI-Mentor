@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import type { RitualSectionWithCipher } from "@/lib/storage";
 import { ROLE_DISPLAY_NAMES, cleanRitualText } from "@/lib/document-parser";
+import { getRoleIcon } from "./MasonicIcons";
 import {
   speak,
   speakAsRole,
@@ -245,15 +246,19 @@ export default function ListenMode({ sections }: ListenModeProps) {
 
         {/* Roles legend */}
         <div className="flex flex-wrap gap-2 mb-4">
-          {availableRoles.map((role) => (
-            <span
-              key={role}
-              className="px-2.5 py-1 bg-zinc-800 rounded-md text-xs text-zinc-400 border border-zinc-700"
-            >
-              <span className="font-semibold text-zinc-300">{role}</span>
-              <span className="text-zinc-600 ml-1">{getRoleDisplayName(role)}</span>
-            </span>
-          ))}
+          {availableRoles.map((role) => {
+            const Icon = getRoleIcon(role);
+            return (
+              <span
+                key={role}
+                className="flex items-center gap-2 px-3 py-1.5 bg-zinc-900 rounded-md text-xs text-zinc-400 border border-zinc-700/50 shadow-sm"
+              >
+                {Icon && <Icon className="w-4 h-4 text-amber-500/80" />}
+                <span className="font-serif font-bold tracking-wide text-zinc-300">{role}</span>
+                <span className="text-zinc-500 ml-1">{getRoleDisplayName(role)}</span>
+              </span>
+            );
+          })}
         </div>
 
         {/* Transport controls */}

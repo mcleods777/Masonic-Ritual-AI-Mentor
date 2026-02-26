@@ -15,6 +15,7 @@ import {
   isTTSAvailable,
 } from "@/lib/text-to-speech";
 import DiffDisplay from "./DiffDisplay";
+import { getRoleIcon } from "./MasonicIcons";
 
 interface PracticeModeProps {
   sections: RitualSectionWithCipher[];
@@ -224,17 +225,22 @@ export default function PracticeMode({ sections }: PracticeModeProps) {
                   }}
                   className={`
                     text-left px-4 py-3 rounded-lg border transition-all
-                    ${
-                      selectedSection?.id === section.id
-                        ? "border-amber-500 bg-amber-500/10 text-amber-200"
-                        : "border-zinc-700 hover:border-zinc-600 text-zinc-400 hover:text-zinc-300"
+                    ${selectedSection?.id === section.id
+                      ? "border-amber-500 bg-amber-500/10 text-amber-200"
+                      : "border-zinc-700 hover:border-zinc-600 text-zinc-400 hover:text-zinc-300"
                     }
                   `}
                 >
                   <span className="font-medium">{section.sectionName}</span>
                   {section.speaker && (
-                    <span className="ml-2 text-xs text-zinc-500">
-                      ({section.speaker})
+                    <span className="ml-2 flex items-center gap-1.5 inline-flex text-xs text-zinc-500">
+                      (
+                      {(() => {
+                        const Icon = getRoleIcon(section.speaker);
+                        return Icon ? <Icon className="w-3.5 h-3.5 text-amber-500/70" /> : null;
+                      })()}
+                      {section.speaker}
+                      )
                     </span>
                   )}
                   {/* Show cipher text preview by default */}
@@ -252,11 +258,16 @@ export default function PracticeMode({ sections }: PracticeModeProps) {
       {selectedSection && (
         <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-zinc-200">
+            <h2 className="text-lg font-semibold text-zinc-200 flex items-center gap-2">
               {selectedSection.sectionName}
               {selectedSection.speaker && (
-                <span className="text-amber-500 ml-2">
-                  — {selectedSection.speaker}
+                <span className="flex items-center gap-2 text-amber-500 ml-2">
+                  —
+                  {(() => {
+                    const Icon = getRoleIcon(selectedSection.speaker);
+                    return Icon ? <Icon className="w-5 h-5" /> : null;
+                  })()}
+                  {selectedSection.speaker}
                 </span>
               )}
             </h2>
@@ -277,9 +288,8 @@ export default function PracticeMode({ sections }: PracticeModeProps) {
 
           {/* Reference text — cipher by default, plain on toggle */}
           <div className="mb-4 p-4 bg-zinc-800/50 rounded-lg border border-zinc-700">
-            <p className={`text-sm leading-relaxed whitespace-pre-wrap ${
-              showPlainText ? "text-zinc-300" : "text-amber-200/80 font-mono"
-            }`}>
+            <p className={`text-sm leading-relaxed whitespace-pre-wrap ${showPlainText ? "text-zinc-300" : "text-amber-200/80 font-mono"
+              }`}>
               {showPlainText ? selectedSection.text : selectedSection.cipherText}
             </p>
             {!showPlainText && (
