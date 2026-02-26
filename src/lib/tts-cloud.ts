@@ -11,6 +11,7 @@
 // ============================================================
 
 let currentAudio: HTMLAudioElement | null = null;
+let currentResolve: (() => void) | null = null;
 
 /** Play an audio blob and resolve when it finishes. */
 export function playAudioBlob(blob: Blob): Promise<void> {
@@ -19,21 +20,25 @@ export function playAudioBlob(blob: Blob): Promise<void> {
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
     currentAudio = audio;
+    currentResolve = resolve;
 
     audio.onended = () => {
       URL.revokeObjectURL(url);
       currentAudio = null;
+      currentResolve = null;
       resolve();
     };
     audio.onerror = () => {
       URL.revokeObjectURL(url);
       currentAudio = null;
+      currentResolve = null;
       reject(new Error("Cloud TTS audio playback failed"));
     };
 
     audio.play().catch((err) => {
       URL.revokeObjectURL(url);
       currentAudio = null;
+      currentResolve = null;
       reject(err);
     });
   });
@@ -45,6 +50,12 @@ export function stopCloudAudio(): void {
     currentAudio.pause();
     currentAudio.src = "";
     currentAudio = null;
+  }
+  // Resolve the pending playAudioBlob promise so callers (e.g. the
+  // playFrom loop) don't hang forever waiting for audio that was stopped.
+  if (currentResolve) {
+    currentResolve();
+    currentResolve = null;
   }
 }
 
