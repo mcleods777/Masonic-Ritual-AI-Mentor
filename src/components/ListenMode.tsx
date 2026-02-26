@@ -190,6 +190,13 @@ export default function ListenMode({ sections }: ListenModeProps) {
   const handleWordClick = useCallback(
     async (word: string, role: string | null, e: React.MouseEvent) => {
       e.stopPropagation();
+
+      // If the ceremony loop is running, pause it first so the loop
+      // doesn't advance to the next line and overlap with the word.
+      if (playState === "playing") {
+        pausedRef.current = true;
+      }
+
       stopSpeaking();
       if (role) {
         try {
@@ -201,7 +208,7 @@ export default function ListenMode({ sections }: ListenModeProps) {
         await speak(word);
       }
     },
-    [],
+    [playState],
   );
 
   // Cleanup on unmount

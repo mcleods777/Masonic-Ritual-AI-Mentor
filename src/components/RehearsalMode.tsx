@@ -342,6 +342,13 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
   const handleWordClick = useCallback(
     async (word: string, role: string | null, e: React.MouseEvent) => {
       e.stopPropagation();
+
+      // If the AI is currently speaking a line, cancel the recursive
+      // advance so it doesn't start the next line and overlap.
+      if (rehearsalState === "ai-speaking") {
+        cancelledRef.current = true;
+      }
+
       stopSpeaking();
       if (role) {
         try {
@@ -353,7 +360,7 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
         await speak(word);
       }
     },
-    [],
+    [rehearsalState],
   );
 
   // Cleanup on unmount
