@@ -216,15 +216,17 @@ function getBestVoice(preferredName?: string): SpeechSynthesisVoice | null {
 }
 
 /** Speak using the browser Web Speech API. */
-function speakBrowser(text: string, options: TTSOptions = {}): Promise<void> {
+async function speakBrowser(text: string, options: TTSOptions = {}): Promise<void> {
+  if (!isWebSpeechPresent()) {
+    throw new Error("Text-to-speech is not available in this browser");
+  }
+
+  // Cancel any in-flight utterance and give the browser a moment to
+  // fully tear it down.  Without this gap Chrome can overlap utterances.
+  speechSynthesis.cancel();
+  await new Promise((r) => setTimeout(r, 80));
+
   return new Promise((resolve, reject) => {
-    if (!isWebSpeechPresent()) {
-      reject(new Error("Text-to-speech is not available in this browser"));
-      return;
-    }
-
-    speechSynthesis.cancel();
-
     const opts = { ...DEFAULT_OPTIONS, ...options };
     const utterance = new SpeechSynthesisUtterance(text);
 

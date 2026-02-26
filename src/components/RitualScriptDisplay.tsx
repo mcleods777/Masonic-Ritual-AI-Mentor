@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useCallback } from "react";
+import { useRef, useCallback } from "react";
 import type { RitualSectionWithCipher } from "@/lib/storage";
 import { cleanRitualText } from "@/lib/document-parser";
 import { countGavelMarks } from "@/lib/gavel-sound";
@@ -31,6 +31,14 @@ function getRoleColor(role: string | null): string {
 }
 
 /* ------------------------------------------------------------------ */
+/*  3D Wheel configuration                                             */
+/* ------------------------------------------------------------------ */
+
+const VISIBLE_RANGE = 4;   // render ±4 lines from centre
+const ANGLE_STEP   = 18;   // degrees between lines on the cylinder
+const RADIUS       = 280;  // cylinder radius in px
+
+/* ------------------------------------------------------------------ */
 /*  Props                                                              */
 /* ------------------------------------------------------------------ */
 
@@ -49,7 +57,7 @@ interface RitualScriptDisplayProps {
   onWordClick?: (word: string, role: string | null) => void;
   /** DOM-id prefix so Listen / Rehearsal don't collide. */
   lineIdPrefix?: string;
-  /** CSS max-height for the scrollable viewport. */
+  /** CSS max-height for the wheel viewport. */
   maxHeight?: string;
 }
 
@@ -70,13 +78,8 @@ export default function RitualScriptDisplay({
 }: RitualScriptDisplayProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
-  /* ---- auto-scroll current line to centre ---- */
-  useEffect(() => {
-    const el = document.getElementById(`${lineIdPrefix}-${currentIndex}`);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
-  }, [currentIndex, lineIdPrefix]);
+  // When not yet active, centre on index 0
+  const centerIndex = Math.max(0, currentIndex);
 
   /* ---- callbacks ---- */
   const handleLineClick = useCallback(
@@ -92,35 +95,74 @@ export default function RitualScriptDisplay({
     [onWordClick],
   );
 
+  /* ---- determine visible line window ---- */
+  const visibleIndices: number[] = [];
+  for (let i = centerIndex - VISIBLE_RANGE; i <= centerIndex + VISIBLE_RANGE; i++) {
+    if (i >= 0 && i < sections.length) {
+      visibleIndices.push(i);
+    }
+  }
+
   /* ---- render ---- */
   return (
     <div className="relative rounded-xl overflow-hidden">
-      {/* Top gradient — slot-machine viewport edge */}
+      {/* Top gradient — wheel edge fade */}
       <div
-        className="absolute top-0 left-0 right-0 h-14 z-10 pointer-events-none"
-        style={{ background: "linear-gradient(to bottom, #09090b, transparent)" }}
+        className="absolute top-0 left-0 right-0 h-20 z-10 pointer-events-none"
+        style={{ background: "linear-gradient(to bottom, #09090b 8%, transparent)" }}
       />
       {/* Bottom gradient */}
       <div
-        className="absolute bottom-0 left-0 right-0 h-14 z-10 pointer-events-none"
-        style={{ background: "linear-gradient(to top, #09090b, transparent)" }}
+        className="absolute bottom-0 left-0 right-0 h-20 z-10 pointer-events-none"
+        style={{ background: "linear-gradient(to top, #09090b 8%, transparent)" }}
       />
 
-      {/* Scrollable reel */}
+      {/* Centre pointer — the "flapper" indicator */}
+      <div
+        className="absolute left-0 top-0 bottom-0 z-20 pointer-events-none flex items-center"
+      >
+        <div
+          style={{
+            width: "4px",
+            height: "50px",
+            background: "linear-gradient(to bottom, transparent, #f59e0b, transparent)",
+            borderRadius: "2px",
+            boxShadow: "0 0 10px #f59e0b50",
+          }}
+        />
+      </div>
+
+      {/* 3D Wheel viewport */}
       <div
         ref={containerRef}
-        className="bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-10 overflow-y-auto scroll-smooth"
-        style={{ maxHeight }}
+        className="bg-zinc-900 border border-zinc-800 rounded-xl"
+        style={{
+          height: maxHeight,
+          perspective: "1200px",
+          perspectiveOrigin: "center center",
+        }}
       >
-        <div className="space-y-2.5">
-          {sections.map((section, i) => {
+        {/* 3D scene — items positioned on a vertical cylinder */}
+        <div
+          style={{
+            position: "relative",
+            width: "100%",
+            height: "100%",
+            transformStyle: "preserve-3d",
+          }}
+        >
+          {visibleIndices.map((i) => {
+            const offset    = i - centerIndex;
+            const absOffset = Math.abs(offset);
+            const angle = -offset * ANGLE_STEP;
+
+            const section   = sections[i];
             const isPast    = i < currentIndex && isActive;
             const isCurrent = i === currentIndex && isActive;
             const isFuture  = i > currentIndex && isActive;
 
             const isUserLine = !!(selectedRole && section.speaker === selectedRole);
             const roleColor  = getRoleColor(section.speaker);
-            // In rehearsal mode AI lines show blue when current
             const isAiLineCurrent = isCurrent && !!selectedRole && !isUserLine;
             const color = isAiLineCurrent ? "#3b82f6" : roleColor;
 
@@ -134,89 +176,110 @@ export default function RitualScriptDisplay({
                 : cleanText;
 
             const shouldHideText = isCurrent && isUserLine && hideCurrentUserLine;
-
-            // Split into segments (words + whitespace) for per-word click
             const segments = displayText.split(/(\s+)/);
+
+            // Opacity: current line is full, others fade with distance
+            let itemOpacity: number;
+            if (isCurrent) {
+              itemOpacity = 1;
+            } else if (isPast) {
+              itemOpacity = Math.max(0.08, 0.4 - absOffset * 0.08);
+            } else if (isFuture) {
+              itemOpacity = Math.max(0.1, 0.75 - absOffset * 0.16);
+            } else {
+              itemOpacity = Math.max(0.12, 0.85 - absOffset * 0.18);
+            }
 
             return (
               <div
                 key={section.id}
                 id={`${lineIdPrefix}-${i}`}
                 onClick={() => handleLineClick(i)}
-                className={`
-                  group relative flex overflow-hidden rounded-xl cursor-pointer
-                  transition-all duration-500 ease-out
-                  ${isCurrent ? "ritual-line-active" : ""}
-                  ${isPast ? "opacity-30 scale-[0.97]" : ""}
-                  ${isFuture ? "opacity-60 hover:opacity-90" : ""}
-                  ${!isActive ? "hover:opacity-100" : ""}
-                `}
+                className="ritual-wheel-item cursor-pointer"
                 style={{
-                  background: isCurrent
-                    ? `linear-gradient(135deg, ${color}14, ${color}0a, transparent 70%)`
-                    : isPast
-                      ? "rgba(24,24,27,0.5)"
-                      : "rgba(39,39,42,0.35)",
-                  boxShadow: isCurrent
-                    ? `0 0 40px ${color}18, 0 4px 24px rgba(0,0,0,0.35)`
-                    : "none",
-                  outline: isCurrent ? `1px solid ${color}35` : "1px solid transparent",
+                  position: "absolute",
+                  top: "50%",
+                  left: "0.5rem",
+                  right: "0.5rem",
+                  transform: `translateY(-50%) rotateX(${angle}deg) translateZ(${RADIUS}px)`,
+                  backfaceVisibility: "hidden",
+                  opacity: itemOpacity,
+                  zIndex: VISIBLE_RANGE - absOffset + 1,
+                  transition:
+                    "transform 0.7s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.5s ease-out",
+                  willChange: "transform, opacity",
                 }}
               >
-                {/* Left accent bar */}
+                {/* Line card — compact */}
                 <div
-                  className={`w-1.5 flex-shrink-0 self-stretch transition-all duration-500 ${
-                    isCurrent ? "ritual-glow-pulse" : ""
-                  }`}
+                  className={`
+                    group relative flex overflow-hidden rounded-lg
+                    ${isCurrent ? "ritual-line-active" : ""}
+                  `}
                   style={{
                     background: isCurrent
-                      ? color
+                      ? `linear-gradient(135deg, ${color}14, ${color}0a, transparent 70%)`
                       : isPast
-                        ? "#3f3f46"
-                        : "#52525b",
+                        ? "rgba(24,24,27,0.5)"
+                        : "rgba(39,39,42,0.35)",
+                    boxShadow: isCurrent
+                      ? `0 0 30px ${color}15, 0 2px 16px rgba(0,0,0,0.3)`
+                      : "none",
+                    outline: isCurrent ? `1px solid ${color}35` : "1px solid transparent",
                   }}
-                />
-
-                {/* Content */}
-                <div
-                  className={`flex items-start gap-4 flex-1 px-5 transition-all duration-500 ${
-                    isCurrent ? "py-5" : "py-3.5"
-                  }`}
                 >
-                  {/* Role badge */}
-                  <div className="flex-shrink-0 pt-0.5">
-                    {section.speaker ? (
-                      <span
-                        className="inline-flex items-center justify-center min-w-[3.5rem] px-3 py-2 rounded-lg text-xs font-bold tracking-wide transition-all duration-300"
-                        style={{
-                          background: isCurrent ? `${color}25` : "rgba(39,39,42,0.8)",
-                          color: isCurrent ? color : "#a1a1aa",
-                          boxShadow: isCurrent
-                            ? `0 0 0 1px ${color}40`
-                            : "0 0 0 1px #3f3f46",
-                        }}
-                      >
-                        {section.speaker}
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center justify-center min-w-[3.5rem] px-3 py-2 rounded-lg text-xs text-zinc-600 bg-zinc-800/50 ring-1 ring-zinc-800">
-                        ---
-                      </span>
-                    )}
-                  </div>
+                  {/* Left accent bar */}
+                  <div
+                    className={`w-1 flex-shrink-0 self-stretch transition-all duration-500 ${
+                      isCurrent ? "ritual-glow-pulse" : ""
+                    }`}
+                    style={{
+                      background: isCurrent
+                        ? color
+                        : isPast
+                          ? "#3f3f46"
+                          : "#52525b",
+                    }}
+                  />
 
-                  {/* Text body */}
-                  <div className="flex-1 min-w-0 pt-0.5">
-                    {/* Gavel dots */}
+                  {/* Content — tight layout */}
+                  <div
+                    className={`flex items-center gap-2.5 flex-1 px-3 ${
+                      isCurrent ? "py-2.5" : "py-1.5"
+                    }`}
+                  >
+                    {/* Role badge — compact */}
+                    <div className="flex-shrink-0">
+                      {section.speaker ? (
+                        <span
+                          className="inline-flex items-center justify-center min-w-[2.5rem] px-2 py-1 rounded-md text-[0.65rem] font-bold tracking-wide transition-all duration-300"
+                          style={{
+                            background: isCurrent ? `${color}25` : "rgba(39,39,42,0.8)",
+                            color: isCurrent ? color : "#a1a1aa",
+                            boxShadow: isCurrent
+                              ? `0 0 0 1px ${color}40`
+                              : "0 0 0 1px #3f3f46",
+                          }}
+                        >
+                          {section.speaker}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center justify-center min-w-[2.5rem] px-2 py-1 rounded-md text-[0.65rem] text-zinc-600 bg-zinc-800/50 ring-1 ring-zinc-800">
+                          ---
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Gavel dots — inline beside badge */}
                     {gavels > 0 && (
                       <div
-                        className="flex gap-1.5 mb-2"
+                        className="flex gap-1 flex-shrink-0"
                         title={`${gavels} gavel knock${gavels !== 1 ? "s" : ""}`}
                       >
                         {Array.from({ length: gavels }).map((_, g) => (
                           <span
                             key={g}
-                            className="inline-block w-2.5 h-2.5 rounded-full transition-colors duration-300"
+                            className="inline-block w-2 h-2 rounded-full transition-colors duration-300"
                             style={{
                               background: isCurrent ? "#eab308" : "#854d0e80",
                             }}
@@ -225,11 +288,12 @@ export default function RitualScriptDisplay({
                       </div>
                     )}
 
-                    {/* Line text — each word individually clickable */}
+                    {/* Line text */}
                     <div
-                      className="leading-relaxed"
+                      className="flex-1 min-w-0"
                       style={{
-                        fontSize: isCurrent ? "1rem" : "0.925rem",
+                        fontSize: isCurrent ? "0.8rem" : "0.75rem",
+                        lineHeight: "1.4",
                         color: isCurrent
                           ? color
                           : isPast
@@ -240,12 +304,11 @@ export default function RitualScriptDisplay({
                     >
                       {shouldHideText ? (
                         <span className="italic" style={{ color: `${color}90` }}>
-                          [ Your line &mdash; recite from memory ]
+                          [ Your line — recite from memory ]
                         </span>
                       ) : displayText ? (
                         <span className="inline">
                           {segments.map((seg, wi) => {
-                            // Whitespace — pass through
                             if (/^\s+$/.test(seg)) {
                               return <span key={wi}>{seg}</span>;
                             }
@@ -273,33 +336,33 @@ export default function RitualScriptDisplay({
                         </span>
                       )}
                     </div>
-                  </div>
 
-                  {/* Right side — playing indicator / hover play icon */}
-                  <div className="flex-shrink-0 flex items-center pt-1.5">
-                    {isCurrent && isActive ? (
-                      <div className="flex gap-0.5 items-end h-5">
-                        {[60, 100, 40, 80].map((h, j) => (
-                          <span
-                            key={j}
-                            className="w-1 rounded-full animate-bounce"
-                            style={{
-                              height: `${h}%`,
-                              background: color,
-                              animationDelay: `${j * 150}ms`,
-                            }}
-                          />
-                        ))}
-                      </div>
-                    ) : (
-                      <svg
-                        className="w-5 h-5 opacity-0 group-hover:opacity-50 transition-opacity duration-200"
-                        fill="#71717a"
-                        viewBox="0 0 24 24"
-                      >
-                        <path d="M8 5v14l11-7z" />
-                      </svg>
-                    )}
+                    {/* Right side — playing indicator */}
+                    <div className="flex-shrink-0 flex items-center">
+                      {isCurrent && isActive ? (
+                        <div className="flex gap-0.5 items-end h-4">
+                          {[60, 100, 40, 80].map((h, j) => (
+                            <span
+                              key={j}
+                              className="w-0.5 rounded-full animate-bounce"
+                              style={{
+                                height: `${h}%`,
+                                background: color,
+                                animationDelay: `${j * 150}ms`,
+                              }}
+                            />
+                          ))}
+                        </div>
+                      ) : (
+                        <svg
+                          className="w-4 h-4 opacity-0 group-hover:opacity-50 transition-opacity duration-200"
+                          fill="#71717a"
+                          viewBox="0 0 24 24"
+                        >
+                          <path d="M8 5v14l11-7z" />
+                        </svg>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
