@@ -55,6 +55,9 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
   const [sttError, setSttError] = useState<string | null>(null);
   const [inputMode, setInputMode] = useState<"voice" | "type">("voice");
   const [sttProvider, setSTTProvider] = useState<STTProvider>("browser");
+  const [aiCoaching, setAiCoaching] = useState(true);
+  const [aiFeedback, setAiFeedback] = useState<string | null>(null);
+  const [isSpeakingFeedback, setIsSpeakingFeedback] = useState(false);
 
   const engineRef = useRef<STTEngine | null>(null);
   const sttProviderRef = useRef<STTProvider>(sttProvider);
@@ -300,8 +303,53 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
 
   // Continue to next line after checking
   const continueAfterCheck = useCallback(() => {
+    stopSpeaking();
+    setIsSpeakingFeedback(false);
+    setAiFeedback(null);
     advanceToLine(currentIndex + 1);
   }, [advanceToLine, currentIndex]);
+
+  // Fetch AI coaching feedback and speak it aloud
+  const fetchAndSpeakFeedback = useCallback(
+    async (comparison: ComparisonResult) => {
+      if (!aiCoaching || !isTTSAvailable()) return;
+
+      try {
+        const res = await fetch("/api/rehearsal-feedback", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            accuracy: comparison.accuracy,
+            wrongWords: comparison.wrongWords,
+            missingWords: comparison.missingWords,
+            troubleSpots: comparison.troubleSpots,
+            lineNumber: lineResults.length + 1,
+            totalLines: userLineCount,
+          }),
+        });
+
+        if (!res.ok) return;
+        const { feedback } = await res.json();
+        if (!feedback || cancelledRef.current) return;
+
+        setAiFeedback(feedback);
+        setIsSpeakingFeedback(true);
+        await speak(feedback, { rate: 0.95 });
+      } catch {
+        // Non-critical — silently skip if feedback fails
+      } finally {
+        setIsSpeakingFeedback(false);
+      }
+    },
+    [aiCoaching, lineResults.length, userLineCount]
+  );
+
+  // Trigger AI coaching feedback when a line is checked
+  useEffect(() => {
+    if (rehearsalState === "checking" && currentComparison && aiCoaching) {
+      fetchAndSpeakFeedback(currentComparison);
+    }
+  }, [rehearsalState, currentComparison, aiCoaching, fetchAndSpeakFeedback]);
 
   // Skip user's line (they can't remember)
   const skipLine = useCallback(() => {
@@ -343,6 +391,8 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
     setCurrentComparison(null);
     setLineResults([]);
     setSttError(null);
+    setAiFeedback(null);
+    setIsSpeakingFeedback(false);
   }, []);
 
   // Restart rehearsal
@@ -350,6 +400,8 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
     setLineResults([]);
     setCurrentComparison(null);
     setTranscript("");
+    setAiFeedback(null);
+    setIsSpeakingFeedback(false);
     startRehearsal();
   }, [startRehearsal]);
 
@@ -481,6 +533,30 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
                   {sttProvider === "whisper"
                     ? "Higher accuracy, Masonic vocabulary hints"
                     : "Free, real-time, browser-native"}
+                </span>
+              </div>
+
+              {/* AI Coaching toggle */}
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-zinc-500 uppercase tracking-wide">AI Coach:</span>
+                <button
+                  onClick={() => setAiCoaching(!aiCoaching)}
+                  className={`
+                    relative inline-flex h-6 w-11 items-center rounded-full transition-colors
+                    ${aiCoaching ? "bg-amber-600" : "bg-zinc-700"}
+                  `}
+                >
+                  <span
+                    className={`
+                      inline-block h-4 w-4 rounded-full bg-white transition-transform
+                      ${aiCoaching ? "translate-x-6" : "translate-x-1"}
+                    `}
+                  />
+                </button>
+                <span className="text-xs text-zinc-600">
+                  {aiCoaching
+                    ? "AI gives spoken feedback after each line"
+                    : "No AI feedback between lines"}
                 </span>
               </div>
 
@@ -860,6 +936,32 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
                     <p className="text-sm text-zinc-300">
                       {cleanRitualText(currentSection.text)}
                     </p>
+                  </div>
+                )}
+
+                {/* AI Coach feedback */}
+                {aiCoaching && (
+                  <div className="p-3 bg-amber-900/20 rounded-lg border border-amber-700/30">
+                    {aiFeedback ? (
+                      <div className="flex items-start gap-2">
+                        {isSpeakingFeedback && (
+                          <div className="flex gap-0.5 items-center pt-1 flex-shrink-0">
+                            <div className="w-1 h-3 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                            <div className="w-1 h-4 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                            <div className="w-1 h-3 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                          </div>
+                        )}
+                        <p className="text-sm text-amber-200/90 italic">{aiFeedback}</p>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 text-amber-400/60">
+                        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        </svg>
+                        <span className="text-xs">AI Coach is thinking...</span>
+                      </div>
+                    )}
                   </div>
                 )}
 
