@@ -1,10 +1,12 @@
 /**
  * Text-to-speech — multi-engine support.
  *
- * Three engines:
- *   1. "browser"     — Web Speech Synthesis API (free, works offline)
- *   2. "elevenlabs"  — ElevenLabs cloud API (high-quality)
+ * Five engines:
+ *   1. "browser"      — Web Speech Synthesis API (free, works offline)
+ *   2. "elevenlabs"   — ElevenLabs cloud API (high-quality)
  *   3. "google-cloud" — Google Cloud TTS Neural2 (high-quality)
+ *   4. "deepgram"     — Deepgram Aura-2 (fast, natural)
+ *   5. "kokoro"       — Kokoro (self-hosted, free)
  *
  * The public API (speak, speakAsRole, stopSpeaking, etc.) stays the same.
  * Components don't need to know which engine is active — they just call
@@ -16,6 +18,10 @@ import {
   speakElevenLabsAsRole,
   speakGoogleCloud,
   speakGoogleCloudAsRole,
+  speakDeepgram,
+  speakDeepgramAsRole,
+  speakKokoro,
+  speakKokoroAsRole,
   stopCloudAudio,
   isCloudAudioPlaying,
 } from "./tts-cloud";
@@ -24,7 +30,7 @@ import {
 // Engine selection
 // ============================================================
 
-export type TTSEngineName = "browser" | "elevenlabs" | "google-cloud";
+export type TTSEngineName = "browser" | "elevenlabs" | "google-cloud" | "deepgram" | "kokoro";
 
 const TTS_ENGINE_STORAGE_KEY = "tts-engine";
 
@@ -33,7 +39,12 @@ let currentEngine: TTSEngineName = "browser";
 // Restore persisted engine on module load (client only)
 if (typeof window !== "undefined") {
   const stored = localStorage.getItem(TTS_ENGINE_STORAGE_KEY);
-  if (stored === "elevenlabs" || stored === "google-cloud") {
+  if (
+    stored === "elevenlabs" ||
+    stored === "google-cloud" ||
+    stored === "deepgram" ||
+    stored === "kokoro"
+  ) {
     currentEngine = stored;
   }
 }
@@ -279,6 +290,10 @@ export async function speak(
       return speakElevenLabs(text);
     case "google-cloud":
       return speakGoogleCloud(text);
+    case "deepgram":
+      return speakDeepgram(text);
+    case "kokoro":
+      return speakKokoro(text);
     default:
       return speakBrowser(text, options);
   }
@@ -299,6 +314,10 @@ export function speakAsRole(
       return speakElevenLabsAsRole(text, role);
     case "google-cloud":
       return speakGoogleCloudAsRole(text, role);
+    case "deepgram":
+      return speakDeepgramAsRole(text, role);
+    case "kokoro":
+      return speakKokoroAsRole(text, role);
     default: {
       const profile = voiceMap?.get(role) || getVoiceForRole(role);
       return speakBrowser(text, {

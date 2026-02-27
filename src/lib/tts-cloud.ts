@@ -1,5 +1,5 @@
 /**
- * Cloud TTS engines — ElevenLabs and Google Cloud Text-to-Speech.
+ * Cloud TTS engines — ElevenLabs, Google Cloud, Deepgram Aura-2, and Kokoro.
  *
  * Each engine calls its corresponding Next.js API route (which holds
  * the secret API key) and plays back the returned audio via an
@@ -270,6 +270,183 @@ export async function speakGoogleCloudAsRole(
 }
 
 // ============================================================
+// Deepgram Aura-2
+// ============================================================
+
+/**
+ * Deepgram Aura-2 voice model IDs for Masonic officer roles.
+ * Uses distinct Aura-2 voices so each officer sounds different.
+ */
+const DEEPGRAM_ROLE_VOICES: Record<string, string> = {
+  // Principal officers — deeper, authoritative
+  WM:       "aura-2-zeus-en",     // Zeus — commanding, deep
+  "W.M.":   "aura-2-zeus-en",
+  "W. M.":  "aura-2-zeus-en",
+  SW:       "aura-2-orion-en",    // Orion — clear, steady
+  "S.W.":   "aura-2-orion-en",
+  "S. W.":  "aura-2-orion-en",
+  JW:       "aura-2-arcas-en",    // Arcas — measured
+  "J.W.":   "aura-2-arcas-en",
+  "J. W.":  "aura-2-arcas-en",
+  // Deacons
+  SD:       "aura-2-orpheus-en",  // Orpheus — warm
+  "S.D.":   "aura-2-orpheus-en",
+  "S. D.":  "aura-2-orpheus-en",
+  JD:       "aura-2-perseus-en",  // Perseus — distinct
+  "J.D.":   "aura-2-perseus-en",
+  "J. D.":  "aura-2-perseus-en",
+  "S(orJ)D":"aura-2-orpheus-en",
+  "S/J D":  "aura-2-orpheus-en",
+  // Other officers
+  "S/Sec":  "aura-2-orion-en",
+  Sec:      "aura-2-orion-en",
+  "Sec.":   "aura-2-orion-en",
+  S:        "aura-2-orion-en",
+  Tr:       "aura-2-arcas-en",
+  Treas:    "aura-2-arcas-en",
+  "Treas.": "aura-2-arcas-en",
+  Ch:       "aura-2-helios-en",   // Helios — resonant
+  Chap:     "aura-2-helios-en",
+  "Chap.":  "aura-2-helios-en",
+  Marshal:  "aura-2-orpheus-en",
+  T:        "aura-2-angus-en",    // Angus — distinctive accent
+  Tyler:    "aura-2-angus-en",
+  Candidate:"aura-2-arcas-en",
+  ALL:      "aura-2-zeus-en",
+  All:      "aura-2-zeus-en",
+  BR:       "aura-2-orpheus-en",
+  Bro:      "aura-2-orpheus-en",
+  "Bro.":   "aura-2-orpheus-en",
+  "SW/WM":  "aura-2-zeus-en",
+};
+
+const DEEPGRAM_DEFAULT_VOICE = "aura-2-orion-en";
+
+export function getDeepgramVoiceForRole(role: string): string {
+  return DEEPGRAM_ROLE_VOICES[role] || DEEPGRAM_DEFAULT_VOICE;
+}
+
+/** Speak text using Deepgram Aura-2. */
+export async function speakDeepgram(
+  text: string,
+  model?: string
+): Promise<void> {
+  const resp = await fetch("/api/tts/deepgram", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      text,
+      model: model || DEEPGRAM_DEFAULT_VOICE,
+    }),
+  });
+
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ error: resp.statusText }));
+    throw new Error((err as { error?: string }).error || "Deepgram TTS failed");
+  }
+
+  await playAudioBlob(await resp.blob());
+}
+
+/** Speak text as a Masonic officer role using Deepgram Aura-2. */
+export async function speakDeepgramAsRole(
+  text: string,
+  role: string
+): Promise<void> {
+  return speakDeepgram(text, getDeepgramVoiceForRole(role));
+}
+
+// ============================================================
+// Kokoro (self-hosted, free)
+// ============================================================
+
+/**
+ * Kokoro voice IDs for Masonic officer roles.
+ * Uses a mix of American and British voices for variety.
+ */
+const KOKORO_ROLE_VOICES: Record<string, { voice: string; speed: number }> = {
+  // Principal officers — deeper, deliberate
+  WM:       { voice: "bm_george",  speed: 0.90 },   // British male — authoritative
+  "W.M.":   { voice: "bm_george",  speed: 0.90 },
+  "W. M.":  { voice: "bm_george",  speed: 0.90 },
+  SW:       { voice: "am_adam",    speed: 0.93 },   // American male — steady
+  "S.W.":   { voice: "am_adam",    speed: 0.93 },
+  "S. W.":  { voice: "am_adam",    speed: 0.93 },
+  JW:       { voice: "am_michael", speed: 0.93 },   // American male — clear
+  "J.W.":   { voice: "am_michael", speed: 0.93 },
+  "J. W.":  { voice: "am_michael", speed: 0.93 },
+  // Deacons
+  SD:       { voice: "bm_daniel",  speed: 0.97 },   // British male — warm
+  "S.D.":   { voice: "bm_daniel",  speed: 0.97 },
+  "S. D.":  { voice: "bm_daniel",  speed: 0.97 },
+  JD:       { voice: "bm_lewis",   speed: 0.97 },   // British male — distinct
+  "J.D.":   { voice: "bm_lewis",   speed: 0.97 },
+  "J. D.":  { voice: "bm_lewis",   speed: 0.97 },
+  "S(orJ)D":{ voice: "bm_daniel",  speed: 0.97 },
+  "S/J D":  { voice: "bm_daniel",  speed: 0.97 },
+  // Other officers
+  "S/Sec":  { voice: "am_adam",    speed: 1.0 },
+  Sec:      { voice: "am_adam",    speed: 1.0 },
+  "Sec.":   { voice: "am_adam",    speed: 1.0 },
+  S:        { voice: "am_adam",    speed: 1.0 },
+  Tr:       { voice: "am_michael", speed: 0.95 },
+  Treas:    { voice: "am_michael", speed: 0.95 },
+  "Treas.": { voice: "am_michael", speed: 0.95 },
+  Ch:       { voice: "bm_george",  speed: 0.85 },   // Chaplain — slowest, deepest
+  Chap:     { voice: "bm_george",  speed: 0.85 },
+  "Chap.":  { voice: "bm_george",  speed: 0.85 },
+  Marshal:  { voice: "bm_daniel",  speed: 0.95 },
+  T:        { voice: "bm_lewis",   speed: 1.0 },
+  Tyler:    { voice: "bm_lewis",   speed: 1.0 },
+  Candidate:{ voice: "am_adam",    speed: 0.90 },
+  ALL:      { voice: "bm_george",  speed: 0.88 },
+  All:      { voice: "bm_george",  speed: 0.88 },
+  BR:       { voice: "bm_daniel",  speed: 0.95 },
+  Bro:      { voice: "bm_daniel",  speed: 0.95 },
+  "Bro.":   { voice: "bm_daniel",  speed: 0.95 },
+  "SW/WM":  { voice: "bm_george",  speed: 0.90 },
+};
+
+const KOKORO_DEFAULT_VOICE = { voice: "am_adam", speed: 1.0 };
+
+export function getKokoroVoiceForRole(role: string): { voice: string; speed: number } {
+  return KOKORO_ROLE_VOICES[role] || KOKORO_DEFAULT_VOICE;
+}
+
+/** Speak text using Kokoro TTS. */
+export async function speakKokoro(
+  text: string,
+  voice?: string,
+  speed?: number
+): Promise<void> {
+  const resp = await fetch("/api/tts/kokoro", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      text,
+      voice: voice ?? KOKORO_DEFAULT_VOICE.voice,
+      speed: speed ?? KOKORO_DEFAULT_VOICE.speed,
+    }),
+  });
+
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ error: resp.statusText }));
+    throw new Error((err as { error?: string }).error || "Kokoro TTS failed");
+  }
+
+  await playAudioBlob(await resp.blob());
+}
+
+/** Speak text as a Masonic officer role using Kokoro TTS. */
+export async function speakKokoroAsRole(
+  text: string,
+  role: string
+): Promise<void> {
+  const profile = getKokoroVoiceForRole(role);
+  return speakKokoro(text, profile.voice, profile.speed);
+}
+
+// ============================================================
 // Engine availability
 // ============================================================
 
@@ -277,12 +454,14 @@ export async function speakGoogleCloudAsRole(
 export async function fetchEngineAvailability(): Promise<{
   elevenlabs: boolean;
   google: boolean;
+  deepgram: boolean;
+  kokoro: boolean;
 }> {
   try {
     const resp = await fetch("/api/tts/engines");
-    if (!resp.ok) return { elevenlabs: false, google: false };
+    if (!resp.ok) return { elevenlabs: false, google: false, deepgram: false, kokoro: false };
     return resp.json();
   } catch {
-    return { elevenlabs: false, google: false };
+    return { elevenlabs: false, google: false, deepgram: false, kokoro: false };
   }
 }
