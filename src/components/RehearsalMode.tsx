@@ -225,6 +225,20 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
     }
   }, []);
 
+  // Auto-start listening when it becomes the user's turn (voice mode)
+  useEffect(() => {
+    if (rehearsalState !== "user-turn" || inputMode !== "voice") return;
+
+    // Brief delay so the user sees/hears the "YOUR TURN" cue before mic activates
+    const timer = setTimeout(() => {
+      if (!cancelledRef.current) {
+        startListening();
+      }
+    }, 600);
+
+    return () => clearTimeout(timer);
+  }, [rehearsalState, inputMode, startListening]);
+
   // Stop listening and check accuracy
   const stopListening = useCallback(() => {
     const provider = sttProviderRef.current;
@@ -709,7 +723,7 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
           </div>
         )}
 
-        {/* User's turn — waiting to start */}
+        {/* User's turn — waiting to start (auto-listens in voice mode) */}
         {rehearsalState === "user-turn" && currentSection && (
           <div className="space-y-4">
             <div className="text-center">
@@ -717,24 +731,28 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
                 YOUR TURN — {selectedRole}
               </span>
               <p className="text-zinc-400 text-sm">
-                Recite your line from memory. You can speak or type.
+                {inputMode === "voice"
+                  ? "Mic activating — recite your line from memory..."
+                  : "Recite your line from memory. You can speak or type."}
               </p>
             </div>
 
             <div className="flex justify-center gap-3">
-              <button
-                onClick={() => {
-                  setInputMode("voice");
-                  startListening();
-                }}
-                className="px-6 py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
-              >
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
-                  <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
-                </svg>
-                Speak
-              </button>
+              {inputMode !== "voice" && (
+                <button
+                  onClick={() => {
+                    setInputMode("voice");
+                    startListening();
+                  }}
+                  className="px-6 py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+                >
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
+                    <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
+                  </svg>
+                  Speak
+                </button>
+              )}
               <button
                 onClick={() => {
                   setInputMode("type");
