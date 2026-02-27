@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import type { RitualSectionWithCipher } from "@/lib/storage";
 import { compareTexts, type ComparisonResult } from "@/lib/text-comparison";
 import {
@@ -15,7 +15,14 @@ import {
   isTTSAvailable,
 } from "@/lib/text-to-speech";
 import DiffDisplay from "./DiffDisplay";
-import { getRoleIcon } from "./MasonicIcons";
+
+interface GroupedSection {
+  sectionName: string;
+  degree: string;
+  text: string;        // Combined plain text of all lines
+  cipherText: string;  // Combined cipher text of all lines
+  speakers: string[];  // Unique speakers in this section
+}
 
 interface PracticeModeProps {
   sections: RitualSectionWithCipher[];
@@ -24,7 +31,7 @@ interface PracticeModeProps {
 type PracticeState = "idle" | "listening" | "reviewing";
 
 export default function PracticeMode({ sections }: PracticeModeProps) {
-  const [selectedSection, setSelectedSection] = useState<RitualSectionWithCipher | null>(
+  const [selectedSection, setSelectedSection] = useState<GroupedSection | null>(
     null
   );
   const [practiceState, setPracticeState] = useState<PracticeState>("idle");
@@ -36,15 +43,38 @@ export default function PracticeMode({ sections }: PracticeModeProps) {
 
   const engineRef = useRef<STTEngine | null>(null);
 
-  // Group sections by degree
-  const sectionsByDegree = sections.reduce<Record<string, RitualSectionWithCipher[]>>(
-    (acc, section) => {
-      if (!acc[section.degree]) acc[section.degree] = [];
-      acc[section.degree].push(section);
-      return acc;
-    },
-    {}
-  );
+  // Group individual lines into actual ritual sections, then group by degree
+  const sectionsByDegree = useMemo(() => {
+    // First, group lines by sectionName to create one entry per ritual section
+    const groupedMap = new Map<string, GroupedSection>();
+    for (const line of sections) {
+      const key = `${line.degree}::${line.sectionName}`;
+      const existing = groupedMap.get(key);
+      if (existing) {
+        existing.text += "\n" + line.text;
+        existing.cipherText += "\n" + line.cipherText;
+        if (line.speaker && !existing.speakers.includes(line.speaker)) {
+          existing.speakers.push(line.speaker);
+        }
+      } else {
+        groupedMap.set(key, {
+          sectionName: line.sectionName,
+          degree: line.degree,
+          text: line.text,
+          cipherText: line.cipherText,
+          speakers: line.speaker ? [line.speaker] : [],
+        });
+      }
+    }
+
+    // Then group by degree for display
+    const byDegree: Record<string, GroupedSection[]> = {};
+    for (const group of groupedMap.values()) {
+      if (!byDegree[group.degree]) byDegree[group.degree] = [];
+      byDegree[group.degree].push(group);
+    }
+    return byDegree;
+  }, [sections]);
 
   const startListening = useCallback(() => {
     if (!isWebSpeechAvailable()) {
@@ -218,29 +248,23 @@ export default function PracticeMode({ sections }: PracticeModeProps) {
             <div className="grid gap-2">
               {degreeSections.map((section) => (
                 <button
-                  key={section.id}
+                  key={`${section.degree}::${section.sectionName}`}
                   onClick={() => {
                     reset();
                     setSelectedSection(section);
                   }}
                   className={`
                     text-left px-4 py-3 rounded-lg border transition-all
-                    ${selectedSection?.id === section.id
+                    ${selectedSection?.sectionName === section.sectionName && selectedSection?.degree === section.degree
                       ? "border-amber-500 bg-amber-500/10 text-amber-200"
                       : "border-zinc-700 hover:border-zinc-600 text-zinc-400 hover:text-zinc-300"
                     }
                   `}
                 >
                   <span className="font-medium">{section.sectionName}</span>
-                  {section.speaker && (
-                    <span className="ml-2 flex items-center gap-1.5 inline-flex text-xs text-zinc-500">
-                      (
-                      {(() => {
-                        const Icon = getRoleIcon(section.speaker);
-                        return Icon ? <Icon className="w-3.5 h-3.5 text-amber-500/70" /> : null;
-                      })()}
-                      {section.speaker}
-                      )
+                  {section.speakers.length > 0 && (
+                    <span className="ml-2 inline-flex items-center gap-1.5 text-xs text-zinc-500">
+                      ({section.speakers.join(", ")})
                     </span>
                   )}
                   {/* Show cipher text preview by default */}
@@ -260,14 +284,9 @@ export default function PracticeMode({ sections }: PracticeModeProps) {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-zinc-200 flex items-center gap-2">
               {selectedSection.sectionName}
-              {selectedSection.speaker && (
+              {selectedSection.speakers.length > 0 && (
                 <span className="flex items-center gap-2 text-amber-500 ml-2">
-                  —
-                  {(() => {
-                    const Icon = getRoleIcon(selectedSection.speaker);
-                    return Icon ? <Icon className="w-5 h-5" /> : null;
-                  })()}
-                  {selectedSection.speaker}
+                  — {selectedSection.speakers.join(", ")}
                 </span>
               )}
             </h2>
