@@ -54,10 +54,11 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
   const [lineResults, setLineResults] = useState<LineResult[]>([]);
   const [sttError, setSttError] = useState<string | null>(null);
   const [inputMode, setInputMode] = useState<"voice" | "type">("voice");
-  const [sttProvider, setSTTProvider] = useState<STTProvider>("browser");
+  const [sttProvider, setSTTProvider] = useState<STTProvider>("whisper");
   const [aiCoaching, setAiCoaching] = useState(true);
   const [aiFeedback, setAiFeedback] = useState<string | null>(null);
   const [isSpeakingFeedback, setIsSpeakingFeedback] = useState(false);
+  const [autoStop, setAutoStop] = useState(true);
 
   const engineRef = useRef<STTEngine | null>(null);
   const sttProviderRef = useRef<STTProvider>(sttProvider);
@@ -65,6 +66,9 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
   const voiceMapRef = useRef<Map<string, RoleVoiceProfile>>(new Map());
   const cancelledRef = useRef(false);
   const scriptContainerRef = useRef<HTMLDivElement>(null);
+  const stopListeningRef = useRef<() => void>(() => {});
+  const autoStopRef = useRef(autoStop);
+  autoStopRef.current = autoStop;
 
   // Extract unique roles from sections (only those with speaker lines)
   const availableRoles = useMemo(() => {
@@ -218,6 +222,11 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
         // Whisper engine: recording stopped, transcript delivered via onResult
       };
 
+      engine.onSilence = () => {
+        if (!autoStopRef.current) return;
+        stopListeningRef.current();
+      };
+
       engine.start();
       setRehearsalState("listening");
     } catch (err) {
@@ -267,6 +276,7 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
       setRehearsalState("checking");
     }
   }, [transcript, currentSection, currentIndex]);
+  stopListeningRef.current = stopListening;
 
   // When Whisper finishes transcribing, the transcript state updates.
   // This effect detects that and moves from "transcribing" → "checking".
@@ -577,6 +587,30 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
                   {aiCoaching
                     ? "AI gives spoken feedback after each line"
                     : "No AI feedback between lines"}
+                </span>
+              </div>
+
+              {/* Auto-stop toggle */}
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-zinc-500 uppercase tracking-wide">Auto-Stop:</span>
+                <button
+                  onClick={() => setAutoStop(!autoStop)}
+                  className={`
+                    relative inline-flex h-6 w-11 items-center rounded-full transition-colors
+                    ${autoStop ? "bg-amber-600" : "bg-zinc-700"}
+                  `}
+                >
+                  <span
+                    className={`
+                      inline-block h-4 w-4 rounded-full bg-white transition-transform
+                      ${autoStop ? "translate-x-6" : "translate-x-1"}
+                    `}
+                  />
+                </button>
+                <span className="text-xs text-zinc-600">
+                  {autoStop
+                    ? "Auto-submits after 3s of silence"
+                    : "Manual — press Done Speaking to submit"}
                 </span>
               </div>
 
@@ -929,6 +963,11 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
                 Listening — speak your line...
               </span>
             </div>
+            {autoStop && (
+              <p className="text-xs text-zinc-500 text-center">
+                Will auto-submit after 3 seconds of silence
+              </p>
+            )}
 
             {transcript && (
               <div className="p-4 bg-zinc-800/50 rounded-lg border border-zinc-700">
