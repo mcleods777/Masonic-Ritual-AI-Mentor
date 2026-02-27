@@ -402,6 +402,29 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
     startRehearsal();
   }, [startRehearsal]);
 
+  // Jump to any line — interrupts current speech/recording and navigates
+  const jumpToLine = useCallback(
+    async (index: number) => {
+      if (index < 0 || index >= sections.length) return;
+
+      // Stop everything in-flight
+      cancelledRef.current = true;
+      stopSpeaking();
+      if (engineRef.current) {
+        engineRef.current.stop();
+        engineRef.current = null;
+      }
+      setAiFeedback(null);
+      setIsSpeakingFeedback(false);
+
+      // Brief pause so the cancelled flag is respected by any in-flight advanceToLine
+      await new Promise((r) => setTimeout(r, 50));
+      cancelledRef.current = false;
+      advanceToLine(index);
+    },
+    [sections.length, advanceToLine],
+  );
+
   // Click-to-speak: tap any word in the script view
   const handleWordClick = useCallback(
     async (word: string, role: string | null, e: React.MouseEvent) => {
@@ -713,8 +736,10 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
             <div
               key={section.id}
               id={`rehearsal-line-${i}`}
+              onClick={() => !isCurrent && jumpToLine(i)}
               className={`
                 flex gap-3 px-3 py-2 rounded-lg mb-1 transition-all
+                ${!isCurrent ? "cursor-pointer hover:bg-white/5" : ""}
                 ${isPast ? "opacity-30" : ""}
                 ${isCurrent && isUserSection ? "bg-amber-500/10 border border-amber-500/30" : ""}
                 ${isCurrent && !isUserSection ? "bg-blue-500/10 border border-blue-500/20" : ""}
@@ -793,6 +818,30 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
             <p className="text-zinc-400 text-sm max-w-lg mx-auto font-mono">
               {currentSection.cipherText || cleanRitualText(currentSection.text)}
             </p>
+
+            {/* Navigation buttons */}
+            <div className="flex justify-center items-center gap-3">
+              <button
+                onClick={() => jumpToLine(currentIndex - 1)}
+                disabled={currentIndex === 0}
+                className="px-4 py-2 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-30 disabled:cursor-not-allowed text-zinc-200 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                </svg>
+                Back
+              </button>
+              <button
+                onClick={() => jumpToLine(currentIndex + 1)}
+                disabled={currentIndex >= sections.length - 1}
+                className="px-4 py-2 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-30 disabled:cursor-not-allowed text-zinc-200 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
+              >
+                Next
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+            </div>
           </div>
         )}
 
