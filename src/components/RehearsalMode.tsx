@@ -204,11 +204,8 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
 
       engine.onResult = (result) => {
         setTranscript(result.transcript);
-        // Whisper returns a single final result after transcription completes.
-        // Automatically move to checking state.
-        if (provider === "whisper" && result.isFinal) {
-          setRehearsalState("listening"); // briefly show transcript before check runs
-        }
+        // Whisper: the final transcript update triggers the "transcribing" → "checking"
+        // effect. No state change needed here — the effect handles the transition.
       };
 
       engine.onError = (error) => {
