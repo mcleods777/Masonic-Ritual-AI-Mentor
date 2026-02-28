@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import Link from "next/link";
 import type { RitualSectionWithCipher } from "@/lib/storage";
 import { ROLE_DISPLAY_NAMES, cleanRitualText } from "@/lib/document-parser";
 import { compareTexts, type ComparisonResult } from "@/lib/text-comparison";
@@ -23,9 +24,17 @@ import {
 } from "@/lib/text-to-speech";
 import { playGavelKnocks, countGavelMarks } from "@/lib/gavel-sound";
 import DiffDisplay from "./DiffDisplay";
+import {
+  saveSession,
+  buildPerformanceContext,
+  type PracticeSession,
+  type LineScore,
+} from "@/lib/performance-history";
 
 interface RehearsalModeProps {
   sections: RitualSectionWithCipher[];
+  documentId?: string;
+  documentTitle?: string;
 }
 
 type RehearsalState =
@@ -44,7 +53,7 @@ interface LineResult {
   comparison: ComparisonResult;
 }
 
-export default function RehearsalMode({ sections }: RehearsalModeProps) {
+export default function RehearsalMode({ sections, documentId, documentTitle }: RehearsalModeProps) {
   // Setup state
   const [selectedRole, setSelectedRole] = useState<string | null>(null);
   const [rehearsalState, setRehearsalState] = useState<RehearsalState>("setup");
@@ -69,6 +78,15 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
   const stopListeningRef = useRef<() => void>(() => {});
   const autoStopRef = useRef(autoStop);
   autoStopRef.current = autoStop;
+  const sessionStartRef = useRef<string>(new Date().toISOString());
+  const perfContextRef = useRef<string>("");
+
+  // Load performance context on mount for AI feedback
+  useEffect(() => {
+    buildPerformanceContext()
+      .then((ctx) => { perfContextRef.current = ctx; })
+      .catch(console.error);
+  }, []);
 
   // Extract unique roles from sections (only those with speaker lines)
   const availableRoles = useMemo(() => {
@@ -120,6 +138,7 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
   // Start the rehearsal — begin advancing through sections
   const startRehearsal = useCallback(() => {
     cancelledRef.current = false;
+    sessionStartRef.current = new Date().toISOString();
     setCurrentIndex(0);
     setLineResults([]);
     setRehearsalState("ready");
@@ -332,6 +351,7 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
             troubleSpots: comparison.troubleSpots,
             lineNumber: lineResults.length + 1,
             totalLines: userLineCount,
+            performanceContext: perfContextRef.current,
           }),
         });
 
@@ -459,6 +479,60 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
     },
     [rehearsalState],
   );
+
+  // Save session to performance history when rehearsal completes
+  useEffect(() => {
+    if (rehearsalState !== "complete" || lineResults.length === 0) return;
+    if (!documentId) return;
+
+    const degree = sections[0]?.degree || "Unknown";
+    const duration = Math.round(
+      (Date.now() - new Date(sessionStartRef.current).getTime()) / 1000
+    );
+
+    // Collect all trouble spots across lines
+    const allTroubleSpots = new Map<string, number>();
+    for (const r of lineResults) {
+      for (const word of r.comparison.troubleSpots) {
+        allTroubleSpots.set(word, (allTroubleSpots.get(word) || 0) + 1);
+      }
+    }
+    const topTroubleSpots = [...allTroubleSpots.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([w]) => w);
+
+    const sessionId = crypto.randomUUID();
+    const session: PracticeSession = {
+      id: sessionId,
+      documentId,
+      documentTitle: documentTitle || "Unknown",
+      mode: "rehearsal",
+      role: selectedRole,
+      degree,
+      sectionName: null,
+      overallAccuracy,
+      linesAttempted: lineResults.length,
+      linesNailed: lineResults.filter((r) => r.accuracy >= 90).length,
+      troubleSpots: topTroubleSpots,
+      startedAt: sessionStartRef.current,
+      duration,
+    };
+
+    const lineScores: LineScore[] = lineResults.map((r, i) => ({
+      id: `${sessionId}-line-${i}`,
+      sessionId,
+      sectionName: sections[r.sectionIndex]?.sectionName || "Unknown",
+      lineIndex: r.sectionIndex,
+      accuracy: r.accuracy,
+      wrongWords: r.comparison.wrongWords,
+      missingWords: r.comparison.missingWords,
+      troubleSpots: r.comparison.troubleSpots,
+      timestamp: new Date().toISOString(),
+    }));
+
+    saveSession(session, lineScores).catch(console.error);
+  }, [rehearsalState, lineResults, documentId, documentTitle, sections, selectedRole, overallAccuracy]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -702,7 +776,7 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
             </div>
           )}
 
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
             <button
               onClick={restartRehearsal}
               className="px-6 py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-medium transition-colors"
@@ -715,6 +789,24 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
             >
               Change Role
             </button>
+            <Link
+              href="/progress"
+              className="px-6 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg font-medium transition-colors flex items-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              </svg>
+              View Progress
+            </Link>
+            <Link
+              href="/chat"
+              className="px-6 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg font-medium transition-colors flex items-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+              </svg>
+              Discuss with Coach
+            </Link>
           </div>
         </div>
       </div>

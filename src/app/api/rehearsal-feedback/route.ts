@@ -21,13 +21,14 @@ RULES:
 - Use "Brother" naturally — sometimes for warmth, sometimes to set up the punchline.
 - Weave in genuine coaching when the moment calls for it — a quick tip lands harder after a great joke.
 - If they're near the end of the ritual, acknowledge the journey. If they nailed a hard section, note it.
+- If performance history is provided, USE IT intelligently: reference their streak, celebrate improvements, call out recurring trouble spots, or note when they finally nail something they've been struggling with. Make the feedback feel personal and aware of their journey.
 - NEVER quote or reveal the full ritual text.
 - NEVER reveal grips, passwords, signs, or modes of recognition.
 - Do NOT use markdown, bullet points, or formatting — spoken text only.`;
 
 export async function POST(req: Request) {
   try {
-    const { accuracy, wrongWords, missingWords, troubleSpots, lineNumber, totalLines } =
+    const { accuracy, wrongWords, missingWords, troubleSpots, lineNumber, totalLines, performanceContext } =
       await req.json();
 
     const userPrompt = [
@@ -38,6 +39,7 @@ export async function POST(req: Request) {
       troubleSpots?.length > 0
         ? `Trouble spots: ${troubleSpots.slice(0, 5).join(", ")}`
         : null,
+      performanceContext ? `\nPerformance history context:\n${performanceContext}` : null,
       `Give brief spoken feedback.`,
     ]
       .filter(Boolean)

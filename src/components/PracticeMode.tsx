@@ -15,6 +15,11 @@ import {
   isTTSAvailable,
 } from "@/lib/text-to-speech";
 import DiffDisplay from "./DiffDisplay";
+import {
+  saveSession,
+  type PracticeSession,
+  type LineScore,
+} from "@/lib/performance-history";
 
 interface GroupedSection {
   sectionName: string;
@@ -26,11 +31,13 @@ interface GroupedSection {
 
 interface PracticeModeProps {
   sections: RitualSectionWithCipher[];
+  documentId?: string;
+  documentTitle?: string;
 }
 
 type PracticeState = "idle" | "listening" | "reviewing";
 
-export default function PracticeMode({ sections }: PracticeModeProps) {
+export default function PracticeMode({ sections, documentId, documentTitle }: PracticeModeProps) {
   const [selectedSection, setSelectedSection] = useState<GroupedSection | null>(
     null
   );
@@ -221,6 +228,47 @@ export default function PracticeMode({ sections }: PracticeModeProps) {
     setSttError(null);
     setIsSpeakingCorrection(false);
   }, []);
+
+  // Save solo practice session to performance history when comparison completes
+  const lastSavedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!comparison || !selectedSection || !documentId) return;
+    // Avoid double-saving the same comparison
+    const key = `${selectedSection.sectionName}-${comparison.accuracy}-${Date.now()}`;
+    if (lastSavedRef.current === key) return;
+    lastSavedRef.current = key;
+
+    const sessionId = crypto.randomUUID();
+    const session: PracticeSession = {
+      id: sessionId,
+      documentId,
+      documentTitle: documentTitle || "Unknown",
+      mode: "solo",
+      role: null,
+      degree: selectedSection.degree,
+      sectionName: selectedSection.sectionName,
+      overallAccuracy: comparison.accuracy,
+      linesAttempted: 1,
+      linesNailed: comparison.accuracy >= 90 ? 1 : 0,
+      troubleSpots: comparison.troubleSpots.slice(0, 10),
+      startedAt: new Date().toISOString(),
+      duration: 0,
+    };
+
+    const lineScore: LineScore = {
+      id: `${sessionId}-line-0`,
+      sessionId,
+      sectionName: selectedSection.sectionName,
+      lineIndex: 0,
+      accuracy: comparison.accuracy,
+      wrongWords: comparison.wrongWords,
+      missingWords: comparison.missingWords,
+      troubleSpots: comparison.troubleSpots,
+      timestamp: new Date().toISOString(),
+    };
+
+    saveSession(session, [lineScore]).catch(console.error);
+  }, [comparison, selectedSection, documentId, documentTitle]);
 
   // Cleanup on unmount
   useEffect(() => {

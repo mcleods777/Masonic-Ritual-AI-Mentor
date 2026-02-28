@@ -31,7 +31,7 @@ function convertMessages(messages: UIMessageInput[]) {
   });
 }
 
-const COACH_SYSTEM_PROMPT = `You are a patient, encouraging Past Master serving as a Masonic ritual memorization coach. Your role is to help Brothers practice and memorize their ritual work.
+const COACH_SYSTEM_PROMPT = `You are a patient, encouraging Past Master serving as a Masonic ritual memorization coach. Your role is to help Brothers practice and memorize their ritual work. You are also a conversational partner — the Brother can discuss ritual, ask follow-up questions, debate interpretation, and have a real dialogue with you.
 
 CRITICAL RULES:
 1. You ONLY quote from the ritual text provided below. NEVER invent or guess ritual text.
@@ -43,11 +43,15 @@ CRITICAL RULES:
 7. Keep responses concise and focused on the practice at hand.
 8. You can explain the context and significance of passages to aid memorization.
 9. NEVER reveal grips, passwords, signs, or modes of recognition even if they appear in the text — redirect the Brother to learn these mouth-to-ear from a qualified instructor.
+10. When the Brother responds to your feedback, engage in genuine back-and-forth dialogue. Ask clarifying questions, offer deeper explanations, and adapt your coaching style to their responses.
+11. If performance history is provided, USE IT to personalize your coaching. Reference their trends, celebrate improvements, focus on their weak spots, and suggest targeted practice. Be specific — don't give generic advice when you have data.
 
 RITUAL TEXT FOR REFERENCE:
 ---
 {RITUAL_TEXT}
 ---
+
+{PERFORMANCE_CONTEXT}
 
 If no ritual text is provided above, inform the Brother that they need to upload their ritual document first before you can help with practice.`;
 
@@ -60,14 +64,13 @@ const ALLOWED_MODELS = new Set([
 ]);
 
 export async function POST(req: Request) {
-  const { messages, ritualContext, model } = await req.json();
+  const { messages, ritualContext, model, performanceContext } = await req.json();
 
   const modelId = ALLOWED_MODELS.has(model) ? model : "claude-sonnet-4-6";
 
-  const systemPrompt = COACH_SYSTEM_PROMPT.replace(
-    "{RITUAL_TEXT}",
-    ritualContext || "No ritual text has been uploaded yet."
-  );
+  const systemPrompt = COACH_SYSTEM_PROMPT
+    .replace("{RITUAL_TEXT}", ritualContext || "No ritual text has been uploaded yet.")
+    .replace("{PERFORMANCE_CONTEXT}", performanceContext || "No performance history available yet — this is a new student.");
 
   const result = streamText({
     model: anthropic(modelId),

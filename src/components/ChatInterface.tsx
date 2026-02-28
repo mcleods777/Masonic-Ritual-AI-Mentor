@@ -13,6 +13,7 @@ import {
 } from "@/lib/speech-to-text";
 import { speak, stopSpeaking, isTTSAvailable } from "@/lib/text-to-speech";
 import TTSEngineSelector from "@/components/TTSEngineSelector";
+import { buildPerformanceContext, getSmartSuggestions } from "@/lib/performance-history";
 
 const AVAILABLE_MODELS = [
   { id: "claude-sonnet-4-6", label: "Sonnet 4.6", description: "Fast & capable (default)" },
@@ -34,6 +35,26 @@ export default function ChatInterface({ ritualContext }: ChatInterfaceProps) {
   const selectedModelRef = useRef(selectedModel);
   selectedModelRef.current = selectedModel;
 
+  // Performance context for the AI coach
+  const [perfContext, setPerfContext] = useState<string>("");
+  const perfContextRef = useRef(perfContext);
+  perfContextRef.current = perfContext;
+
+  // Smart suggestions based on performance history
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+
+  useEffect(() => {
+    buildPerformanceContext()
+      .then((ctx) => {
+        setPerfContext(ctx);
+        perfContextRef.current = ctx;
+      })
+      .catch(console.error);
+    getSmartSuggestions()
+      .then(setSuggestions)
+      .catch(console.error);
+  }, []);
+
   const transport = useMemo(
     () =>
       new TextStreamChatTransport({
@@ -41,6 +62,7 @@ export default function ChatInterface({ ritualContext }: ChatInterfaceProps) {
         body: () => ({
           ritualContext: ritualContextRef.current,
           model: selectedModelRef.current,
+          performanceContext: perfContextRef.current,
         }),
       }),
     []
@@ -227,12 +249,12 @@ export default function ChatInterface({ ritualContext }: ChatInterfaceProps) {
               passages, or have the coach quiz you on the catechism.
             </p>
             <div className="flex flex-wrap justify-center gap-2 mt-6">
-              {[
+              {(suggestions.length > 0 ? suggestions : [
                 "What does the Senior Warden say during opening?",
                 "Quiz me on the Entered Apprentice obligation",
                 "Give me a hint for the Fellow Craft lecture",
                 "Explain the significance of the working tools",
-              ].map((suggestion) => (
+              ]).map((suggestion) => (
                 <button
                   key={suggestion}
                   onClick={() => setInputValue(suggestion)}

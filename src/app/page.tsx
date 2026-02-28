@@ -37,7 +37,7 @@ export default function HomePage() {
       </div>
 
       {/* Quick Actions */}
-      <div className="grid md:grid-cols-3 gap-4">
+      <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Link
           href="/upload"
           className="group bg-zinc-900 rounded-xl border border-zinc-800 hover:border-amber-500/50 p-6 transition-all"
@@ -92,6 +92,34 @@ export default function HomePage() {
         </Link>
 
         <Link
+          href="/progress"
+          className="group bg-zinc-900 rounded-xl border border-zinc-800 hover:border-amber-500/50 p-6 transition-all"
+        >
+          <div className="w-12 h-12 rounded-xl bg-amber-500/10 flex items-center justify-center mb-4 group-hover:bg-amber-500/20 transition-colors">
+            <svg
+              className="w-6 h-6 text-amber-500"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+              />
+            </svg>
+          </div>
+          <h3 className="text-lg font-semibold text-zinc-200 group-hover:text-amber-400 transition-colors">
+            Progress
+          </h3>
+          <p className="text-sm text-zinc-500 mt-2">
+            Track your accuracy over time, see trends, identify persistent
+            trouble spots, and celebrate your streaks.
+          </p>
+        </Link>
+
+        <Link
           href="/chat"
           className={`group bg-zinc-900 rounded-xl border border-zinc-800 hover:border-amber-500/50 p-6 transition-all ${
             !hasDocuments && !loading ? "opacity-50" : ""
@@ -116,8 +144,8 @@ export default function HomePage() {
             AI Coach
           </h3>
           <p className="text-sm text-zinc-500 mt-2">
-            Chat with a patient AI coach who knows your ritual. Ask
-            questions, get hints, or have it quiz you on the catechism.
+            Have a conversation with a patient AI coach who knows your
+            ritual and your performance history.
           </p>
         </Link>
       </div>
