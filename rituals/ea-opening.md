@@ -1,9 +1,5 @@
 ### I. Purgation and Tiling
-**Narrator**: Officers and members, when addressed, should arise to respond and remain standing until the end of the colloquy.
-**Narrator**: Note: The lodge is congregated, and the Senior Warden ensures that only those entitled to be present remain.
-**Narrator**: * Congregates Lodge, Junior Deacon closes preparation room door & Lodge room door; Senior Deacon closes any door in the East & Deacons return to places & sit down
-**Narrator**: ( Ofs @ mbs, wn adrsd, shd ars t rsp @ rm stndg unt nd o colqy )
-**Narrator**: * ( Congrts L, JD cls pp rm dr @ L rm dr; SD cls ny dr in t E @ Ds rt t pls @ s d )
+**Narrator**: Junior Deacon closes preparation room door & Lodge room door; Senior Deacon closes any door in the East & Deacons return to places & sit down
 **WM**: Br SW,
 **WM**: Brother Senior Warden,
 **Narrator**: ( SW rs )
