@@ -310,8 +310,13 @@ export default function WalkthroughPage() {
             icon="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"
             color="blue"
             title="2. Recite from memory"
-            desc="Speak your lines aloud using Browser Speech or high-accuracy Groq Whisper STT (the app transcribes in real time) or type them from memory."
-          />
+            desc="Speak your lines aloud (the app transcribes in real time) using either built-in Browser Speech or high-accuracy OpenAI Whisper STT powered by Groq, or type them from memory."
+          >
+            <div className="flex flex-wrap gap-2 mt-3">
+              <Tag>Browser STT (Free, Fast)</Tag>
+              <Tag>OpenAI Whisper STT (High Accuracy)</Tag>
+            </div>
+          </FlowStep>
           <DownArrow />
 
           {/* Accuracy visualization */}
