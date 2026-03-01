@@ -75,7 +75,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   const voiceMapRef = useRef<Map<string, RoleVoiceProfile>>(new Map());
   const cancelledRef = useRef(false);
   const scriptContainerRef = useRef<HTMLDivElement>(null);
-  const stopListeningRef = useRef<() => void>(() => {});
+  const stopListeningRef = useRef<() => void>(() => { });
   const autoStopRef = useRef(autoStop);
   autoStopRef.current = autoStop;
   const sessionStartRef = useRef<string>(new Date().toISOString());
@@ -617,8 +617,8 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
                   <button
                     onClick={() => setSTTProvider("browser")}
                     className={`px-4 py-2 text-xs font-medium transition-colors ${sttProvider === "browser"
-                        ? "bg-amber-600 text-white"
-                        : "bg-zinc-800 text-zinc-400 hover:text-zinc-200"
+                      ? "bg-amber-600 text-white"
+                      : "bg-zinc-800 text-zinc-400 hover:text-zinc-200"
                       }`}
                   >
                     Browser
@@ -626,8 +626,8 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
                   <button
                     onClick={() => setSTTProvider("whisper")}
                     className={`px-4 py-2 text-xs font-medium transition-colors ${sttProvider === "whisper"
-                        ? "bg-amber-600 text-white"
-                        : "bg-zinc-800 text-zinc-400 hover:text-zinc-200"
+                      ? "bg-amber-600 text-white"
+                      : "bg-zinc-800 text-zinc-400 hover:text-zinc-200"
                       }`}
                   >
                     Whisper (Groq)
@@ -728,8 +728,8 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
           <div className="grid grid-cols-3 gap-4 mb-6">
             <div className="bg-zinc-800 rounded-lg p-4 text-center">
               <p className={`text-3xl font-bold ${overallAccuracy >= 85 ? "text-green-400" :
-                  overallAccuracy >= 70 ? "text-amber-400" :
-                    overallAccuracy >= 50 ? "text-orange-400" : "text-red-400"
+                overallAccuracy >= 70 ? "text-amber-400" :
+                  overallAccuracy >= 50 ? "text-orange-400" : "text-red-400"
                 }`}>
                 {overallAccuracy}%
               </p>
@@ -761,8 +761,8 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
                     className="flex items-center gap-3 px-4 py-3 bg-zinc-800/50 rounded-lg"
                   >
                     <span className={`text-lg font-bold w-12 text-right ${result.accuracy >= 90 ? "text-green-400" :
-                        result.accuracy >= 70 ? "text-amber-400" :
-                          result.accuracy >= 50 ? "text-orange-400" : "text-red-400"
+                      result.accuracy >= 70 ? "text-amber-400" :
+                        result.accuracy >= 50 ? "text-orange-400" : "text-red-400"
                       }`}>
                       {result.accuracy}%
                     </span>
@@ -854,9 +854,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
           const isUserSection = section.speaker === selectedRole;
           const gavels = section.gavels > 0 ? section.gavels : countGavelMarks(section.text);
           const cleanText = cleanRitualText(section.text);
-          const displayText = section.cipherText && section.cipherText !== section.text
-            ? section.cipherText
-            : cleanText;
+          const displayText = section.cipherText || cleanText;
 
           return (
             <div

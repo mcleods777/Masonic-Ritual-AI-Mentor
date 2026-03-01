@@ -357,7 +357,7 @@ export default function PracticeMode({ sections, documentId, documentTitle }: Pr
           <div className="mb-4 p-4 bg-zinc-800/50 rounded-lg border border-zinc-700">
             <p className={`text-sm leading-relaxed whitespace-pre-wrap ${showPlainText ? "text-zinc-300" : "text-amber-200/80 font-mono"
               }`}>
-              {showPlainText ? selectedSection.text : selectedSection.cipherText}
+              {showPlainText ? selectedSection.text : (selectedSection.cipherText || selectedSection.text)}
             </p>
             {!showPlainText && (
               <p className="text-xs text-zinc-600 mt-2 italic">

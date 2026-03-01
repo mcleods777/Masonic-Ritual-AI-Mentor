@@ -55,7 +55,7 @@ interface MRAMDocument {
 
 // Speaker pattern — matches lines like **WM**: or **Tyler**: or **Vchr**:
 const SPEAKER_PATTERN =
-  /^\*{0,2}(WM|SW|JW|SD|JD|Sec|Trs|Tyl|Tyler|Ch|Chap|ALL|All|BR|Bro|Bros|Voucher|Vchr|Marshal|Candidate|S|T|PRAYER)\*{0,2}\s*:\s*/i;
+  /^\*{0,2}(WM|SW|JW|SD|JD|Sec|Trs|Tyl|Tyler|Ch|Chap|ALL|All|BR|Bro|Bros|Voucher|Vchr|Marshal|Candidate|S|T|PRAYER|Narrator)\*{0,2}\s*:\s*/i;
 
 // Known roles with display names
 const ROLE_MAP: Record<string, string> = {
@@ -81,6 +81,7 @@ const ROLE_MAP: Record<string, string> = {
   Candidate: "Candidate",
   T: "Tiler",
   S: "Secretary",
+  Narrator: "Narrator",
 };
 
 function normalizeRole(role: string): string {

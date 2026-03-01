@@ -343,9 +343,7 @@ export default function ListenMode({ sections }: ListenModeProps) {
           const isCurrent = i === currentIndex && playState !== "idle";
           const gavels = section.gavels > 0 ? section.gavels : countGavelMarks(section.text);
           const cleanText = cleanRitualText(section.text);
-          const displayText = section.cipherText && section.cipherText !== section.text
-            ? section.cipherText
-            : cleanText;
+          const displayText = section.cipherText || cleanText;
 
           return (
             <div

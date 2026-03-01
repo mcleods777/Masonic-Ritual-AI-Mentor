@@ -56,7 +56,7 @@ const SECTION_PATTERNS = [
 // Speaker role prefixes — supports both dotted (W.M.:) and abbreviated (WM:) forms,
 // as well as markdown bold (**WM**:) format
 const SPEAKER_PATTERN =
-  /^\*{0,2}(W\.?\s?M\.?|WM|S\.?\s?W\.?|SW|J\.?\s?W\.?|JW|S\.?\s?D\.?|SD|J\.?\s?D\.?|JD|S\/Sec|S\/J\s?D|S\s?\(orJ\)\s?D|Sec\.?|Treas\.?|Tr|Chap\.?|Ch|Marshal|Tyler|Candidate|All|ALL|Bros?\.?|BR|T|SW\/WM)\*{0,2}\s*[:\-–—]+\s*/i;
+  /^\*{0,2}(W\.?\s?M\.?|WM|S\.?\s?W\.?|SW|J\.?\s?W\.?|JW|S\.?\s?D\.?|SD|J\.?\s?D\.?|JD|S\/Sec|S\/J\s?D|S\s?\(orJ\)\s?D|Sec\.?|Treas\.?|Tr|Chap\.?|Ch|Marshal|Tyler|Candidate|All|ALL|Bros?\.?|BR|T|SW\/WM|Narrator)\*{0,2}\s*[:\-–—]+\s*/i;
 
 // Markdown heading pattern for ceremony/section structure
 const MARKDOWN_HEADING_PATTERN = /^#{1,4}\s+(.+)$/;
@@ -102,6 +102,7 @@ export const ROLE_DISPLAY_NAMES: Record<string, string> = {
   'SW/WM': 'SW & WM',
   'S(orJ)D': 'Sr. or Jr. Deacon',
   'S/J D': 'Sr. or Jr. Deacon',
+  'Narrator': 'Narrator',
 };
 
 /**
