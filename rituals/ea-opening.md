@@ -1,14 +1,3 @@
-## ROLES
-- **WM**: Worshipful Master
-- **SW**: Senior Warden
-- **JW**: Junior Warden
-- **SD**: Senior Deacon
-- **JD**: Junior Deacon
-- **S/Sec**: Secretary
-- **Tr**: Treasurer
-- **T/Tyl**: Tiler
-- **Narrator**: Stage directions and actions
-
 ### I. Purgation and Tiling
 **Narrator**: n: t L i c, @ t S W e t o t e t b p r.
 **Narrator**: Note: The lodge is congregated, and the Senior Warden ensures that only those entitled to be present remain.
