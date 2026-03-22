@@ -326,26 +326,42 @@ export function getDeepgramVoiceForRole(role: string): string {
   return DEEPGRAM_ROLE_VOICES[role] || DEEPGRAM_DEFAULT_VOICE;
 }
 
-/** Speak text using Deepgram Aura-2. */
+/** Speak text using Deepgram Aura-2 (with retry for transient errors). */
 export async function speakDeepgram(
   text: string,
   model?: string
 ): Promise<void> {
-  const resp = await fetch("/api/tts/deepgram", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      text,
-      model: model || DEEPGRAM_DEFAULT_VOICE,
-    }),
-  });
+  const MAX_RETRIES = 2;
+  const RETRY_DELAYS = [500, 1500];
 
-  if (!resp.ok) {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const resp = await fetch("/api/tts/deepgram", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text,
+        model: model || DEEPGRAM_DEFAULT_VOICE,
+      }),
+    });
+
+    if (resp.ok) {
+      await playAudioBlob(await resp.blob());
+      return;
+    }
+
+    // Retry on transient errors (429 rate limit, 500/503 server errors)
+    const isRetryable = resp.status === 429 || resp.status >= 500;
+    if (isRetryable && attempt < MAX_RETRIES) {
+      console.warn(
+        `Deepgram TTS returned ${resp.status}, retrying in ${RETRY_DELAYS[attempt]}ms (attempt ${attempt + 1}/${MAX_RETRIES})...`
+      );
+      await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+      continue;
+    }
+
     const err = await resp.json().catch(() => ({ error: resp.statusText }));
     throw new Error((err as { error?: string }).error || "Deepgram TTS failed");
   }
-
-  await playAudioBlob(await resp.blob());
 }
 
 /** Speak text as a Masonic officer role using Deepgram Aura-2. */

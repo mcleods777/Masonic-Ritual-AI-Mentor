@@ -88,16 +88,29 @@ export default function ListenMode({ sections }: ListenModeProps) {
         }
         if (cancelledRef.current) return;
 
-        // Speak the line if it has a speaker
+        // Speak the line if it has a speaker (retry once on failure)
         if (section.speaker) {
           const cleanText = cleanRitualText(section.text);
           if (cleanText) {
-            try {
-              await speakAsRole(cleanText, section.speaker, voiceMapRef.current);
-            } catch (err) {
-              console.warn(`TTS failed for line ${i} (${section.speaker}):`, err);
-              // Brief pause so we don't zip through the script on repeated failures
-              await new Promise((r) => setTimeout(r, 800));
+            let spoken = false;
+            for (let attempt = 0; attempt < 2 && !spoken; attempt++) {
+              if (cancelledRef.current) return;
+              try {
+                await speakAsRole(cleanText, section.speaker, voiceMapRef.current);
+                spoken = true;
+              } catch (err) {
+                console.warn(
+                  `TTS failed for line ${i} (${section.speaker}), attempt ${attempt + 1}:`,
+                  err
+                );
+                if (attempt === 0) {
+                  // Wait before retry
+                  await new Promise((r) => setTimeout(r, 1000));
+                } else {
+                  // Final failure — pause before advancing so user notices the skip
+                  await new Promise((r) => setTimeout(r, 1500));
+                }
+              }
             }
           }
         }
