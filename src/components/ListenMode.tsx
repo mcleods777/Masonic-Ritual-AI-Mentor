@@ -98,6 +98,8 @@ export default function ListenMode({ sections }: ListenModeProps) {
                 await speakAsRole(cleanText, section.speaker, voiceMapRef.current);
                 spoken = true;
               } catch (err) {
+                // Don't retry if this was an intentional abort (user tapped a different line)
+                if (err instanceof DOMException && err.name === "AbortError") return;
                 console.warn(
                   `TTS failed for line ${i} (${section.speaker}), attempt ${attempt + 1}:`,
                   err
@@ -116,6 +118,11 @@ export default function ListenMode({ sections }: ListenModeProps) {
         // Lines with no speaker (stage directions) get a brief pause
         else {
           await new Promise((r) => setTimeout(r, 600));
+        }
+
+        // Small gap between lines to avoid hammering the TTS API
+        if (!cancelledRef.current && i < sections.length - 1) {
+          await new Promise((r) => setTimeout(r, 150));
         }
       }
 

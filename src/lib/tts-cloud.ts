@@ -348,20 +348,40 @@ export async function speakDeepgram(
   text: string,
   model?: string
 ): Promise<void> {
-  const MAX_RETRIES = 2;
-  const RETRY_DELAYS = [500, 1500];
+  const MAX_RETRIES = 3;
+  const RETRY_DELAYS = [400, 1000, 2000];
   const signal = getTTSAbortSignal();
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    const resp = await fetch("/api/tts/deepgram", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        text,
-        model: model || DEEPGRAM_DEFAULT_VOICE,
-      }),
-      signal,
-    });
+    // Re-throw abort errors immediately — don't retry intentional cancellations
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+
+    let resp: Response;
+    try {
+      resp = await fetch("/api/tts/deepgram", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text,
+          model: model || DEEPGRAM_DEFAULT_VOICE,
+        }),
+        signal,
+      });
+    } catch (fetchErr) {
+      // Abort errors should not be retried
+      if (fetchErr instanceof DOMException && fetchErr.name === "AbortError") {
+        throw fetchErr;
+      }
+      // Network error — retry if we can
+      if (attempt < MAX_RETRIES) {
+        console.warn(
+          `Deepgram TTS network error, retrying in ${RETRY_DELAYS[attempt]}ms (attempt ${attempt + 1}/${MAX_RETRIES})...`
+        );
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+        continue;
+      }
+      throw fetchErr;
+    }
 
     if (resp.ok) {
       await playAudioBlob(await resp.blob());
