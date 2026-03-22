@@ -5,7 +5,6 @@ import type { RitualSectionWithCipher } from "@/lib/storage";
 import { ROLE_DISPLAY_NAMES, cleanRitualText } from "@/lib/document-parser";
 import { getRoleIcon } from "./MasonicIcons";
 import {
-  speak,
   speakAsRole,
   assignVoicesToRoles,
   stopSpeaking,
@@ -198,32 +197,6 @@ export default function ListenMode({ sections }: ListenModeProps) {
     [playState, sections, playFrom],
   );
 
-  /* -------------------------------------------------------------- */
-  /*  Click-to-speak: tap any individual word to hear it             */
-  /* -------------------------------------------------------------- */
-  const handleWordClick = useCallback(
-    async (word: string, role: string | null, e: React.MouseEvent) => {
-      e.stopPropagation();
-
-      // If the ceremony loop is running, pause it first so the loop
-      // doesn't advance to the next line and overlap with the word.
-      if (playState === "playing") {
-        pausedRef.current = true;
-      }
-
-      stopSpeaking();
-      if (role) {
-        try {
-          await speakAsRole(word, role, voiceMapRef.current);
-        } catch {
-          await speak(word);
-        }
-      } else {
-        await speak(word);
-      }
-    },
-    [playState],
-  );
 
   // Cleanup on unmount
   useEffect(() => {
@@ -247,7 +220,7 @@ export default function ListenMode({ sections }: ListenModeProps) {
             </h2>
             <p className="text-sm text-zinc-500 mt-1">
               Sit back and listen to the full ceremony read aloud, each officer in a distinct voice.
-              Tap any line to hear it, or tap a single word.
+              Tap any line to hear it.
             </p>
           </div>
           {!isTTSAvailable() && (
@@ -399,22 +372,7 @@ export default function ListenMode({ sections }: ListenModeProps) {
                   </span>
                 )}
                 {displayText ? (
-                  <span className="inline">
-                    {displayText.split(/(\s+)/).map((seg, wi) => {
-                      if (/^\s+$/.test(seg)) {
-                        return <span key={wi}>{seg}</span>;
-                      }
-                      return (
-                        <span
-                          key={wi}
-                          onClick={(e) => handleWordClick(seg, section.speaker, e)}
-                          className="inline-block cursor-pointer rounded px-0.5 -mx-0.5 transition-colors hover:bg-white/10"
-                        >
-                          {seg}
-                        </span>
-                      );
-                    })}
-                  </span>
+                  <span>{displayText}</span>
                 ) : (
                   <span className="italic text-zinc-600">[stage direction]</span>
                 )}
