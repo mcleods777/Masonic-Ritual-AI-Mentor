@@ -12,6 +12,14 @@
 
 let currentAudio: HTMLAudioElement | null = null;
 let currentResolve: (() => void) | null = null;
+let currentAbort: AbortController | null = null;
+
+/** Get a new AbortSignal for a TTS fetch. Aborts any previous in-flight fetch. */
+export function getTTSAbortSignal(): AbortSignal {
+  if (currentAbort) currentAbort.abort();
+  currentAbort = new AbortController();
+  return currentAbort.signal;
+}
 
 /** Play an audio blob and resolve when it finishes. */
 export function playAudioBlob(blob: Blob): Promise<void> {
@@ -44,8 +52,13 @@ export function playAudioBlob(blob: Blob): Promise<void> {
   });
 }
 
-/** Stop whatever cloud audio is currently playing. */
+/** Stop whatever cloud audio is currently playing and abort in-flight fetches. */
 export function stopCloudAudio(): void {
+  // Abort any in-flight TTS fetch so it doesn't start playback after we stop
+  if (currentAbort) {
+    currentAbort.abort();
+    currentAbort = null;
+  }
   if (currentAudio) {
     currentAudio.pause();
     currentAudio.src = "";
@@ -126,6 +139,7 @@ export async function speakElevenLabs(
   text: string,
   voiceId?: string
 ): Promise<void> {
+  const signal = getTTSAbortSignal();
   const resp = await fetch("/api/tts/elevenlabs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -133,6 +147,7 @@ export async function speakElevenLabs(
       text,
       voiceId: voiceId || ELEVENLABS_DEFAULT_VOICE,
     }),
+    signal,
   });
 
   if (!resp.ok) {
@@ -227,6 +242,7 @@ export async function speakGoogleCloud(
 ): Promise<void> {
   const MAX_RETRIES = 2;
   const RETRY_DELAYS = [500, 1500]; // ms backoff between retries
+  const signal = getTTSAbortSignal();
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     const resp = await fetch("/api/tts/google", {
@@ -238,6 +254,7 @@ export async function speakGoogleCloud(
         pitch: pitch ?? GOOGLE_DEFAULT_VOICE.pitch,
         speakingRate: speakingRate ?? GOOGLE_DEFAULT_VOICE.rate,
       }),
+      signal,
     });
 
     if (resp.ok) {
@@ -333,6 +350,7 @@ export async function speakDeepgram(
 ): Promise<void> {
   const MAX_RETRIES = 2;
   const RETRY_DELAYS = [500, 1500];
+  const signal = getTTSAbortSignal();
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     const resp = await fetch("/api/tts/deepgram", {
@@ -342,6 +360,7 @@ export async function speakDeepgram(
         text,
         model: model || DEEPGRAM_DEFAULT_VOICE,
       }),
+      signal,
     });
 
     if (resp.ok) {
@@ -435,6 +454,7 @@ export async function speakKokoro(
   voice?: string,
   speed?: number
 ): Promise<void> {
+  const signal = getTTSAbortSignal();
   const resp = await fetch("/api/tts/kokoro", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -443,6 +463,7 @@ export async function speakKokoro(
       voice: voice ?? KOKORO_DEFAULT_VOICE.voice,
       speed: speed ?? KOKORO_DEFAULT_VOICE.speed,
     }),
+    signal,
   });
 
   if (!resp.ok) {
