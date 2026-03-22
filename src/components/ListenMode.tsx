@@ -44,8 +44,33 @@ export default function ListenMode({ sections }: ListenModeProps) {
     }
   }, [availableRoles]);
 
-  // Scroll current line into view
+  // Track whether the user is manually scrolling — suppress auto-scroll if so
+  const userScrollingRef = useRef(false);
+  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
+    const container = scriptContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      userScrollingRef.current = true;
+      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+      // Re-enable auto-scroll after 5 seconds of no manual scrolling
+      scrollTimeoutRef.current = setTimeout(() => {
+        userScrollingRef.current = false;
+      }, 5000);
+    };
+
+    container.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      container.removeEventListener("scroll", handleScroll);
+      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+    };
+  }, []);
+
+  // Scroll current line into view (only if user isn't manually scrolling)
+  useEffect(() => {
+    if (userScrollingRef.current) return;
     const el = document.getElementById(`listen-line-${currentIndex}`);
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
