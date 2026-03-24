@@ -74,7 +74,7 @@ export default function ChatInterface({ ritualContext }: ChatInterfaceProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [autoSpeak, setAutoSpeak] = useState(false);
-  const [sttProvider, setSTTProvider] = useState<STTProvider>("browser");
+  const [sttProvider, setSTTProvider] = useState<STTProvider>("whisper");
   const engineRef = useRef<STTEngine | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
