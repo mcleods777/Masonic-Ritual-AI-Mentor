@@ -79,10 +79,12 @@ export async function POST(req: Request) {
 
   const modelId = ALLOWED_MODELS.has(model) ? model : "claude-sonnet-4-6";
 
+  // Use function replacements to avoid $ in knowledge text being treated as
+  // regex special characters (e.g. "$120.00" → "$1" would eat a capture group)
   const systemPrompt = COACH_SYSTEM_PROMPT
-    .replace("{RITUAL_TEXT}", ritualContext || "No ritual text has been uploaded yet.")
-    .replace("{KNOWLEDGE_CONTEXT}", knowledgeContext)
-    .replace("{PERFORMANCE_CONTEXT}", performanceContext || "No performance history available yet — this is a new student.");
+    .replace("{RITUAL_TEXT}", () => ritualContext || "No ritual text has been uploaded yet.")
+    .replace("{KNOWLEDGE_CONTEXT}", () => knowledgeContext)
+    .replace("{PERFORMANCE_CONTEXT}", () => performanceContext || "No performance history available yet — this is a new student.");
 
   const result = streamText({
     model: anthropic(modelId),
