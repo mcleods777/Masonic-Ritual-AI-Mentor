@@ -75,19 +75,30 @@ export const GroupIcon = ({ className }: { className?: string }) => (
     </svg>
 );
 
-// Helper mapping for role/office to the icon component
-export const getRoleIcon = (roleName: string) => {
+// Helper mapping for role/office to the image URL
+export const getRoleImageUrl = (roleName: string): string | null => {
     const r = roleName.toUpperCase();
-    if (r.includes("WM") || r.includes("MASTER")) return SquareIcon;
-    if (r.includes("SW") || r.includes("SENIOR WARDEN")) return LevelIcon;
-    if (r.includes("JW") || r.includes("JUNIOR WARDEN")) return PlumbIcon;
-    if (r.includes("TR") || r.includes("TREASURER")) return CrossedKeysIcon;
-    if (r.includes("SEC")) return CrossedQuillsIcon;
-    if (r.includes("SD") || r.includes("SENIOR DEACON")) return SunCompassesIcon;
-    if (r.includes("JD") || r.includes("JUNIOR DEACON")) return MoonCompassesIcon;
-    if (r.includes("TY") || r.includes("TYLER") || r.includes("IG") || r.includes("VCHR")) return SwordIcon;
-    if (r.includes("PRAYER") || r.includes("CHAP")) return BookIcon;
-    if (r.includes("ALL")) return GroupIcon;
+    if (r.includes("WM") || r.includes("MASTER")) return "/role-icons/wm.png";
+    if (r.includes("SW") || r.includes("SENIOR WARDEN")) return "/role-icons/sw.png";
+    if (r.includes("JW") || r.includes("JUNIOR WARDEN")) return "/role-icons/jw.png";
+    if (r.includes("TR") || r.includes("TREASURER")) return "/role-icons/tr.png";
+    if (r.includes("SEC")) return "/role-icons/sec.png";
+    if (r.includes("SD") || r.includes("SENIOR DEACON")) return "/role-icons/sd.png";
+    if (r.includes("JD") || r.includes("JUNIOR DEACON")) return "/role-icons/jd.png";
+    if (r.includes("TY") || r.includes("TYLER") || r.includes("IG") || r.includes("VCHR")) return "/role-icons/ty.png";
+    if (r.includes("PRAYER") || r.includes("CHAP")) return "/role-icons/chap.png";
+    if (r.includes("ALL")) return "/role-icons/all.png";
 
     return null; // Fallback to none if unknown
+};
+
+// Replaces the previous SVG mapping with a dynamic Image component mapping
+export const getRoleIcon = (roleName: string) => {
+    const url = getRoleImageUrl(roleName);
+    if (!url) return null;
+
+    return function RoleImageIcon({ className }: { className?: string }) {
+        // Merge the optional className with styling for the image (round, object-cover)
+        return <img src={url} alt={`${roleName} icon`} className={`object-cover rounded-full shadow-lg border border-amber-500/20 ${className || ''}`} />;
+    };
 };
