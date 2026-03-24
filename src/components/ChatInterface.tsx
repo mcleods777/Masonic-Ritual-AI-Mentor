@@ -40,7 +40,7 @@ export default function ChatInterface({ ritualContext }: ChatInterfaceProps) {
   const perfContextRef = useRef(perfContext);
   perfContextRef.current = perfContext;
 
-  // Smart suggestions based on performance history
+  // Smart suggestions based on performance history + knowledge topics
   const [suggestions, setSuggestions] = useState<string[]>([]);
 
   useEffect(() => {
@@ -50,9 +50,30 @@ export default function ChatInterface({ ritualContext }: ChatInterfaceProps) {
         perfContextRef.current = ctx;
       })
       .catch(console.error);
-    getSmartSuggestions()
-      .then(setSuggestions)
-      .catch(console.error);
+
+    // Blend performance-based suggestions with knowledge-based topics
+    Promise.all([
+      getSmartSuggestions().catch(() => [] as string[]),
+      fetch("/api/knowledge-topics")
+        .then((r) => r.json())
+        .then((d) => d.topics as string[])
+        .catch(() => [] as string[]),
+    ]).then(([perfSuggestions, knowledgeTopics]) => {
+      if (perfSuggestions.length > 0) {
+        // Mix: performance suggestions first, then fill with knowledge topics
+        const combined = [...perfSuggestions];
+        for (const topic of knowledgeTopics) {
+          if (combined.length >= 6) break;
+          if (!combined.includes(topic)) combined.push(topic);
+        }
+        setSuggestions(combined);
+      } else {
+        // No performance history — show a mix of knowledge topics
+        // Shuffle and pick 6
+        const shuffled = [...knowledgeTopics].sort(() => Math.random() - 0.5);
+        setSuggestions(shuffled.slice(0, 6));
+      }
+    });
   }, []);
 
   const transport = useMemo(
@@ -279,10 +300,10 @@ export default function ChatInterface({ ritualContext }: ChatInterfaceProps) {
             </p>
             <div className="flex flex-wrap justify-center gap-2 mt-6">
               {(suggestions.length > 0 ? suggestions : [
-                "What does the Senior Warden say during opening?",
-                "Quiz me on the Entered Apprentice obligation",
-                "Give me a hint for the Fellow Craft lecture",
-                "Explain the significance of the working tools",
+                "What are the duties of the Worshipful Master?",
+                "When are stated meetings held for Capital Lodge?",
+                "What does the Masonic Code say about proficiency?",
+                "Explain the Ancient Charges of a Freemason",
               ]).map((suggestion) => (
                 <button
                   key={suggestion}
