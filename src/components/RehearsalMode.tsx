@@ -106,8 +106,33 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
     }
   }, [availableRoles]);
 
-  // Scroll current line into view
+  // Track whether the user is manually scrolling — suppress auto-scroll if so
+  const userScrollingRef = useRef(false);
+  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
+    const container = scriptContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      userScrollingRef.current = true;
+      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+      // Re-enable auto-scroll after 5 seconds of no manual scrolling
+      scrollTimeoutRef.current = setTimeout(() => {
+        userScrollingRef.current = false;
+      }, 5000);
+    };
+
+    container.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      container.removeEventListener("scroll", handleScroll);
+      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+    };
+  }, []);
+
+  // Scroll current line into view (only if user isn't manually scrolling)
+  useEffect(() => {
+    if (userScrollingRef.current) return;
     const el = document.getElementById(`rehearsal-line-${currentIndex}`);
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -174,23 +199,39 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
       // AI reads this line
       setRehearsalState("ai-speaking");
 
-      try {
-        const cleanText = cleanRitualText(section.text);
-        if (cleanText) {
-          await speakAsRole(cleanText, section.speaker, voiceMapRef.current);
+      const cleanText = cleanRitualText(section.text);
+      if (cleanText) {
+        let spoken = false;
+        for (let attempt = 0; attempt < 2 && !spoken; attempt++) {
+          if (cancelledRef.current) return;
+          try {
+            await speakAsRole(cleanText, section.speaker, voiceMapRef.current);
+            spoken = true;
+          } catch (err) {
+            // Don't retry if this was an intentional abort
+            if (err instanceof DOMException && err.name === "AbortError") return;
+            console.warn(
+              `TTS failed for line ${index} (${section.speaker}), attempt ${attempt + 1}:`,
+              err
+            );
+            if (attempt === 0) {
+              await new Promise((r) => setTimeout(r, 1000));
+            } else {
+              await new Promise((r) => setTimeout(r, 1500));
+            }
+          }
         }
-      } catch (err) {
-        console.warn(`TTS failed for line ${index} (${section.speaker}):`, err);
-        // Brief pause so we don't zip through the script on repeated failures
-        await new Promise((r) => setTimeout(r, 800));
       }
 
       if (!cancelledRef.current) {
+        // Small gap between lines to avoid hammering the TTS API
+        await new Promise((r) => setTimeout(r, 150));
         // Auto-advance to next line after speaking
         advanceToLine(index + 1);
       }
     } else {
-      // No speaker (stage direction, etc.) — skip
+      // No speaker (stage direction, etc.) — brief pause then skip
+      await new Promise((r) => setTimeout(r, 150));
       advanceToLine(index + 1);
     }
   }, [sections, selectedRole]);

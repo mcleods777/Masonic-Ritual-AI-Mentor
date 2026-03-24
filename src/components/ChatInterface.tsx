@@ -85,14 +85,27 @@ export default function ChatInterface({ ritualContext }: ChatInterfaceProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Auto-speak assistant responses
+  // Auto-speak assistant responses (retry once on failure)
   useEffect(() => {
     if (!autoSpeak || !isTTSAvailable()) return;
     const lastMessage = messages[messages.length - 1];
     if (lastMessage?.role === "assistant" && !isLoading) {
       const parts = lastMessage.parts?.filter((p) => p.type === "text") || [];
       const text = parts.map((p) => p.text).join("");
-      if (text) speak(text, { rate: 0.9 });
+      if (text) {
+        (async () => {
+          for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+              await speak(text, { rate: 0.9 });
+              return;
+            } catch (err) {
+              if (err instanceof DOMException && err.name === "AbortError") return;
+              console.warn(`Auto-speak failed, attempt ${attempt + 1}:`, err);
+              if (attempt === 0) await new Promise((r) => setTimeout(r, 1000));
+            }
+          }
+        })();
+      }
     }
   }, [messages, isLoading, autoSpeak]);
 
@@ -113,7 +126,7 @@ export default function ChatInterface({ ritualContext }: ChatInterfaceProps) {
     return "";
   };
 
-  const toggleRecording = () => {
+  const toggleRecording = async () => {
     if (isRecording) {
       if (engineRef.current) {
         engineRef.current.stop();
@@ -161,8 +174,24 @@ export default function ChatInterface({ ritualContext }: ChatInterfaceProps) {
         setIsRecording(false);
       };
 
-      engine.start();
-      setIsRecording(true);
+      // Auto-stop after silence so Whisper can transcribe
+      engine.onSilence = () => {
+        if (engineRef.current) {
+          engineRef.current.stop();
+        }
+        setIsRecording(false);
+        if (sttProvider === "whisper") {
+          setIsTranscribing(true);
+        }
+      };
+
+      try {
+        await engine.start();
+        setIsRecording(true);
+      } catch (err) {
+        console.warn("Failed to start recording:", err);
+        engineRef.current = null;
+      }
     }
   };
 

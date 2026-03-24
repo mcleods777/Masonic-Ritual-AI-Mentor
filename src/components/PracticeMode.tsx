@@ -208,9 +208,35 @@ export default function PracticeMode({ sections, documentId, documentTitle }: Pr
         const script = phrases
           .map((p, idx) => (phrases.length > 1 ? `Number ${idx + 1}. ${p}` : p))
           .join(". ... ");
-        await speak(`${intro} ... ${script}`, { rate: 0.85 });
+
+        // Retry once on TTS failure
+        let spoken = false;
+        for (let attempt = 0; attempt < 2 && !spoken; attempt++) {
+          try {
+            await speak(`${intro} ... ${script}`, { rate: 0.85 });
+            spoken = true;
+          } catch (err) {
+            if (err instanceof DOMException && err.name === "AbortError") return;
+            console.warn(`Correction TTS failed, attempt ${attempt + 1}:`, err);
+            if (attempt === 0) await new Promise((r) => setTimeout(r, 1000));
+          }
+        }
+
+        // Small gap before feedback to avoid hammering the TTS API
+        await new Promise((r) => setTimeout(r, 150));
       }
-      await speakFeedback(comparison.accuracy);
+
+      // Retry feedback speech once on failure
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          await speakFeedback(comparison.accuracy);
+          break;
+        } catch (err) {
+          if (err instanceof DOMException && err.name === "AbortError") return;
+          console.warn(`Feedback TTS failed, attempt ${attempt + 1}:`, err);
+          if (attempt === 0) await new Promise((r) => setTimeout(r, 1000));
+        }
+      }
     } finally {
       setIsSpeakingCorrection(false);
     }
