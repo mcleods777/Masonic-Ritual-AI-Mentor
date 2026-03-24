@@ -103,6 +103,8 @@ export const ROLE_DISPLAY_NAMES: Record<string, string> = {
   'S(orJ)D': 'Sr. or Jr. Deacon',
   'S/J D': 'Sr. or Jr. Deacon',
   'Narrator': 'Narrator',
+  'PRAYER': 'Chaplain',
+  'Prayer': 'Chaplain',
 };
 
 /**

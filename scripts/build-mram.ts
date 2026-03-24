@@ -349,7 +349,7 @@ function parseDocument(content: string): MRAMDocument {
   }
   // Always include PRAYER if used
   if (doc.lines.some((l) => l.role === "PRAYER")) {
-    doc.roles["PRAYER"] = "Prayer";
+    doc.roles["PRAYER"] = "Chaplain";
   }
 
   return doc;
