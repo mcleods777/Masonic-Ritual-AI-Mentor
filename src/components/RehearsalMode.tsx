@@ -510,10 +510,12 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
     [sections.length, advanceToLine],
   );
 
-  // Click-to-speak: tap any word in the script view
-  const handleWordClick = useCallback(
-    async (word: string, role: string | null, e: React.MouseEvent) => {
+  // Click-to-speak: tap a line to hear the full line spoken
+  const handleLineSpeak = useCallback(
+    async (index: number, e: React.MouseEvent) => {
       e.stopPropagation();
+      const section = sections[index];
+      if (!section) return;
 
       // If the AI is currently speaking a line, cancel the recursive
       // advance so it doesn't start the next line and overlap.
@@ -522,17 +524,20 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
       }
 
       stopSpeaking();
-      if (role) {
+      const cleanText = cleanRitualText(section.text);
+      if (!cleanText) return;
+
+      if (section.speaker) {
         try {
-          await speakAsRole(word, role, voiceMapRef.current);
+          await speakAsRole(cleanText, section.speaker, voiceMapRef.current);
         } catch {
-          await speak(word);
+          await speak(cleanText);
         }
       } else {
-        await speak(word);
+        await speak(cleanText);
       }
     },
-    [rehearsalState],
+    [rehearsalState, sections],
   );
 
   // Save session to performance history when rehearsal completes
@@ -953,21 +958,12 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
                 {isCurrent && isUserSection && rehearsalState !== "checking" ? (
                   <span className="italic text-amber-400/70">[ Your line — recite from memory ]</span>
                 ) : displayText ? (
-                  <span className="inline">
-                    {displayText.split(/(\s+)/).map((seg, wi) => {
-                      if (/^\s+$/.test(seg)) {
-                        return <span key={wi}>{seg}</span>;
-                      }
-                      return (
-                        <span
-                          key={wi}
-                          onClick={(e) => handleWordClick(seg, section.speaker, e)}
-                          className="inline-block cursor-pointer rounded px-0.5 -mx-0.5 transition-colors hover:bg-white/10"
-                        >
-                          {seg}
-                        </span>
-                      );
-                    })}
+                  <span
+                    className="inline cursor-pointer rounded transition-colors hover:bg-white/5"
+                    onClick={(e) => handleLineSpeak(i, e)}
+                    title="Click to hear this line"
+                  >
+                    {displayText}
                   </span>
                 ) : (
                   <span className="italic text-zinc-600">[stage direction]</span>
