@@ -86,46 +86,58 @@ export function isCloudAudioPlaying(): boolean {
  * Uses the publicly-available premade voices so every account has them.
  */
 const ELEVENLABS_ROLE_VOICES: Record<string, string> = {
-  // Principal officers
-  WM:       "pNInz6obpgDQGcFmaJgB", // Adam — deep, authoritative
+  // All premade male voices — each major officer gets a distinct voice
+  // Adam (pNInz6obpgDQGcFmaJgB)  — deep, authoritative → WM
+  // Josh (TxGEqnHWrfWFTfGW9XjX)  — clear, measured → SW
+  // Arnold (VR6AewLTigWG4xSOukaG) — crisp, confident → JW
+  // Antoni (ErXwobaYiN019PkySvjV) — warm, friendly → SD
+  // Sam (yoZ06aMxZJJ28mfd3POQ)    — raspy, mature → JD
+  // Bill (pqHfZKP75CvOlQylNhV4)   — calm, steady → Secretary
+  // Charlie (IKne3meq5aSn9XLyUdCD) — natural, conversational → Treasurer
+  // Clyde (2EiwWnXFnvU5JabPnv8n)  — gruff, older → Tyler
+  // Dave (CYw3kZ02Hs0563khs1Fj)   — British, distinguished → Chaplain
+  // Fin (D38z5RcWu1voky8WS1ja)    — Irish, warm → Marshal
+
+  // Principal officers — deepest, most authoritative
+  WM:       "pNInz6obpgDQGcFmaJgB", // Adam
   "W.M.":   "pNInz6obpgDQGcFmaJgB",
   "W. M.":  "pNInz6obpgDQGcFmaJgB",
-  SW:       "TxGEqnHWrfWFTfGW9XjX", // Josh — clear, measured
+  SW:       "TxGEqnHWrfWFTfGW9XjX", // Josh
   "S.W.":   "TxGEqnHWrfWFTfGW9XjX",
   "S. W.":  "TxGEqnHWrfWFTfGW9XjX",
-  JW:       "VR6AewLTigWG4xSOukaG", // Arnold — crisp
+  JW:       "VR6AewLTigWG4xSOukaG", // Arnold
   "J.W.":   "VR6AewLTigWG4xSOukaG",
   "J. W.":  "VR6AewLTigWG4xSOukaG",
   // Deacons
-  SD:       "ErXwobaYiN019PkySvjV", // Antoni — warm
+  SD:       "ErXwobaYiN019PkySvjV", // Antoni
   "S.D.":   "ErXwobaYiN019PkySvjV",
   "S. D.":  "ErXwobaYiN019PkySvjV",
-  JD:       "yoZ06aMxZJJ28mfd3POQ", // Sam — raspy
+  JD:       "yoZ06aMxZJJ28mfd3POQ", // Sam
   "J.D.":   "yoZ06aMxZJJ28mfd3POQ",
   "J. D.":  "yoZ06aMxZJJ28mfd3POQ",
   "S(orJ)D":"ErXwobaYiN019PkySvjV",
   "S/J D":  "ErXwobaYiN019PkySvjV",
-  // Other officers
-  "S/Sec":  "TxGEqnHWrfWFTfGW9XjX",
-  Sec:      "TxGEqnHWrfWFTfGW9XjX",
-  "Sec.":   "TxGEqnHWrfWFTfGW9XjX",
-  S:        "TxGEqnHWrfWFTfGW9XjX",
-  Tr:       "VR6AewLTigWG4xSOukaG",
-  Treas:    "VR6AewLTigWG4xSOukaG",
-  "Treas.": "VR6AewLTigWG4xSOukaG",
-  Ch:       "pNInz6obpgDQGcFmaJgB",
-  Chap:     "pNInz6obpgDQGcFmaJgB",
-  "Chap.":  "pNInz6obpgDQGcFmaJgB",
-  Marshal:  "ErXwobaYiN019PkySvjV",
-  T:        "yoZ06aMxZJJ28mfd3POQ",
-  Tyler:    "yoZ06aMxZJJ28mfd3POQ",
-  Candidate:"VR6AewLTigWG4xSOukaG",
-  ALL:      "pNInz6obpgDQGcFmaJgB",
+  // Other officers — each gets a unique voice
+  "S/Sec":  "pqHfZKP75CvOlQylNhV4", // Bill
+  Sec:      "pqHfZKP75CvOlQylNhV4",
+  "Sec.":   "pqHfZKP75CvOlQylNhV4",
+  S:        "pqHfZKP75CvOlQylNhV4",
+  Tr:       "IKne3meq5aSn9XLyUdCD", // Charlie
+  Treas:    "IKne3meq5aSn9XLyUdCD",
+  "Treas.": "IKne3meq5aSn9XLyUdCD",
+  Ch:       "CYw3kZ02Hs0563khs1Fj", // Dave — distinguished for prayer
+  Chap:     "CYw3kZ02Hs0563khs1Fj",
+  "Chap.":  "CYw3kZ02Hs0563khs1Fj",
+  Marshal:  "D38z5RcWu1voky8WS1ja", // Fin
+  T:        "2EiwWnXFnvU5JabPnv8n", // Clyde — gruff for the Tyler
+  Tyler:    "2EiwWnXFnvU5JabPnv8n",
+  Candidate:"VR6AewLTigWG4xSOukaG", // Arnold (same as JW — he's being led)
+  ALL:      "pNInz6obpgDQGcFmaJgB", // Adam (WM leads unison)
   All:      "pNInz6obpgDQGcFmaJgB",
-  BR:       "ErXwobaYiN019PkySvjV",
-  Bro:      "ErXwobaYiN019PkySvjV",
-  "Bro.":   "ErXwobaYiN019PkySvjV",
-  "SW/WM":  "pNInz6obpgDQGcFmaJgB",
+  BR:       "IKne3meq5aSn9XLyUdCD", // Charlie
+  Bro:      "IKne3meq5aSn9XLyUdCD",
+  "Bro.":   "IKne3meq5aSn9XLyUdCD",
+  "SW/WM":  "pNInz6obpgDQGcFmaJgB", // Adam
 };
 
 const ELEVENLABS_DEFAULT_VOICE = "pNInz6obpgDQGcFmaJgB"; // Adam
