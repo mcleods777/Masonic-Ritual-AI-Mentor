@@ -16,6 +16,7 @@
 import {
   speakElevenLabs,
   speakElevenLabsAsRole,
+  getElevenLabsVoiceForRole,
   speakGoogleCloud,
   speakGoogleCloudAsRole,
   speakDeepgram,
@@ -361,6 +362,10 @@ export function speakAsRole(
   role: string,
   voiceMap?: Map<string, RoleVoiceProfile>
 ): Promise<void> {
+  if (currentEngine === "elevenlabs") {
+    const voiceId = getElevenLabsVoiceForRole(role);
+    console.log(`[TTS] speakAsRole engine=elevenlabs role="${role}" voiceId=${voiceId} text="${text.substring(0, 30)}..."`);
+  }
   switch (currentEngine) {
     case "elevenlabs":
       return speakElevenLabsAsRole(text, role);
