@@ -105,6 +105,10 @@ export const ROLE_DISPLAY_NAMES: Record<string, string> = {
   'Narrator': 'Narrator',
   'PRAYER': 'Chaplain',
   'Prayer': 'Chaplain',
+  'Trs': 'Treasurer',
+  'WM/Chaplain': 'WM / Chaplain',
+  'Voucher': 'Voucher',
+  'Vchr': 'Voucher',
 };
 
 /**

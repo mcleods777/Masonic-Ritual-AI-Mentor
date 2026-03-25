@@ -132,12 +132,20 @@ const ELEVENLABS_ROLE_VOICES: Record<string, string> = {
   T:        "2EiwWnXFnvU5JabPnv8n", // Clyde — gruff for the Tyler
   Tyler:    "2EiwWnXFnvU5JabPnv8n",
   Candidate:"VR6AewLTigWG4xSOukaG", // Arnold (same as JW — he's being led)
-  ALL:      "pNInz6obpgDQGcFmaJgB", // Adam (WM leads unison)
-  All:      "pNInz6obpgDQGcFmaJgB",
-  BR:       "IKne3meq5aSn9XLyUdCD", // Charlie
-  Bro:      "IKne3meq5aSn9XLyUdCD",
-  "Bro.":   "IKne3meq5aSn9XLyUdCD",
-  "SW/WM":  "pNInz6obpgDQGcFmaJgB", // Adam
+  ALL:          "pNInz6obpgDQGcFmaJgB", // Adam (WM leads unison)
+  All:          "pNInz6obpgDQGcFmaJgB",
+  BR:           "IKne3meq5aSn9XLyUdCD", // Charlie
+  Bro:          "IKne3meq5aSn9XLyUdCD",
+  "Bro.":       "IKne3meq5aSn9XLyUdCD",
+  "SW/WM":      "pNInz6obpgDQGcFmaJgB", // Adam
+  // Additional role aliases from ritual files
+  Trs:          "IKne3meq5aSn9XLyUdCD", // Charlie — Treasurer
+  "WM/Chaplain":"CYw3kZ02Hs0563khs1Fj", // Dave — prayer/chaplain voice
+  Voucher:      "ErXwobaYiN019PkySvjV", // Antoni — warm
+  Vchr:         "ErXwobaYiN019PkySvjV",
+  Narrator:     "TxGEqnHWrfWFTfGW9XjX", // Josh — narrator reads stage directions
+  PRAYER:       "CYw3kZ02Hs0563khs1Fj", // Dave — prayer
+  Prayer:       "CYw3kZ02Hs0563khs1Fj",
 };
 
 const ELEVENLABS_DEFAULT_VOICE = "pNInz6obpgDQGcFmaJgB"; // Adam
@@ -268,7 +276,15 @@ const GOOGLE_ROLE_VOICES: Record<string, GoogleVoiceProfile> = {
   BR:       { name: "en-US-Neural2-I", pitch: 0.0,  rate: 0.95 },
   Bro:      { name: "en-US-Neural2-I", pitch: 0.0,  rate: 0.95 },
   "Bro.":   { name: "en-US-Neural2-I", pitch: 0.0,  rate: 0.95 },
-  "SW/WM":  { name: "en-US-Neural2-D", pitch: -1.5, rate: 0.90 },
+  "SW/WM":      { name: "en-US-Neural2-D", pitch: -1.5, rate: 0.90 },
+  // Additional role aliases from ritual files
+  Trs:          { name: "en-US-Neural2-J", pitch: -1.0, rate: 0.95 },
+  "WM/Chaplain":{ name: "en-US-Neural2-D", pitch: -3.0, rate: 0.85 },
+  Voucher:      { name: "en-US-Neural2-I", pitch: 0.0,  rate: 0.95 },
+  Vchr:         { name: "en-US-Neural2-I", pitch: 0.0,  rate: 0.95 },
+  Narrator:     { name: "en-US-Neural2-A", pitch: 0.0,  rate: 1.0 },
+  PRAYER:       { name: "en-US-Neural2-D", pitch: -3.0, rate: 0.85 },
+  Prayer:       { name: "en-US-Neural2-D", pitch: -3.0, rate: 0.85 },
 };
 
 const GOOGLE_DEFAULT_VOICE: GoogleVoiceProfile = {
@@ -402,7 +418,15 @@ const DEEPGRAM_ROLE_VOICES: Record<string, string> = {
   BR:       "aura-2-orpheus-en",
   Bro:      "aura-2-orpheus-en",
   "Bro.":   "aura-2-orpheus-en",
-  "SW/WM":  "aura-2-zeus-en",
+  "SW/WM":      "aura-2-zeus-en",
+  // Additional role aliases from ritual files
+  Trs:          "aura-2-arcas-en",
+  "WM/Chaplain":"aura-2-helios-en",
+  Voucher:      "aura-2-orpheus-en",
+  Vchr:         "aura-2-orpheus-en",
+  Narrator:     "aura-2-orion-en",
+  PRAYER:       "aura-2-helios-en",
+  Prayer:       "aura-2-helios-en",
 };
 
 const DEEPGRAM_DEFAULT_VOICE = "aura-2-orion-en";

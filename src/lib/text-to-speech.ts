@@ -137,7 +137,15 @@ const ROLE_VOICE_PROFILES: Record<string, RoleVoiceProfile> = {
   BR:        { pitch: 0.72, rate: 0.90 },
   Bro:       { pitch: 0.72, rate: 0.90 },
   'Bro.':    { pitch: 0.72, rate: 0.90 },
-  'SW/WM':   { pitch: 0.58, rate: 0.85 },
+  'SW/WM':       { pitch: 0.58, rate: 0.85 },
+  // Additional role aliases from ritual files
+  Trs:           { pitch: 0.65, rate: 0.90 },
+  'WM/Chaplain': { pitch: 0.50, rate: 0.78 },
+  Voucher:       { pitch: 0.72, rate: 0.90 },
+  Vchr:          { pitch: 0.72, rate: 0.90 },
+  Narrator:      { pitch: 0.68, rate: 0.92 },
+  PRAYER:        { pitch: 0.50, rate: 0.78 },
+  Prayer:        { pitch: 0.50, rate: 0.78 },
 };
 
 /**
