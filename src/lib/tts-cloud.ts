@@ -86,66 +86,69 @@ export function isCloudAudioPlaying(): boolean {
  * Uses the publicly-available premade voices so every account has them.
  */
 const ELEVENLABS_ROLE_VOICES: Record<string, string> = {
-  // All premade male voices — each major officer gets a distinct voice
-  // Adam (pNInz6obpgDQGcFmaJgB)  — deep, authoritative → WM
-  // Josh (TxGEqnHWrfWFTfGW9XjX)  — clear, measured → SW
-  // Arnold (VR6AewLTigWG4xSOukaG) — crisp, confident → JW
-  // Antoni (ErXwobaYiN019PkySvjV) — warm, friendly → SD
-  // Sam (yoZ06aMxZJJ28mfd3POQ)    — raspy, mature → JD
-  // Bill (pqHfZKP75CvOlQylNhV4)   — calm, steady → Secretary
-  // Charlie (IKne3meq5aSn9XLyUdCD) — natural, conversational → Treasurer
-  // Clyde (2EiwWnXFnvU5JabPnv8n)  — gruff, older → Tyler
-  // Dave (CYw3kZ02Hs0563khs1Fj)   — British, distinguished → Chaplain
-  // Fin (D38z5RcWu1voky8WS1ja)    — Irish, warm → Marshal
+  // Voices verified available on the account (all male):
+  // Adam   (pNInz6obpgDQGcFmaJgB) — Dominant, Firm
+  // Brian  (nPczCjzI2devNBz1zQrb) — Deep, Resonant, Comforting
+  // George (JBFqnCBsd6RMkjVDRZzb) — Warm, British Storyteller
+  // Eric   (cjVigY5qzO86Huf0OWal) — Smooth, Trustworthy
+  // Chris  (iP95p4xoKVk53GoZ742B) — Charming, Down-to-Earth
+  // Bill   (pqHfZKP75CvOlQylNhV4) — Wise, Mature
+  // Charlie(IKne3meq5aSn9XLyUdCD) — Deep, Confident
+  // Daniel (onwK4e9ZLuTAKqWW03F9) — Steady Broadcaster
+  // Roger  (CwhRBWXzGAHq8TQ4Fs17) — Laid-Back, Resonant
+  // Liam   (TX3LPaxmHKxFdv7VOQHJ) — Energetic
+  // Harry  (SOYHLrjzK2X1ezoPC6cr) — Fierce Warrior
+  // Callum (N2lVS1w4EtoT3dr4eOWO) — Husky
+  // Will   (bIHbv24MWmeRgasZH58o) — Relaxed Optimist
 
-  // Principal officers — deepest, most authoritative
-  WM:       "pNInz6obpgDQGcFmaJgB", // Adam
+  // Principal officers
+  WM:       "pNInz6obpgDQGcFmaJgB", // Adam — dominant, firm
   "W.M.":   "pNInz6obpgDQGcFmaJgB",
   "W. M.":  "pNInz6obpgDQGcFmaJgB",
-  SW:       "TxGEqnHWrfWFTfGW9XjX", // Josh
-  "S.W.":   "TxGEqnHWrfWFTfGW9XjX",
-  "S. W.":  "TxGEqnHWrfWFTfGW9XjX",
-  JW:       "VR6AewLTigWG4xSOukaG", // Arnold
-  "J.W.":   "VR6AewLTigWG4xSOukaG",
-  "J. W.":  "VR6AewLTigWG4xSOukaG",
+  SW:       "nPczCjzI2devNBz1zQrb", // Brian — deep, resonant
+  "S.W.":   "nPczCjzI2devNBz1zQrb",
+  "S. W.":  "nPczCjzI2devNBz1zQrb",
+  JW:       "JBFqnCBsd6RMkjVDRZzb", // George — warm, British
+  "J.W.":   "JBFqnCBsd6RMkjVDRZzb",
+  "J. W.":  "JBFqnCBsd6RMkjVDRZzb",
   // Deacons
-  SD:       "ErXwobaYiN019PkySvjV", // Antoni
-  "S.D.":   "ErXwobaYiN019PkySvjV",
-  "S. D.":  "ErXwobaYiN019PkySvjV",
-  JD:       "yoZ06aMxZJJ28mfd3POQ", // Sam
-  "J.D.":   "yoZ06aMxZJJ28mfd3POQ",
-  "J. D.":  "yoZ06aMxZJJ28mfd3POQ",
-  "S(orJ)D":"ErXwobaYiN019PkySvjV",
-  "S/J D":  "ErXwobaYiN019PkySvjV",
-  // Other officers — each gets a unique voice
-  "S/Sec":  "pqHfZKP75CvOlQylNhV4", // Bill
+  SD:       "cjVigY5qzO86Huf0OWal", // Eric — smooth, trustworthy
+  "S.D.":   "cjVigY5qzO86Huf0OWal",
+  "S. D.":  "cjVigY5qzO86Huf0OWal",
+  JD:       "iP95p4xoKVk53GoZ742B", // Chris — charming
+  "J.D.":   "iP95p4xoKVk53GoZ742B",
+  "J. D.":  "iP95p4xoKVk53GoZ742B",
+  "S(orJ)D":"cjVigY5qzO86Huf0OWal",
+  "S/J D":  "cjVigY5qzO86Huf0OWal",
+  // Other officers
+  "S/Sec":  "pqHfZKP75CvOlQylNhV4", // Bill — wise, mature
   Sec:      "pqHfZKP75CvOlQylNhV4",
   "Sec.":   "pqHfZKP75CvOlQylNhV4",
   S:        "pqHfZKP75CvOlQylNhV4",
-  Tr:       "IKne3meq5aSn9XLyUdCD", // Charlie
+  Tr:       "IKne3meq5aSn9XLyUdCD", // Charlie — deep, confident
   Treas:    "IKne3meq5aSn9XLyUdCD",
   "Treas.": "IKne3meq5aSn9XLyUdCD",
-  Ch:       "CYw3kZ02Hs0563khs1Fj", // Dave — distinguished for prayer
-  Chap:     "CYw3kZ02Hs0563khs1Fj",
-  "Chap.":  "CYw3kZ02Hs0563khs1Fj",
-  Marshal:  "D38z5RcWu1voky8WS1ja", // Fin
-  T:        "2EiwWnXFnvU5JabPnv8n", // Clyde — gruff for the Tyler
-  Tyler:    "2EiwWnXFnvU5JabPnv8n",
-  Candidate:"VR6AewLTigWG4xSOukaG", // Arnold (same as JW — he's being led)
-  ALL:          "pNInz6obpgDQGcFmaJgB", // Adam (WM leads unison)
-  All:          "pNInz6obpgDQGcFmaJgB",
-  BR:           "IKne3meq5aSn9XLyUdCD", // Charlie
-  Bro:          "IKne3meq5aSn9XLyUdCD",
-  "Bro.":       "IKne3meq5aSn9XLyUdCD",
-  "SW/WM":      "pNInz6obpgDQGcFmaJgB", // Adam
-  // Additional role aliases from ritual files
-  Trs:          "IKne3meq5aSn9XLyUdCD", // Charlie — Treasurer
-  "WM/Chaplain":"CYw3kZ02Hs0563khs1Fj", // Dave — prayer/chaplain voice
-  Voucher:      "ErXwobaYiN019PkySvjV", // Antoni — warm
-  Vchr:         "ErXwobaYiN019PkySvjV",
-  Narrator:     "TxGEqnHWrfWFTfGW9XjX", // Josh — narrator reads stage directions
-  PRAYER:       "CYw3kZ02Hs0563khs1Fj", // Dave — prayer
-  Prayer:       "CYw3kZ02Hs0563khs1Fj",
+  Ch:       "onwK4e9ZLuTAKqWW03F9", // Daniel — steady broadcaster
+  Chap:     "onwK4e9ZLuTAKqWW03F9",
+  "Chap.":  "onwK4e9ZLuTAKqWW03F9",
+  Marshal:  "TX3LPaxmHKxFdv7VOQHJ", // Liam — energetic
+  T:        "CwhRBWXzGAHq8TQ4Fs17", // Roger — laid-back, resonant
+  Tyler:    "CwhRBWXzGAHq8TQ4Fs17",
+  Candidate:"N2lVS1w4EtoT3dr4eOWO", // Callum — husky
+  ALL:      "pNInz6obpgDQGcFmaJgB", // Adam (WM leads unison)
+  All:      "pNInz6obpgDQGcFmaJgB",
+  BR:       "N2lVS1w4EtoT3dr4eOWO", // Callum
+  Bro:      "N2lVS1w4EtoT3dr4eOWO",
+  "Bro.":   "N2lVS1w4EtoT3dr4eOWO",
+  "SW/WM":  "pNInz6obpgDQGcFmaJgB", // Adam
+  // Additional role aliases
+  Trs:      "IKne3meq5aSn9XLyUdCD", // Charlie
+  "WM/Chaplain":"onwK4e9ZLuTAKqWW03F9", // Daniel
+  Voucher:  "bIHbv24MWmeRgasZH58o", // Will — relaxed
+  Vchr:     "bIHbv24MWmeRgasZH58o",
+  Narrator: "SOYHLrjzK2X1ezoPC6cr", // Harry — commanding narrator
+  PRAYER:   "onwK4e9ZLuTAKqWW03F9", // Daniel
+  Prayer:   "onwK4e9ZLuTAKqWW03F9",
 };
 
 const ELEVENLABS_DEFAULT_VOICE = "pNInz6obpgDQGcFmaJgB"; // Adam
