@@ -487,14 +487,15 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
     startRehearsal();
   }, [startRehearsal]);
 
-  // Jump to any line — interrupts current speech/recording and navigates.
-  // The line is spoken by the AI (if it's an AI line) and rehearsal
-  // continues from there, just like pressing Start Rehearsal.
+  // Jump to any line — speaks the clicked line first, then continues rehearsal.
   const jumpToLine = useCallback(
-    (index: number) => {
+    async (index: number) => {
       if (index < 0 || index >= sections.length) return;
 
       // Stop everything in-flight
+      const gen = ++advanceGenRef.current;
+      cancelledRef.current = false;
+      stopSpeaking();
       if (engineRef.current) {
         engineRef.current.stop();
         engineRef.current = null;
@@ -504,12 +505,36 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
       setTranscript("");
       setCurrentComparison(null);
       setSttError(null);
+      setCurrentIndex(index);
 
-      // advanceToLine bumps generation + calls stopSpeaking, so old chains die
-      cancelledRef.current = false;
-      advanceToLine(index);
+      const section = sections[index];
+      const stale = () => cancelledRef.current || gen !== advanceGenRef.current;
+
+      // Play gavel knocks if present
+      const gavelCount = section.gavels > 0 ? section.gavels : countGavelMarks(section.text);
+      if (gavelCount > 0 && !stale()) {
+        await playGavelKnocks(gavelCount);
+      }
+      if (stale()) return;
+
+      // Speak the clicked line (even stage directions / narrator)
+      const cleanText = cleanRitualText(section.text);
+      if (cleanText && section.speaker) {
+        setRehearsalState("ai-speaking");
+        try {
+          await speakAsRole(cleanText, section.speaker, voiceMapRef.current);
+        } catch {
+          /* ignore */
+        }
+      }
+
+      if (stale()) return;
+
+      // Now continue rehearsal from the next line using advanceToLine
+      // (which bumps generation, killing this chain's gen — that's fine)
+      advanceToLine(index + 1);
     },
-    [sections.length, advanceToLine],
+    [sections, advanceToLine],
   );
 
   // Click-to-speak: tap the current line's text to re-hear it (one-shot).
