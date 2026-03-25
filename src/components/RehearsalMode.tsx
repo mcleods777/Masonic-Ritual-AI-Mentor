@@ -74,6 +74,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   sttProviderRef.current = sttProvider;
   const voiceMapRef = useRef<Map<string, RoleVoiceProfile>>(new Map());
   const cancelledRef = useRef(false);
+  const advanceGenRef = useRef(0); // generation counter to prevent overlapping advanceToLine chains
   const scriptContainerRef = useRef<HTMLDivElement>(null);
   const stopListeningRef = useRef<() => void>(() => { });
   const autoStopRef = useRef(autoStop);
@@ -170,12 +171,16 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
     // Advance will be triggered by effect
   }, []);
 
-  // Advance to next line and handle AI speaking vs user turn
-  const advanceToLine = useCallback(async (index: number) => {
+  // Internal advance — walks through lines with a generation guard.
+  // Only the matching generation is allowed to continue; a new call
+  // to advanceToLine() bumps the generation so any old chain exits.
+  const advanceInternal = useCallback(async (index: number, gen: number) => {
     if (cancelledRef.current || index >= sections.length) {
       setRehearsalState("complete");
       return;
     }
+
+    const stale = () => cancelledRef.current || gen !== advanceGenRef.current;
 
     setCurrentIndex(index);
     setTranscript("");
@@ -186,11 +191,11 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
 
     // Check for gavel marks and play knock sounds (use MRAM field first)
     const gavelCount = section.gavels > 0 ? section.gavels : countGavelMarks(section.text);
-    if (gavelCount > 0 && !cancelledRef.current) {
+    if (gavelCount > 0 && !stale()) {
       await playGavelKnocks(gavelCount);
     }
 
-    if (cancelledRef.current) return;
+    if (stale()) return;
 
     if (section.speaker === selectedRole) {
       // It's the user's turn
@@ -203,7 +208,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
       if (cleanText) {
         let spoken = false;
         for (let attempt = 0; attempt < 2 && !spoken; attempt++) {
-          if (cancelledRef.current) return;
+          if (stale()) return;
           try {
             await speakAsRole(cleanText, section.speaker, voiceMapRef.current);
             spoken = true;
@@ -223,18 +228,27 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
         }
       }
 
-      if (!cancelledRef.current) {
+      if (!stale()) {
         // Small gap between lines to avoid hammering the TTS API
         await new Promise((r) => setTimeout(r, 150));
-        // Auto-advance to next line after speaking
-        advanceToLine(index + 1);
+        // Auto-advance to next line (same generation — not a new entry)
+        advanceInternal(index + 1, gen);
       }
     } else {
       // No speaker (stage direction, etc.) — brief pause then skip
       await new Promise((r) => setTimeout(r, 150));
-      advanceToLine(index + 1);
+      if (!stale()) {
+        advanceInternal(index + 1, gen);
+      }
     }
   }, [sections, selectedRole]);
+
+  // Public entry point — bumps generation to cancel any running chain
+  const advanceToLine = useCallback((index: number) => {
+    stopSpeaking();
+    const gen = ++advanceGenRef.current;
+    advanceInternal(index, gen);
+  }, [advanceInternal]);
 
   // Trigger first advance when rehearsal starts
   useEffect(() => {
