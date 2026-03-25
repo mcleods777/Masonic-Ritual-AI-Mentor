@@ -32,6 +32,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "text is required" }, { status: 400 });
   }
 
+  console.log(`ElevenLabs TTS: voiceId=${voiceId}, text="${text.substring(0, 50)}..."`);
+
   const response = await fetch(
     `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}`,
     {
