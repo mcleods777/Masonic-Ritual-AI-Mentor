@@ -148,51 +148,77 @@ export function getVoiceForRole(role: string): RoleVoiceProfile {
 }
 
 /**
- * Heuristic: does this voice name suggest a male voice?
- * Browser voices don't expose gender reliably, so we match known names.
+ * Known male voice names across platforms, ordered by preference.
+ * We match substrings so "Microsoft David Desktop" matches "david".
  */
-function isMaleVoice(voice: SpeechSynthesisVoice): boolean {
+const MALE_VOICE_NAMES = [
+  // Windows
+  "david", "mark", "james", "george", "richard", "guy",
+  // macOS / iOS
+  "daniel", "alex", "fred", "ralph", "tom", "lee", "oliver", "aaron",
+  "arthur", "brian", "charles", "edmund", "gordon", "reed", "rishi", "thomas",
+  // Chrome / Android
+  "google uk english male", "google us english",
+  // Generic
+  "male",
+];
+
+const FEMALE_VOICE_NAMES = [
+  "female", "zira", "samantha", "victoria", "karen", "moira",
+  "fiona", "susan", "kate", "tessa", "allison", "ava",
+  "catherine", "grandma", "martha", "nicky", "serena",
+  "jenny", "aria", "eva", "elsa", "hazel", "clara",
+  "linda", "michelle", "sonia", "libby", "emily",
+];
+
+/**
+ * Score a voice for "maleness" — higher is more likely male.
+ * Returns -1 for known female, 0 for unknown, 1+ for likely male.
+ */
+function maleScore(voice: SpeechSynthesisVoice): number {
   const name = voice.name.toLowerCase();
-  const maleNames = [
-    "male", "david", "daniel", "alex", "james", "mark", "fred",
-    "google uk english male", "microsoft david", "microsoft mark",
-    "microsoft james", "aaron", "arthur", "brian", "charles",
-    "edmund", "gordon", "reed", "rishi", "thomas", "grandpa",
-  ];
-  const femaleNames = [
-    "female", "zira", "samantha", "victoria", "karen", "moira",
-    "fiona", "susan", "kate", "tessa", "allison", "ava",
-    "catherine", "grandma", "martha", "nicky", "serena",
-  ];
-  // Check female first — if clearly female, reject
-  if (femaleNames.some((f) => name.includes(f))) return false;
-  // Check male names
-  if (maleNames.some((m) => name.includes(m))) return true;
-  // "Google US English" is ambiguous but typically sounds male-ish; allow as fallback
-  return false;
+  if (FEMALE_VOICE_NAMES.some((f) => name.includes(f))) return -1;
+  for (let i = 0; i < MALE_VOICE_NAMES.length; i++) {
+    if (name.includes(MALE_VOICE_NAMES[i])) return MALE_VOICE_NAMES.length - i;
+  }
+  return 0;
 }
 
 /**
- * Assign distinct voices from the available voice list to each role.
- * Strongly prefers male voices since this is Masonic ritual.
- * Spreads voices across roles for maximum variety.
+ * Find the single best male voice available on this device.
+ */
+function findBestMaleVoice(): SpeechSynthesisVoice | null {
+  const voices = getVoices();
+  if (voices.length === 0) return null;
+
+  let best: SpeechSynthesisVoice | null = null;
+  let bestScore = -Infinity;
+
+  for (const v of voices) {
+    const s = maleScore(v);
+    if (s > bestScore) {
+      bestScore = s;
+      best = v;
+    }
+  }
+
+  return best;
+}
+
+/**
+ * Assign voices to each role for browser TTS.
+ * Uses a single male voice for all roles — pitch and rate variation
+ * from the role profiles provides differentiation between officers.
  * (Only meaningful for the "browser" engine.)
  */
 export function assignVoicesToRoles(roles: string[]): Map<string, RoleVoiceProfile> {
-  const allVoices = getVoices();
-  const maleVoices = allVoices.filter(isMaleVoice);
-  // Fall back to all voices only if no male voices found
-  const voices = maleVoices.length > 0 ? maleVoices : allVoices;
+  const maleVoice = findBestMaleVoice();
   const map = new Map<string, RoleVoiceProfile>();
 
-  for (let i = 0; i < roles.length; i++) {
-    const role = roles[i];
+  for (const role of roles) {
     const profile = getVoiceForRole(role);
-
-    // Spread available voices across roles
-    if (voices.length > 0) {
-      const voiceIndex = i % voices.length;
-      map.set(role, { ...profile, voiceName: voices[voiceIndex].name });
+    if (maleVoice) {
+      map.set(role, { ...profile, voiceName: maleVoice.name });
     } else {
       map.set(role, profile);
     }
@@ -239,25 +265,8 @@ function getBestVoice(preferredName?: string): SpeechSynthesisVoice | null {
     if (preferred) return preferred;
   }
 
-  const preferredVoices = [
-    "Google UK English Male",
-    "Microsoft David", // Windows
-    "Daniel", // macOS
-    "Alex", // macOS
-    "Microsoft Mark",
-    "Google US English",
-  ];
-
-  for (const name of preferredVoices) {
-    const voice = voices.find((v) => v.name.includes(name));
-    if (voice) return voice;
-  }
-
-  // Prefer any male voice over a female one
-  const male = voices.find(isMaleVoice);
-  if (male) return male;
-
-  return voices[0] || null;
+  // Use the same male-preference scoring as role assignment
+  return findBestMaleVoice() || voices[0];
 }
 
 /** Speak using the browser Web Speech API. */
