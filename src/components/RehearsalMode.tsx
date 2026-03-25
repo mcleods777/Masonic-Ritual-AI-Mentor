@@ -487,31 +487,34 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
     startRehearsal();
   }, [startRehearsal]);
 
-  // Jump to any line — interrupts current speech/recording and navigates
+  // Jump to any line — interrupts current speech/recording and navigates.
+  // The line is spoken by the AI (if it's an AI line) and rehearsal
+  // continues from there, just like pressing Start Rehearsal.
   const jumpToLine = useCallback(
-    async (index: number) => {
+    (index: number) => {
       if (index < 0 || index >= sections.length) return;
 
       // Stop everything in-flight
-      cancelledRef.current = true;
-      stopSpeaking();
       if (engineRef.current) {
         engineRef.current.stop();
         engineRef.current = null;
       }
       setAiFeedback(null);
       setIsSpeakingFeedback(false);
+      setTranscript("");
+      setCurrentComparison(null);
+      setSttError(null);
 
-      // Brief pause so the cancelled flag is respected by any in-flight advanceToLine
-      await new Promise((r) => setTimeout(r, 50));
+      // advanceToLine bumps generation + calls stopSpeaking, so old chains die
       cancelledRef.current = false;
       advanceToLine(index);
     },
     [sections.length, advanceToLine],
   );
 
-  // Click-to-speak: tap a line to hear the full line spoken
-  const handleLineSpeak = useCallback(
+  // Click-to-speak: tap the current line's text to re-hear it (one-shot).
+  // Non-current lines are handled by jumpToLine on the outer div.
+  const handleCurrentLineSpeak = useCallback(
     async (index: number, e: React.MouseEvent) => {
       e.stopPropagation();
       const section = sections[index];
@@ -962,9 +965,9 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
                   <span className="italic text-amber-400/70">[ Your line — recite from memory ]</span>
                 ) : displayText ? (
                   <span
-                    className="inline cursor-pointer rounded transition-colors hover:bg-white/5"
-                    onClick={(e) => handleLineSpeak(i, e)}
-                    title="Click to hear this line"
+                    className={`inline rounded transition-colors ${isCurrent ? "cursor-pointer hover:bg-white/5" : ""}`}
+                    onClick={isCurrent ? (e) => handleCurrentLineSpeak(i, e) : undefined}
+                    title={isCurrent ? "Click to hear this line again" : undefined}
                   >
                     {displayText}
                   </span>
