@@ -134,28 +134,64 @@ export function getElevenLabsVoiceForRole(role: string): string {
   return ELEVENLABS_ROLE_VOICES[role] || ELEVENLABS_DEFAULT_VOICE;
 }
 
-/** Speak text using ElevenLabs. */
+/** Speak text using ElevenLabs (with retry for transient errors). */
 export async function speakElevenLabs(
   text: string,
   voiceId?: string
 ): Promise<void> {
+  const MAX_RETRIES = 2;
+  const RETRY_DELAYS = [500, 1500]; // ms backoff between retries
   const signal = getTTSAbortSignal();
-  const resp = await fetch("/api/tts/elevenlabs", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      text,
-      voiceId: voiceId || ELEVENLABS_DEFAULT_VOICE,
-    }),
-    signal,
-  });
 
-  if (!resp.ok) {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    // Re-throw abort errors immediately — don't retry intentional cancellations
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+
+    let resp: Response;
+    try {
+      resp = await fetch("/api/tts/elevenlabs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text,
+          voiceId: voiceId || ELEVENLABS_DEFAULT_VOICE,
+        }),
+        signal,
+      });
+    } catch (fetchErr) {
+      // Abort errors should not be retried
+      if (fetchErr instanceof DOMException && fetchErr.name === "AbortError") {
+        throw fetchErr;
+      }
+      // Network error — retry if we can
+      if (attempt < MAX_RETRIES) {
+        console.warn(
+          `ElevenLabs TTS network error, retrying in ${RETRY_DELAYS[attempt]}ms (attempt ${attempt + 1}/${MAX_RETRIES})...`
+        );
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+        continue;
+      }
+      throw fetchErr;
+    }
+
+    if (resp.ok) {
+      await playAudioBlob(await resp.blob());
+      return;
+    }
+
+    // Retry on transient errors (429 rate limit, 500/503 server errors)
+    const isRetryable = resp.status === 429 || resp.status >= 500;
+    if (isRetryable && attempt < MAX_RETRIES) {
+      console.warn(
+        `ElevenLabs TTS returned ${resp.status}, retrying in ${RETRY_DELAYS[attempt]}ms (attempt ${attempt + 1}/${MAX_RETRIES})...`
+      );
+      await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+      continue;
+    }
+
     const err = await resp.json().catch(() => ({ error: resp.statusText }));
     throw new Error((err as { error?: string }).error || "ElevenLabs TTS failed");
   }
-
-  await playAudioBlob(await resp.blob());
 }
 
 /** Speak text as a Masonic officer role using ElevenLabs. */
@@ -245,17 +281,37 @@ export async function speakGoogleCloud(
   const signal = getTTSAbortSignal();
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    const resp = await fetch("/api/tts/google", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        text,
-        voiceName: voiceName ?? GOOGLE_DEFAULT_VOICE.name,
-        pitch: pitch ?? GOOGLE_DEFAULT_VOICE.pitch,
-        speakingRate: speakingRate ?? GOOGLE_DEFAULT_VOICE.rate,
-      }),
-      signal,
-    });
+    // Re-throw abort errors immediately — don't retry intentional cancellations
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+
+    let resp: Response;
+    try {
+      resp = await fetch("/api/tts/google", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text,
+          voiceName: voiceName ?? GOOGLE_DEFAULT_VOICE.name,
+          pitch: pitch ?? GOOGLE_DEFAULT_VOICE.pitch,
+          speakingRate: speakingRate ?? GOOGLE_DEFAULT_VOICE.rate,
+        }),
+        signal,
+      });
+    } catch (fetchErr) {
+      // Abort errors should not be retried
+      if (fetchErr instanceof DOMException && fetchErr.name === "AbortError") {
+        throw fetchErr;
+      }
+      // Network error — retry if we can
+      if (attempt < MAX_RETRIES) {
+        console.warn(
+          `Google TTS network error, retrying in ${RETRY_DELAYS[attempt]}ms (attempt ${attempt + 1}/${MAX_RETRIES})...`
+        );
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+        continue;
+      }
+      throw fetchErr;
+    }
 
     if (resp.ok) {
       await playAudioBlob(await resp.blob());
@@ -468,30 +524,66 @@ export function getKokoroVoiceForRole(role: string): { voice: string; speed: num
   return KOKORO_ROLE_VOICES[role] || KOKORO_DEFAULT_VOICE;
 }
 
-/** Speak text using Kokoro TTS. */
+/** Speak text using Kokoro TTS (with retry for transient errors). */
 export async function speakKokoro(
   text: string,
   voice?: string,
   speed?: number
 ): Promise<void> {
+  const MAX_RETRIES = 2;
+  const RETRY_DELAYS = [500, 1500]; // ms backoff between retries
   const signal = getTTSAbortSignal();
-  const resp = await fetch("/api/tts/kokoro", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      text,
-      voice: voice ?? KOKORO_DEFAULT_VOICE.voice,
-      speed: speed ?? KOKORO_DEFAULT_VOICE.speed,
-    }),
-    signal,
-  });
 
-  if (!resp.ok) {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    // Re-throw abort errors immediately — don't retry intentional cancellations
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+
+    let resp: Response;
+    try {
+      resp = await fetch("/api/tts/kokoro", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text,
+          voice: voice ?? KOKORO_DEFAULT_VOICE.voice,
+          speed: speed ?? KOKORO_DEFAULT_VOICE.speed,
+        }),
+        signal,
+      });
+    } catch (fetchErr) {
+      // Abort errors should not be retried
+      if (fetchErr instanceof DOMException && fetchErr.name === "AbortError") {
+        throw fetchErr;
+      }
+      // Network error — retry if we can
+      if (attempt < MAX_RETRIES) {
+        console.warn(
+          `Kokoro TTS network error, retrying in ${RETRY_DELAYS[attempt]}ms (attempt ${attempt + 1}/${MAX_RETRIES})...`
+        );
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+        continue;
+      }
+      throw fetchErr;
+    }
+
+    if (resp.ok) {
+      await playAudioBlob(await resp.blob());
+      return;
+    }
+
+    // Retry on transient errors (429 rate limit, 500/503 server errors)
+    const isRetryable = resp.status === 429 || resp.status >= 500;
+    if (isRetryable && attempt < MAX_RETRIES) {
+      console.warn(
+        `Kokoro TTS returned ${resp.status}, retrying in ${RETRY_DELAYS[attempt]}ms (attempt ${attempt + 1}/${MAX_RETRIES})...`
+      );
+      await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+      continue;
+    }
+
     const err = await resp.json().catch(() => ({ error: resp.statusText }));
     throw new Error((err as { error?: string }).error || "Kokoro TTS failed");
   }
-
-  await playAudioBlob(await resp.blob());
 }
 
 /** Speak text as a Masonic officer role using Kokoro TTS. */

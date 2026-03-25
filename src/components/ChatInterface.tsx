@@ -98,11 +98,36 @@ export default function ChatInterface({ ritualContext }: ChatInterfaceProps) {
   const [sttProvider, setSTTProvider] = useState<STTProvider>("whisper");
   const engineRef = useRef<STTEngine | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const speakGenRef = useRef(0);
+  const userScrollingRef = useRef(false);
+  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isLoading = status === "streaming" || status === "submitted";
 
+  // Manual scroll detection — suppress auto-scroll for 5 seconds after user scrolls
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      userScrollingRef.current = true;
+      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+      scrollTimeoutRef.current = setTimeout(() => {
+        userScrollingRef.current = false;
+      }, 5000);
+    };
+
+    container.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      container.removeEventListener("scroll", handleScroll);
+      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+    };
+  }, []);
+
   // Auto-scroll to bottom
   useEffect(() => {
+    if (userScrollingRef.current) return;
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
@@ -114,15 +139,18 @@ export default function ChatInterface({ ritualContext }: ChatInterfaceProps) {
       const parts = lastMessage.parts?.filter((p) => p.type === "text") || [];
       const text = parts.map((p) => p.text).join("");
       if (text) {
+        const gen = ++speakGenRef.current;
         (async () => {
+          stopSpeaking();
           for (let attempt = 0; attempt < 2; attempt++) {
+            if (speakGenRef.current !== gen) return;
             try {
               await speak(text, { rate: 0.9 });
               return;
             } catch (err) {
               if (err instanceof DOMException && err.name === "AbortError") return;
               console.warn(`Auto-speak failed, attempt ${attempt + 1}:`, err);
-              if (attempt === 0) await new Promise((r) => setTimeout(r, 1000));
+              if (attempt === 0) await new Promise((r) => setTimeout(r, 1500));
             }
           }
         })();
@@ -273,7 +301,7 @@ export default function ChatInterface({ ritualContext }: ChatInterfaceProps) {
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-4 min-h-0">
+      <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-6 space-y-4 min-h-0">
         {messages.length === 0 && (
           <div className="text-center py-12">
             <div className="w-16 h-16 mx-auto rounded-full bg-zinc-800 flex items-center justify-center mb-4">

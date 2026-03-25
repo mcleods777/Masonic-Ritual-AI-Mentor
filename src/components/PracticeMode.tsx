@@ -49,6 +49,7 @@ export default function PracticeMode({ sections, documentId, documentTitle }: Pr
   const [isSpeakingCorrection, setIsSpeakingCorrection] = useState(false);
 
   const engineRef = useRef<STTEngine | null>(null);
+  const speakGenRef = useRef(0);
 
   // Group individual lines into actual ritual sections, then group by degree
   const sectionsByDegree = useMemo(() => {
@@ -154,7 +155,10 @@ export default function PracticeMode({ sections, documentId, documentTitle }: Pr
     if (!comparison || !selectedSection || !isTTSAvailable()) return;
 
     setIsSpeakingCorrection(true);
+    const gen = ++speakGenRef.current;
     try {
+      stopSpeaking();
+
       const diffs = comparison.diffs;
       const phrases: string[] = [];
       const CONTEXT = 3;
@@ -213,6 +217,7 @@ export default function PracticeMode({ sections, documentId, documentTitle }: Pr
         let spoken = false;
         for (let attempt = 0; attempt < 2 && !spoken; attempt++) {
           try {
+            if (gen !== speakGenRef.current) return;
             await speak(`${intro} ... ${script}`, { rate: 0.85 });
             spoken = true;
           } catch (err) {
@@ -221,20 +226,21 @@ export default function PracticeMode({ sections, documentId, documentTitle }: Pr
             if (attempt === 0) await new Promise((r) => setTimeout(r, 1000));
           }
         }
-
-        // Small gap before feedback to avoid hammering the TTS API
-        await new Promise((r) => setTimeout(r, 150));
       }
+
+      // Small gap before feedback to avoid hammering the TTS API
+      await new Promise((r) => setTimeout(r, 150));
 
       // Retry feedback speech once on failure
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
+          if (gen !== speakGenRef.current) return;
           await speakFeedback(comparison.accuracy);
           break;
         } catch (err) {
           if (err instanceof DOMException && err.name === "AbortError") return;
           console.warn(`Feedback TTS failed, attempt ${attempt + 1}:`, err);
-          if (attempt === 0) await new Promise((r) => setTimeout(r, 1000));
+          if (attempt === 0) await new Promise((r) => setTimeout(r, 1500));
         }
       }
     } finally {

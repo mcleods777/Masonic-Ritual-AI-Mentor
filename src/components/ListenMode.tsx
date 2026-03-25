@@ -204,10 +204,12 @@ export default function ListenMode({ sections }: ListenModeProps) {
 
       if (playState === "idle" || playState === "finished") {
         // One-shot: speak just this line
+        const gen = ++playGenRef.current;
         stopSpeaking();
         setCurrentIndex(index);
         const gavelCount = section.gavels > 0 ? section.gavels : countGavelMarks(section.text);
         if (gavelCount > 0) await playGavelKnocks(gavelCount);
+        if (gen !== playGenRef.current) return;
         if (section.speaker) {
           const cleanText = cleanRitualText(section.text);
           if (cleanText) {
