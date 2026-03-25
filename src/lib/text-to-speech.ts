@@ -148,12 +148,41 @@ export function getVoiceForRole(role: string): RoleVoiceProfile {
 }
 
 /**
+ * Heuristic: does this voice name suggest a male voice?
+ * Browser voices don't expose gender reliably, so we match known names.
+ */
+function isMaleVoice(voice: SpeechSynthesisVoice): boolean {
+  const name = voice.name.toLowerCase();
+  const maleNames = [
+    "male", "david", "daniel", "alex", "james", "mark", "fred",
+    "google uk english male", "microsoft david", "microsoft mark",
+    "microsoft james", "aaron", "arthur", "brian", "charles",
+    "edmund", "gordon", "reed", "rishi", "thomas", "grandpa",
+  ];
+  const femaleNames = [
+    "female", "zira", "samantha", "victoria", "karen", "moira",
+    "fiona", "susan", "kate", "tessa", "allison", "ava",
+    "catherine", "grandma", "martha", "nicky", "serena",
+  ];
+  // Check female first — if clearly female, reject
+  if (femaleNames.some((f) => name.includes(f))) return false;
+  // Check male names
+  if (maleNames.some((m) => name.includes(m))) return true;
+  // "Google US English" is ambiguous but typically sounds male-ish; allow as fallback
+  return false;
+}
+
+/**
  * Assign distinct voices from the available voice list to each role.
+ * Strongly prefers male voices since this is Masonic ritual.
  * Spreads voices across roles for maximum variety.
  * (Only meaningful for the "browser" engine.)
  */
 export function assignVoicesToRoles(roles: string[]): Map<string, RoleVoiceProfile> {
-  const voices = getVoices();
+  const allVoices = getVoices();
+  const maleVoices = allVoices.filter(isMaleVoice);
+  // Fall back to all voices only if no male voices found
+  const voices = maleVoices.length > 0 ? maleVoices : allVoices;
   const map = new Map<string, RoleVoiceProfile>();
 
   for (let i = 0; i < roles.length; i++) {
@@ -199,7 +228,7 @@ export function getVoices(): SpeechSynthesisVoice[] {
 }
 
 /**
- * Pick the best default browser voice
+ * Pick the best default browser voice — prefers male voices for Masonic ritual.
  */
 function getBestVoice(preferredName?: string): SpeechSynthesisVoice | null {
   const voices = getVoices();
@@ -212,16 +241,21 @@ function getBestVoice(preferredName?: string): SpeechSynthesisVoice | null {
 
   const preferredVoices = [
     "Google UK English Male",
-    "Google US English",
+    "Microsoft David", // Windows
     "Daniel", // macOS
     "Alex", // macOS
-    "Microsoft David", // Windows
+    "Microsoft Mark",
+    "Google US English",
   ];
 
   for (const name of preferredVoices) {
     const voice = voices.find((v) => v.name.includes(name));
     if (voice) return voice;
   }
+
+  // Prefer any male voice over a female one
+  const male = voices.find(isMaleVoice);
+  if (male) return male;
 
   return voices[0] || null;
 }
