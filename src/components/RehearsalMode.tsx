@@ -517,13 +517,16 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
       const section = sections[index];
       if (!section) return;
 
-      // If the AI is currently speaking a line, cancel the recursive
-      // advance so it doesn't start the next line and overlap.
+      // Kill any running advanceInternal chain (bumps generation + stops audio)
+      ++advanceGenRef.current;
+      cancelledRef.current = true;
+      stopSpeaking();
+
+      // Clear the "AI speaking" overlay so it doesn't stick
       if (rehearsalState === "ai-speaking") {
-        cancelledRef.current = true;
+        setRehearsalState("user-turn");
       }
 
-      stopSpeaking();
       const cleanText = cleanRitualText(section.text);
       if (!cleanText) return;
 
@@ -531,10 +534,10 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
         try {
           await speakAsRole(cleanText, section.speaker, voiceMapRef.current);
         } catch {
-          await speak(cleanText);
+          try { await speak(cleanText); } catch { /* ignore */ }
         }
       } else {
-        await speak(cleanText);
+        try { await speak(cleanText); } catch { /* ignore */ }
       }
     },
     [rehearsalState, sections],
