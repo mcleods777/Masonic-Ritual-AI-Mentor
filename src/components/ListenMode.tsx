@@ -25,6 +25,7 @@ export default function ListenMode({ sections }: ListenModeProps) {
   const cancelledRef = useRef(false);
   const pausedRef = useRef(false);
   const resumeRef = useRef<(() => void) | null>(null);
+  const playGenRef = useRef(0); // generation counter to prevent overlapping playFrom loops
   const voiceMapRef = useRef<Map<string, RoleVoiceProfile>>(new Map());
   const scriptContainerRef = useRef<HTMLDivElement>(null);
 
@@ -85,12 +86,16 @@ export default function ListenMode({ sections }: ListenModeProps) {
   // Walk through every line, speaking each one
   const playFrom = useCallback(
     async (startIndex: number) => {
+      // Bump generation so any previous playFrom loop will exit
+      const gen = ++playGenRef.current;
       cancelledRef.current = false;
       pausedRef.current = false;
       setPlayState("playing");
 
       for (let i = startIndex; i < sections.length; i++) {
-        if (cancelledRef.current) return;
+        if (cancelledRef.current || gen !== playGenRef.current) return;
+
+        const stale = () => cancelledRef.current || gen !== playGenRef.current;
 
         // Handle pause — wait until resumed
         if (pausedRef.current) {
@@ -98,7 +103,7 @@ export default function ListenMode({ sections }: ListenModeProps) {
           await new Promise<void>((resolve) => {
             resumeRef.current = resolve;
           });
-          if (cancelledRef.current) return;
+          if (stale()) return;
           setPlayState("playing");
         }
 
@@ -107,10 +112,10 @@ export default function ListenMode({ sections }: ListenModeProps) {
 
         // Play gavel knocks if present (use MRAM field first, then parse from text)
         const gavelCount = section.gavels > 0 ? section.gavels : countGavelMarks(section.text);
-        if (gavelCount > 0 && !cancelledRef.current) {
+        if (gavelCount > 0 && !stale()) {
           await playGavelKnocks(gavelCount);
         }
-        if (cancelledRef.current) return;
+        if (stale()) return;
 
         // Speak the line if it has a speaker (retry once on failure)
         if (section.speaker) {
@@ -118,7 +123,7 @@ export default function ListenMode({ sections }: ListenModeProps) {
           if (cleanText) {
             let spoken = false;
             for (let attempt = 0; attempt < 2 && !spoken; attempt++) {
-              if (cancelledRef.current) return;
+              if (stale()) return;
               try {
                 await speakAsRole(cleanText, section.speaker, voiceMapRef.current);
                 spoken = true;
@@ -146,12 +151,12 @@ export default function ListenMode({ sections }: ListenModeProps) {
         }
 
         // Small gap between lines to avoid hammering the TTS API
-        if (!cancelledRef.current && i < sections.length - 1) {
+        if (!stale() && i < sections.length - 1) {
           await new Promise((r) => setTimeout(r, 150));
         }
       }
 
-      if (!cancelledRef.current) {
+      if (!cancelledRef.current && gen === playGenRef.current) {
         setPlayState("finished");
       }
     },
@@ -215,14 +220,13 @@ export default function ListenMode({ sections }: ListenModeProps) {
         }
       } else if (playState === "playing" || playState === "paused") {
         // Jump playback to this line and continue from here
-        cancelledRef.current = true;
+        // stopSpeaking() cancels current audio; playFrom() bumps generation
+        // so the old loop exits at its next checkpoint
         stopSpeaking();
         if (resumeRef.current) {
           resumeRef.current();
           resumeRef.current = null;
         }
-        // Small delay to let the current playback stop cleanly
-        await new Promise((r) => setTimeout(r, 100));
         playFrom(index);
       }
     },
