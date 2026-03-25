@@ -75,7 +75,7 @@ export interface TTSOptions {
 
 const DEFAULT_OPTIONS: TTSOptions = {
   rate: 0.9,
-  pitch: 1,
+  pitch: 0.7,
   volume: 1,
 };
 
@@ -92,51 +92,52 @@ export interface RoleVoiceProfile {
 
 /**
  * Default voice profiles per role — pitch and rate vary to distinguish speakers.
- * Pitch range: 0.7 (deep) to 1.3 (higher).
- * Rate range: 0.8 (slow/formal) to 1.0 (normal).
+ * All pitches kept in the masculine range (0.5–0.8) so even Android/mobile
+ * default voices sound like men. Officers are differentiated primarily by
+ * rate and subtle pitch shifts within that range.
  */
 const ROLE_VOICE_PROFILES: Record<string, RoleVoiceProfile> = {
-  // Principal officers — deeper, more deliberate
-  WM:        { pitch: 0.75, rate: 0.82 },
-  'W.M.':    { pitch: 0.75, rate: 0.82 },
-  'W. M.':   { pitch: 0.75, rate: 0.82 },
-  SW:        { pitch: 0.88, rate: 0.87 },
-  'S.W.':    { pitch: 0.88, rate: 0.87 },
-  'S. W.':   { pitch: 0.88, rate: 0.87 },
-  JW:        { pitch: 1.0,  rate: 0.87 },
-  'J.W.':    { pitch: 1.0,  rate: 0.87 },
-  'J. W.':   { pitch: 1.0,  rate: 0.87 },
-  // Deacons — slightly higher, a bit quicker
-  SD:        { pitch: 1.05, rate: 0.92 },
-  'S.D.':    { pitch: 1.05, rate: 0.92 },
-  'S. D.':   { pitch: 1.05, rate: 0.92 },
-  JD:        { pitch: 1.15, rate: 0.92 },
-  'J.D.':    { pitch: 1.15, rate: 0.92 },
-  'J. D.':   { pitch: 1.15, rate: 0.92 },
-  'S(orJ)D': { pitch: 1.1,  rate: 0.92 },
-  'S/J D':   { pitch: 1.1,  rate: 0.92 },
+  // Principal officers — deepest, most deliberate
+  WM:        { pitch: 0.55, rate: 0.82 },
+  'W.M.':    { pitch: 0.55, rate: 0.82 },
+  'W. M.':   { pitch: 0.55, rate: 0.82 },
+  SW:        { pitch: 0.62, rate: 0.87 },
+  'S.W.':    { pitch: 0.62, rate: 0.87 },
+  'S. W.':   { pitch: 0.62, rate: 0.87 },
+  JW:        { pitch: 0.68, rate: 0.87 },
+  'J.W.':    { pitch: 0.68, rate: 0.87 },
+  'J. W.':   { pitch: 0.68, rate: 0.87 },
+  // Deacons — slightly higher but still masculine, a bit quicker
+  SD:        { pitch: 0.72, rate: 0.92 },
+  'S.D.':    { pitch: 0.72, rate: 0.92 },
+  'S. D.':   { pitch: 0.72, rate: 0.92 },
+  JD:        { pitch: 0.78, rate: 0.92 },
+  'J.D.':    { pitch: 0.78, rate: 0.92 },
+  'J. D.':   { pitch: 0.78, rate: 0.92 },
+  'S(orJ)D': { pitch: 0.75, rate: 0.92 },
+  'S/J D':   { pitch: 0.75, rate: 0.92 },
   // Other officers
-  'S/Sec':   { pitch: 0.95, rate: 0.95 },
-  Sec:       { pitch: 0.95, rate: 0.95 },
-  'Sec.':    { pitch: 0.95, rate: 0.95 },
-  S:         { pitch: 0.95, rate: 0.95 },
-  Tr:        { pitch: 0.92, rate: 0.90 },
-  Treas:     { pitch: 0.92, rate: 0.90 },
-  'Treas.':  { pitch: 0.92, rate: 0.90 },
-  Ch:        { pitch: 0.80, rate: 0.78 },
-  Chap:      { pitch: 0.80, rate: 0.78 },
-  'Chap.':   { pitch: 0.80, rate: 0.78 },
-  Marshal:   { pitch: 1.0,  rate: 0.90 },
-  T:         { pitch: 1.20, rate: 0.90 },
-  Tyler:     { pitch: 1.20, rate: 0.90 },
-  Candidate: { pitch: 1.10, rate: 0.85 },
+  'S/Sec':   { pitch: 0.70, rate: 0.95 },
+  Sec:       { pitch: 0.70, rate: 0.95 },
+  'Sec.':    { pitch: 0.70, rate: 0.95 },
+  S:         { pitch: 0.70, rate: 0.95 },
+  Tr:        { pitch: 0.65, rate: 0.90 },
+  Treas:     { pitch: 0.65, rate: 0.90 },
+  'Treas.':  { pitch: 0.65, rate: 0.90 },
+  Ch:        { pitch: 0.50, rate: 0.78 },
+  Chap:      { pitch: 0.50, rate: 0.78 },
+  'Chap.':   { pitch: 0.50, rate: 0.78 },
+  Marshal:   { pitch: 0.68, rate: 0.90 },
+  T:         { pitch: 0.80, rate: 0.90 },
+  Tyler:     { pitch: 0.80, rate: 0.90 },
+  Candidate: { pitch: 0.75, rate: 0.85 },
   // Group/other
-  ALL:       { pitch: 0.95, rate: 0.80 },
-  All:       { pitch: 0.95, rate: 0.80 },
-  BR:        { pitch: 1.08, rate: 0.90 },
-  Bro:       { pitch: 1.08, rate: 0.90 },
-  'Bro.':    { pitch: 1.08, rate: 0.90 },
-  'SW/WM':   { pitch: 0.82, rate: 0.85 },
+  ALL:       { pitch: 0.65, rate: 0.80 },
+  All:       { pitch: 0.65, rate: 0.80 },
+  BR:        { pitch: 0.72, rate: 0.90 },
+  Bro:       { pitch: 0.72, rate: 0.90 },
+  'Bro.':    { pitch: 0.72, rate: 0.90 },
+  'SW/WM':   { pitch: 0.58, rate: 0.85 },
 };
 
 /**
@@ -144,7 +145,7 @@ const ROLE_VOICE_PROFILES: Record<string, RoleVoiceProfile> = {
  * Falls back to neutral defaults if the role isn't mapped.
  */
 export function getVoiceForRole(role: string): RoleVoiceProfile {
-  return ROLE_VOICE_PROFILES[role] || { pitch: 1.0, rate: 0.9 };
+  return ROLE_VOICE_PROFILES[role] || { pitch: 0.7, rate: 0.9 };
 }
 
 /**
