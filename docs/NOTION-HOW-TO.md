@@ -6,6 +6,48 @@ Upload your encrypted ritual file. Practice solo, listen to full ceremonies, reh
 
 ---
 
+## App Overview
+
+```mermaid
+flowchart TB
+    subgraph Browser["Your Browser — Everything Stays Local"]
+        Upload["Upload .mram File\nEnter lodge passphrase"]
+        Decrypt["Decrypt & Validate\nMagic bytes + checksum"]
+        Split["Separate Cipher / Plain\nCipher shown - Plain for AI"]
+        Encrypt["Re-encrypt AES-256-GCM\nStore in IndexedDB"]
+        Upload --> Decrypt --> Split --> Encrypt
+
+        Solo["Solo Practice\nDrill one section\nCipher text shown"]
+        Listen["Listen Mode\nHear full ceremony\nCipher text shown"]
+        Rehearsal["Rehearsal Mode\nPractice your role\nCipher text shown"]
+        Coach["AI Coach\nChat with Claude\nAsk anything"]
+        Encrypt --> Solo
+        Encrypt --> Listen
+        Encrypt --> Rehearsal
+        Encrypt --> Coach
+    end
+
+    subgraph Cloud["Cloud Services — Optional"]
+        Claude["Claude API\nAI Coaching\nPlain text only"]
+        Google["Google Cloud TTS\nPremium voices"]
+        Eleven["ElevenLabs\nUltra-realistic voices"]
+        Groq["Groq Whisper\nSpeech-to-text"]
+    end
+
+    Coach --> Claude
+    Solo --> Claude
+    Rehearsal --> Claude
+    Listen --> Google
+    Listen --> Eleven
+    Rehearsal --> Google
+    Solo --> Groq
+
+    style Browser fill:#0f172a,stroke:#334155,color:#e2e8f0
+    style Cloud fill:#1e1b2e,stroke:#4c1d95,color:#e2e8f0
+```
+
+---
+
 # Getting Started
 
 ---
@@ -41,13 +83,21 @@ npm run dev
 
 > **Your lodge secretary provides the `.mram` file and passphrase.**
 
-| Step | What Happens |
-|------|-------------|
-| **Drop your file** | Drag the `.mram` file onto the Upload page |
-| **Enter passphrase** | Your lodge passphrase decrypts the file |
-| **Auto-split** | Cipher text (abbreviated) and plain text (full English) are separated |
-| **Re-encrypted** | A fresh AES-256-GCM key locks it in your browser's IndexedDB |
-| **Original deleted** | The `.mram` file is never stored — only the re-encrypted data remains |
+```mermaid
+flowchart LR
+    A["Drop .mram file"] --> B["Enter passphrase\nPBKDF2 key derivation\n310k iterations"]
+    B --> C["Decrypt & validate\nMagic bytes + SHA-256"]
+    C --> D["Split cipher / plain\nSeparate encrypted fields"]
+    D --> E["Re-encrypt AES-256-GCM\nStore in IndexedDB"]
+    E --> F["Original file deleted\nNever stored"]
+
+    style A fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style B fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style C fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style D fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style E fill:#14532d,stroke:#4ade80,color:#e2e8f0
+    style F fill:#14532d,stroke:#4ade80,color:#e2e8f0
+```
 
 > **Cipher vs. Plain Text**
 >
@@ -68,6 +118,21 @@ npm run dev
 
 > **Drill one section at a time until it's perfect.**
 
+```mermaid
+flowchart LR
+    A["Pick a section\nCipher text shown"] --> B["Recite from memory\nSpeak or type"]
+    B --> C["5-layer comparison\nvs. plain text"]
+    C --> D["Color-coded results\nWord-by-word diff"]
+    D --> E["Hear corrections\nTTS reads back"]
+    E -->|"Try again"| B
+
+    style A fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style B fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style C fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+    style D fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+    style E fill:#14532d,stroke:#4ade80,color:#e2e8f0
+```
+
 **How it works:**
 
 1. Select a section from the dropdown (e.g., "Opening the Lodge")
@@ -85,15 +150,23 @@ npm run dev
 | `Yellow` | **Fuzzy match** — close enough (minor variation) |
 | `Gray` | **Missing** — you skipped this word |
 
-> **How the scoring works**
->
-> Your answer passes through a **5-layer comparison pipeline:**
->
-> **Layer 1** — Normalization (lowercase, expand contractions, strip filler words)
-> **Layer 2** — Word-level diff via jsdiff
-> **Layer 3** — Phonetic forgiveness via Double Metaphone (catches STT artifacts)
-> **Layer 4** — Fuzzy tolerance via Levenshtein distance
-> **Layer 5** — Final scoring with color-coded visual diff
+> **How the scoring works — 5-Layer Comparison Pipeline:**
+
+```mermaid
+flowchart TD
+    Input["Your spoken/typed answer"] --> L1["Layer 1: Normalize\nLowercase, expand contractions,\nstrip filler words (um, uh, like)"]
+    L1 --> L2["Layer 2: Word-Level Diff\njsdiff detects insertions,\ndeletions, substitutions"]
+    L2 --> L3["Layer 3: Phonetic Forgiveness\nDouble Metaphone catches\nSTT artifacts (rite → right)"]
+    L3 --> L4["Layer 4: Fuzzy Tolerance\nLevenshtein distance for\nnear-matches"]
+    L4 --> L5["Layer 5: Final Scoring\nColor-coded visual diff"]
+
+    style Input fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style L1 fill:#312e81,stroke:#818cf8,color:#e2e8f0
+    style L2 fill:#312e81,stroke:#818cf8,color:#e2e8f0
+    style L3 fill:#312e81,stroke:#818cf8,color:#e2e8f0
+    style L4 fill:#312e81,stroke:#818cf8,color:#e2e8f0
+    style L5 fill:#14532d,stroke:#4ade80,color:#e2e8f0
+```
 
 After checking, tap the speaker icon to **hear the correct version** read aloud.
 
@@ -103,10 +176,26 @@ After checking, tap the speaker icon to **hear the correct version** read aloud.
 
 > **Hear the full ceremony performed with unique AI voices for every officer.**
 
-**How it works:**
+```mermaid
+flowchart TB
+    Play["Press Play"] --> Loop{"For each line\nin the ceremony"}
+    Loop -->|"Gavel mark"| Knock["Synthesized knock\nDeep woody thump"]
+    Loop -->|"Officer line"| Voice["Read aloud with\nthat officer's unique voice"]
+    Loop -->|"Stage direction"| Pause["Brief pause\nthen continue"]
+    Knock --> Scroll["Script auto-scrolls\nHighlights current line\nCipher text displayed"]
+    Voice --> Scroll
+    Pause --> Scroll
+    Scroll --> Loop
 
-1. Press **Play**
-2. Each officer speaks with a distinct voice:
+    style Play fill:#14532d,stroke:#4ade80,color:#e2e8f0
+    style Loop fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+    style Knock fill:#78350f,stroke:#fbbf24,color:#e2e8f0
+    style Voice fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style Pause fill:#374151,stroke:#9ca3af,color:#e2e8f0
+    style Scroll fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+```
+
+**Officer voices:**
 
 | Officer | Voice Character |
 |---------|----------------|
@@ -118,11 +207,7 @@ After checking, tap the speaker icon to **hear the correct version** read aloud.
 | Chaplain | Deepest, slowest |
 | Tyler | Higher, distinct |
 
-3. Gavel marks produce realistic synthesized **knock** sounds
-4. The script auto-scrolls, highlighting the current line (cipher text)
-5. Stage directions appear on screen but aren't spoken
-
-Use **Pause / Resume** anytime.
+Use **Pause / Resume** anytime. Gavel marks produce synthesized knock sounds. Stage directions appear on screen but aren't spoken.
 
 ---
 
@@ -130,16 +215,25 @@ Use **Pause / Resume** anytime.
 
 > **Practice your role while AI reads everyone else's parts.**
 
-**How it works:**
+```mermaid
+flowchart TB
+    Pick["Pick your officer role\nWM / SW / JW / SD / JD / etc."] --> Start["Start Rehearsal"]
+    Start --> Loop{"Ceremony plays\nline by line"}
+    Loop -->|"Other officer's line"| AI["AI reads it aloud\nwith that role's voice"]
+    Loop -->|"Your line!"| You["'Your Turn' prompt\nSpeak or type from memory"]
+    AI --> Loop
+    You --> Score["Line scored instantly\n5-layer comparison"]
+    Score --> Loop
+    Loop -->|"Ceremony complete"| Results["Final Results\nOverall accuracy %\nLine-by-line breakdown"]
 
-| Step | What You Do |
-|------|------------|
-| **1. Pick your role** | Choose WM, SW, JW, SD, JD, Chaplain, Tyler, etc. |
-| **2. Start rehearsal** | The ceremony begins playing line by line |
-| **3. Other officer's line** | AI reads it aloud with that role's unique voice |
-| **4. Your line** | You see **"Your Turn"** — speak or type from memory |
-| **5. Instant scoring** | Each of your lines is scored in real time |
-| **6. Final results** | Overall accuracy % + line-by-line breakdown |
+    style Pick fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style Start fill:#14532d,stroke:#4ade80,color:#e2e8f0
+    style Loop fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+    style AI fill:#374151,stroke:#9ca3af,color:#e2e8f0
+    style You fill:#78350f,stroke:#fbbf24,color:#e2e8f0
+    style Score fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+    style Results fill:#14532d,stroke:#4ade80,color:#e2e8f0
+```
 
 > This is the closest thing to rehearsing with your lodge — without needing anyone else to be there.
 
@@ -148,6 +242,18 @@ Use **Pause / Resume** anytime.
 ## AI Ritual Coach
 
 > **Chat with Claude about your specific ritual.**
+
+```mermaid
+flowchart LR
+    Q["Ask a question"] --> Server["Server\nPlain text context only\nCipher never sent"]
+    Server --> Claude["Claude AI\nStreaming response"]
+    Claude --> A["Answer appears\n+ optional TTS readback"]
+
+    style Q fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style Server fill:#374151,stroke:#9ca3af,color:#e2e8f0
+    style Claude fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+    style A fill:#14532d,stroke:#4ade80,color:#e2e8f0
+```
 
 Ask anything:
 - *"What does the Senior Warden say after the Worshipful Master's opening?"*
@@ -177,6 +283,24 @@ Ask anything:
 ## Text-to-Speech Engines
 
 Pick the voice quality that works for you:
+
+```mermaid
+flowchart TB
+    Need["App needs to speak a line\nUses plain text for TTS"] --> Router{"Voice Engine\nRouter"}
+    Router -->|"Free"| Browser["Browser TTS\nOn-device, works offline\nPitch/rate varies per role"]
+    Router -->|"Premium"| Google["Google Cloud TTS\nNeural2 voices\nDifferent voice per role"]
+    Router -->|"Ultra"| Eleven["ElevenLabs\nHuman-like quality\nUnique voice per role"]
+    Browser --> Audio["Audio output"]
+    Google --> Audio
+    Eleven --> Audio
+
+    style Need fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style Router fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+    style Browser fill:#14532d,stroke:#4ade80,color:#e2e8f0
+    style Google fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style Eleven fill:#78350f,stroke:#fbbf24,color:#e2e8f0
+    style Audio fill:#374151,stroke:#9ca3af,color:#e2e8f0
+```
 
 | Engine | Quality | Cost | Setup |
 |--------|---------|------|-------|
@@ -266,6 +390,31 @@ SW: * Brothers Senior & Junior Deacons, proceed to satisfy yourselves that all p
 | **Stage direction** | `(parentheses)` | `(Senior Deacon rises)` |
 | **Line pairing** | Cipher first, plain second | See example above |
 
+## The .mram File Structure
+
+```mermaid
+flowchart LR
+    subgraph File[".mram Binary File"]
+        Magic["4 bytes\nMRAM"]
+        Version["1 byte\nVersion"]
+        Salt["16 bytes\nSalt"]
+        IV["12 bytes\nIV"]
+        Payload["Variable\nAES-256-GCM\nEncrypted JSON"]
+    end
+
+    subgraph JSON["Decrypted Payload"]
+        Meta["Metadata\nJurisdiction\nDegree / Ceremony"]
+        Roles["Roles Map\nWM / SW / JD / etc."]
+        Sections["Sections\nOrdered ceremony parts"]
+        Lines["Lines Array\nCipher + Plain + Role\nGavels + Actions"]
+    end
+
+    Payload -.->|"PBKDF2\n+ passphrase"| JSON
+
+    style File fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style JSON fill:#14532d,stroke:#4ade80,color:#e2e8f0
+```
+
 ## Build Command
 
 ```bash
@@ -317,6 +466,35 @@ Runs on port 3000 as a standard Next.js 16 application.
 
 ---
 
+```mermaid
+flowchart LR
+    subgraph Local["Stays on Your Device"]
+        A["Ritual cipher + plain text\nAES-256 encrypted"]
+        B["Encryption key\nBrowser-generated"]
+        C["Practice scores"]
+        D["Browser speech recognition"]
+        E["Browser voice playback"]
+    end
+
+    subgraph Cloud["Sent Externally — Only When Used"]
+        F["AI Coach → Claude API\nPlain text only"]
+        G["Google TTS → plain text"]
+        H["ElevenLabs → plain text"]
+        I["Groq → audio recording"]
+    end
+
+    subgraph Safe["Security Guarantees"]
+        J["API keys stay on server"]
+        K["Anthropic does not train on API data"]
+        L["No user accounts or tracking"]
+        M[".mram file never stored"]
+    end
+
+    style Local fill:#14532d,stroke:#4ade80,color:#e2e8f0
+    style Cloud fill:#78350f,stroke:#fbbf24,color:#e2e8f0
+    style Safe fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+```
+
 ## What Stays on Your Device
 
 | Data | Protection |
@@ -351,6 +529,37 @@ Runs on port 3000 as a standard Next.js 16 application.
 # Tech Stack
 
 ---
+
+## Architecture
+
+```mermaid
+flowchart TB
+    subgraph Frontend["Frontend — Next.js 16 + React 19"]
+        Pages["Pages\nUpload / Practice / Chat\nListen / Rehearsal"]
+        Components["Components\nDocumentUpload / PracticeMode\nListenMode / RehearsalMode\nChatInterface / DiffDisplay"]
+        Lib["Libraries\nmram-format / storage\ntext-comparison\nspeech-to-text / text-to-speech"]
+        Pages --> Components --> Lib
+    end
+
+    subgraph API["API Routes — Next.js Server"]
+        Chat["/api/chat\nClaude streaming"]
+        TTS["/api/tts/*\nGoogle + ElevenLabs"]
+        STT["/api/transcribe\nGroq Whisper"]
+    end
+
+    subgraph Storage["Client Storage"]
+        IDB["IndexedDB\nAES-256-GCM encrypted\nCipher + Plain separated"]
+        Crypto["Web Crypto API\nKey generation + encryption"]
+    end
+
+    Components --> API
+    Components --> Storage
+    Lib --> Crypto
+
+    style Frontend fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style API fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+    style Storage fill:#14532d,stroke:#4ade80,color:#e2e8f0
+```
 
 | Layer | Technology |
 |-------|-----------|
