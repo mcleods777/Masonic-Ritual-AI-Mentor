@@ -1,18 +1,60 @@
-# Masonic Ritual AI Mentor — How-To Guide
+# Masonic Ritual AI Mentor
 
-> A privacy-first, voice-driven practice tool for Masonic ritual memorization. Upload your encrypted ritual file, practice in multiple modes, and get AI coaching — all with military-grade encryption keeping your ritual secure.
+## Your Private, Voice-Driven Practice Companion
+
+Upload your encrypted ritual file. Practice solo, listen to full ceremonies, rehearse your role with AI officers, and get coaching from Claude — all while keeping your ritual secure with military-grade encryption.
 
 ---
 
-## Quick Start (5 Minutes)
+## App Overview
 
-### Step 1: Get the App Running
+```mermaid
+flowchart TB
+    subgraph Browser["Your Browser — Everything Stays Local"]
+        Upload["Upload .mram File\nEnter lodge passphrase"]
+        Decrypt["Decrypt & Validate\nMagic bytes + checksum"]
+        Split["Separate Cipher / Plain\nCipher shown - Plain for AI"]
+        Encrypt["Re-encrypt AES-256-GCM\nStore in IndexedDB"]
+        Upload --> Decrypt --> Split --> Encrypt
 
-**Prerequisites:**
-- Node.js 18 or higher installed on your machine
-- An Anthropic API key from [console.anthropic.com](https://console.anthropic.com/)
+        Solo["Solo Practice\nDrill one section\nCipher text shown"]
+        Listen["Listen Mode\nHear full ceremony\nCipher text shown"]
+        Rehearsal["Rehearsal Mode\nPractice your role\nCipher text shown"]
+        Coach["AI Coach\nChat with Claude\nAsk anything"]
+        Encrypt --> Solo
+        Encrypt --> Listen
+        Encrypt --> Rehearsal
+        Encrypt --> Coach
+    end
 
-**Install & Launch:**
+    subgraph Cloud["Cloud Services — Optional"]
+        Claude["Claude API\nAI Coaching\nPlain text only"]
+        Google["Google Cloud TTS\nPremium voices"]
+        Eleven["ElevenLabs\nUltra-realistic voices"]
+        Groq["Groq Whisper\nSpeech-to-text"]
+    end
+
+    Coach --> Claude
+    Solo --> Claude
+    Rehearsal --> Claude
+    Listen --> Google
+    Listen --> Eleven
+    Rehearsal --> Google
+    Solo --> Groq
+
+    style Browser fill:#0f172a,stroke:#334155,color:#e2e8f0
+    style Cloud fill:#1e1b2e,stroke:#4c1d95,color:#e2e8f0
+```
+
+---
+
+# Getting Started
+
+---
+
+## 1. Install the App
+
+> **You'll need:** Node.js 18+ and an Anthropic API key ([get one here](https://console.anthropic.com/))
 
 ```bash
 git clone https://github.com/mcleods777/masonic-ritual-ai-mentor.git
@@ -21,186 +63,312 @@ npm install
 cp .env.example .env
 ```
 
-Open the `.env` file and add your API key:
+Add your API key to `.env`:
 
 ```
 ANTHROPIC_API_KEY=sk-ant-your-key-here
 ```
 
-Then start the app:
+Launch:
 
 ```bash
 npm run dev
 ```
 
-Open **http://localhost:3000** in your browser. That's it — the app is running.
+> Open **http://localhost:3000** — you're up and running.
 
 ---
 
-### Step 2: Upload Your Ritual File
+## 2. Upload Your Ritual
 
-1. Navigate to the **Upload** page
-2. Drag and drop your `.mram` encrypted ritual file (provided by your lodge secretary)
-3. Enter your **lodge passphrase** when prompted
-4. The app decrypts the file, splits it into cipher text and plain text, re-encrypts it with a new browser key, and stores it securely in your browser's IndexedDB
-5. The original `.mram` file is never stored — only the re-encrypted version
+> **Your lodge secretary provides the `.mram` file and passphrase.**
 
-> **What is cipher text?** Cipher text is the abbreviated/encoded notation Masons use as memory aids (e.g., "B. S.W., p. t. s. y. t. a. p. a. M."). Plain text is the full English version. You always see cipher text on screen; plain text is only used internally for AI coaching and accuracy checking.
+```mermaid
+flowchart LR
+    A["Drop .mram file"] --> B["Enter passphrase\nPBKDF2 key derivation\n310k iterations"]
+    B --> C["Decrypt & validate\nMagic bytes + SHA-256"]
+    C --> D["Split cipher / plain\nSeparate encrypted fields"]
+    D --> E["Re-encrypt AES-256-GCM\nStore in IndexedDB"]
+    E --> F["Original file deleted\nNever stored"]
+
+    style A fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style B fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style C fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style D fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style E fill:#14532d,stroke:#4ade80,color:#e2e8f0
+    style F fill:#14532d,stroke:#4ade80,color:#e2e8f0
+```
+
+> **Cipher vs. Plain Text**
+>
+> **Cipher:** `B. S.W., p. t. s. y. t. a. p. a. M.`
+> **Plain:** `Brother Senior Warden, proceed to satisfy yourself that all present are Masons.`
+>
+> You always see cipher text on screen. Plain text is only used behind the scenes for AI coaching and accuracy scoring.
 
 ---
 
-## Practice Modes
+---
 
-### Solo Practice
+# Practice Modes
 
-**What it does:** Drill a single section of the ritual until you have it memorized.
+---
 
-**How to use it:**
+## Solo Practice
 
-1. Go to **Practice** and select **Solo Practice**
-2. Choose a section from the dropdown (e.g., "Opening the Lodge")
-3. Cipher text is displayed on screen as your reference
-4. Click the microphone button to **speak your lines** from memory, or type them in the text box
-5. Hit **Check** to see your accuracy
+> **Drill one section at a time until it's perfect.**
 
-**Understanding your score:**
+```mermaid
+flowchart LR
+    A["Pick a section\nCipher text shown"] --> B["Recite from memory\nSpeak or type"]
+    B --> C["5-layer comparison\nvs. plain text"]
+    C --> D["Color-coded results\nWord-by-word diff"]
+    D --> E["Hear corrections\nTTS reads back"]
+    E -->|"Try again"| B
 
-The app runs a 5-layer comparison against the plain text:
+    style A fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style B fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style C fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+    style D fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+    style E fill:#14532d,stroke:#4ade80,color:#e2e8f0
+```
 
-| Color | Meaning |
+**How it works:**
+
+1. Select a section from the dropdown (e.g., "Opening the Lodge")
+2. Cipher text appears on screen as your reference
+3. Tap the mic or type your lines from memory
+4. Hit **Check** — see instant, color-coded feedback
+
+**Reading Your Score**
+
+| Color | What It Means |
+|-------|--------------|
+| `Green` | **Correct** — nailed it |
+| `Red` | **Wrong** — different word |
+| `Blue` | **Phonetic match** — right word, speech recognition spelled it differently ("rite" vs "right") |
+| `Yellow` | **Fuzzy match** — close enough (minor variation) |
+| `Gray` | **Missing** — you skipped this word |
+
+> **How the scoring works — 5-Layer Comparison Pipeline:**
+
+```mermaid
+flowchart TD
+    Input["Your spoken/typed answer"] --> L1["Layer 1: Normalize\nLowercase, expand contractions,\nstrip filler words (um, uh, like)"]
+    L1 --> L2["Layer 2: Word-Level Diff\njsdiff detects insertions,\ndeletions, substitutions"]
+    L2 --> L3["Layer 3: Phonetic Forgiveness\nDouble Metaphone catches\nSTT artifacts (rite → right)"]
+    L3 --> L4["Layer 4: Fuzzy Tolerance\nLevenshtein distance for\nnear-matches"]
+    L4 --> L5["Layer 5: Final Scoring\nColor-coded visual diff"]
+
+    style Input fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style L1 fill:#312e81,stroke:#818cf8,color:#e2e8f0
+    style L2 fill:#312e81,stroke:#818cf8,color:#e2e8f0
+    style L3 fill:#312e81,stroke:#818cf8,color:#e2e8f0
+    style L4 fill:#312e81,stroke:#818cf8,color:#e2e8f0
+    style L5 fill:#14532d,stroke:#4ade80,color:#e2e8f0
+```
+
+After checking, tap the speaker icon to **hear the correct version** read aloud.
+
+---
+
+## Listen Mode
+
+> **Hear the full ceremony performed with unique AI voices for every officer.**
+
+```mermaid
+flowchart TB
+    Play["Press Play"] --> Loop{"For each line\nin the ceremony"}
+    Loop -->|"Gavel mark"| Knock["Synthesized knock\nDeep woody thump"]
+    Loop -->|"Officer line"| Voice["Read aloud with\nthat officer's unique voice"]
+    Loop -->|"Stage direction"| Pause["Brief pause\nthen continue"]
+    Knock --> Scroll["Script auto-scrolls\nHighlights current line\nCipher text displayed"]
+    Voice --> Scroll
+    Pause --> Scroll
+    Scroll --> Loop
+
+    style Play fill:#14532d,stroke:#4ade80,color:#e2e8f0
+    style Loop fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+    style Knock fill:#78350f,stroke:#fbbf24,color:#e2e8f0
+    style Voice fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style Pause fill:#374151,stroke:#9ca3af,color:#e2e8f0
+    style Scroll fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+```
+
+**Officer voices:**
+
+| Officer | Voice Character |
+|---------|----------------|
+| Worshipful Master | Deep, authoritative |
+| Senior Warden | Clear, measured |
+| Junior Warden | Mid-range, steady |
+| Senior Deacon | Slightly brighter |
+| Junior Deacon | Crisp, distinct |
+| Chaplain | Deepest, slowest |
+| Tyler | Higher, distinct |
+
+Use **Pause / Resume** anytime. Gavel marks produce synthesized knock sounds. Stage directions appear on screen but aren't spoken.
+
+---
+
+## Rehearsal Mode
+
+> **Practice your role while AI reads everyone else's parts.**
+
+```mermaid
+flowchart TB
+    Pick["Pick your officer role\nWM / SW / JW / SD / JD / etc."] --> Start["Start Rehearsal"]
+    Start --> Loop{"Ceremony plays\nline by line"}
+    Loop -->|"Other officer's line"| AI["AI reads it aloud\nwith that role's voice"]
+    Loop -->|"Your line!"| You["'Your Turn' prompt\nSpeak or type from memory"]
+    AI --> Loop
+    You --> Score["Line scored instantly\n5-layer comparison"]
+    Score --> Loop
+    Loop -->|"Ceremony complete"| Results["Final Results\nOverall accuracy %\nLine-by-line breakdown"]
+
+    style Pick fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style Start fill:#14532d,stroke:#4ade80,color:#e2e8f0
+    style Loop fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+    style AI fill:#374151,stroke:#9ca3af,color:#e2e8f0
+    style You fill:#78350f,stroke:#fbbf24,color:#e2e8f0
+    style Score fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+    style Results fill:#14532d,stroke:#4ade80,color:#e2e8f0
+```
+
+> This is the closest thing to rehearsing with your lodge — without needing anyone else to be there.
+
+---
+
+## AI Ritual Coach
+
+> **Chat with Claude about your specific ritual.**
+
+```mermaid
+flowchart LR
+    Q["Ask a question"] --> Server["Server\nPlain text context only\nCipher never sent"]
+    Server --> Claude["Claude AI\nStreaming response"]
+    Claude --> A["Answer appears\n+ optional TTS readback"]
+
+    style Q fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style Server fill:#374151,stroke:#9ca3af,color:#e2e8f0
+    style Claude fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+    style A fill:#14532d,stroke:#4ade80,color:#e2e8f0
+```
+
+Ask anything:
+- *"What does the Senior Warden say after the Worshipful Master's opening?"*
+- *"Quiz me on the Junior Deacon's lines in the opening"*
+- *"Explain the significance of the first section"*
+
+**Choose your model:**
+
+| Model | Best For |
 |-------|---------|
-| **Green** | Correct — you got it right |
-| **Red** | Wrong — different word |
-| **Blue** | Phonetic match — you said the right word but speech recognition spelled it differently (e.g., "rite" vs. "right") |
-| **Yellow** | Fuzzy match — close enough (minor misspelling or variation) |
-| **Gray / strikethrough** | Missing — you skipped this word |
+| **Haiku** | Quick questions, fast responses |
+| **Sonnet** | Balanced speed and depth |
+| **Opus** | Complex questions, detailed explanations |
 
-After checking, the app can **read back the correct version** using text-to-speech so you hear what you missed.
+> **Privacy:** Only plain text is sent to Claude. Cipher text never leaves your device. Anthropic does not train on API data.
 
----
-
-### Listen Mode
-
-**What it does:** Plays the entire ceremony aloud with a unique AI voice for each officer role, so you can listen and follow along.
-
-**How to use it:**
-
-1. Go to **Practice** and select **Listen Mode**
-2. Press **Play**
-3. The app reads through the ceremony line by line:
-   - Each officer has a distinct voice (Worshipful Master sounds deep and authoritative, Senior Warden is clear and measured, etc.)
-   - Gavel marks (`*`) produce synthesized knock sounds
-   - Stage directions are shown but not spoken
-4. The script auto-scrolls and highlights the current line (showing cipher text)
-5. Use **Pause/Resume** to control playback
-
-**Voice options:**
-- **Browser TTS** (free, works offline) — default
-- **Google Cloud TTS** (premium Neural2 voices) — requires API key
-- **ElevenLabs** (ultra-realistic human-like voices) — requires API key
-
-Select your preferred voice engine using the dropdown in the voice settings panel.
+> **Masonic Safety:** The AI will **never** reveal grips, passwords, or modes of recognition. This is enforced at the system prompt level.
 
 ---
 
-### Rehearsal Mode
+---
 
-**What it does:** Simulates a full ceremony where the AI reads all other officers' parts, and you speak your own lines.
-
-**How to use it:**
-
-1. Go to **Practice** and select **Rehearsal Mode**
-2. **Pick your officer role** (WM, SW, JW, SD, JD, Chaplain, Tyler, etc.)
-3. Press **Start Rehearsal**
-4. The ceremony begins:
-   - When it's another officer's line → the AI reads it aloud with that role's voice
-   - When it's **your line** → you see a "Your Turn" prompt
-   - Speak or type your line from memory
-   - Your answer is scored instantly against the plain text
-5. When the ceremony finishes, you get a **results summary**:
-   - Overall accuracy percentage
-   - Line-by-line breakdown showing where you were strong and where you need work
+# Voice & Speech Setup
 
 ---
 
-### AI Ritual Coach
+## Text-to-Speech Engines
 
-**What it does:** Chat with Claude AI about your specific ritual. Ask questions, get hints, request quizzes, or clarify ceremony procedures.
+Pick the voice quality that works for you:
 
-**How to use it:**
+```mermaid
+flowchart TB
+    Need["App needs to speak a line\nUses plain text for TTS"] --> Router{"Voice Engine\nRouter"}
+    Router -->|"Free"| Browser["Browser TTS\nOn-device, works offline\nPitch/rate varies per role"]
+    Router -->|"Premium"| Google["Google Cloud TTS\nNeural2 voices\nDifferent voice per role"]
+    Router -->|"Ultra"| Eleven["ElevenLabs\nHuman-like quality\nUnique voice per role"]
+    Browser --> Audio["Audio output"]
+    Google --> Audio
+    Eleven --> Audio
 
-1. Go to the **AI Coach** page
-2. Type a question (e.g., "What does the Senior Warden say after the Worshipful Master's opening?")
-3. Claude responds using your ritual's plain text as context
-4. Optionally enable **voice readback** to hear the answer spoken aloud
+    style Need fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style Router fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+    style Browser fill:#14532d,stroke:#4ade80,color:#e2e8f0
+    style Google fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style Eleven fill:#78350f,stroke:#fbbf24,color:#e2e8f0
+    style Audio fill:#374151,stroke:#9ca3af,color:#e2e8f0
+```
 
-**Model selection:**
-- **Haiku** — fastest responses, good for quick questions
-- **Sonnet** — balanced speed and quality
-- **Opus** — most capable, best for complex questions
+| Engine | Quality | Cost | Setup |
+|--------|---------|------|-------|
+| **Browser TTS** | Good | Free | None — works out of the box |
+| **Google Cloud TTS** | Premium | Pay-per-use | API key required |
+| **ElevenLabs** | Ultra-realistic | Pay-per-use | API key required |
 
-**Privacy note:** Only plain text is sent to Claude's API. Cipher text never leaves your browser. Anthropic does not train on API data.
+### Setting Up Google Cloud TTS
 
-**Safety:** The AI is instructed to never reveal grips, passwords, or modes of recognition — it will decline those requests.
-
----
-
-## Setting Up Voice Engines
-
-### Browser TTS (Default — No Setup Required)
-
-Works out of the box. Uses your browser's built-in speech synthesis. Quality varies by browser and OS. Each officer role gets different pitch and rate settings to sound distinct.
-
-### Google Cloud TTS (Premium)
-
-1. Go to the [Google Cloud Console](https://console.cloud.google.com/)
-2. Enable the **Cloud Text-to-Speech API**
-3. Create an API key at **APIs & Services → Credentials**
-4. Add to your `.env` file:
+1. Open [Google Cloud Console](https://console.cloud.google.com/)
+2. Enable **Cloud Text-to-Speech API**
+3. Go to **APIs & Services** then **Credentials** — create an API key
+4. Add to `.env`:
 
 ```
 GOOGLE_CLOUD_TTS_API_KEY=your-key-here
 ```
 
-5. Restart the app — Google voices will appear in the voice engine selector
+5. Restart the app
 
-### ElevenLabs (Ultra-Realistic)
+### Setting Up ElevenLabs
 
 1. Sign up at [elevenlabs.io](https://elevenlabs.io/)
-2. Go to your **Profile** and copy your API key
-3. Add to your `.env` file:
+2. Copy your API key from **Profile**
+3. Add to `.env`:
 
 ```
 ELEVENLABS_API_KEY=your-key-here
 ```
 
-4. Restart the app — ElevenLabs voices will appear in the voice engine selector
+4. Restart the app
 
-### Groq Whisper STT (High-Accuracy Speech Recognition)
+---
 
-For better speech-to-text accuracy (especially with Masonic vocabulary):
+## Speech-to-Text
+
+| Engine | Accuracy | Setup |
+|--------|----------|-------|
+| **Browser Speech API** | Good for general speech | None — built into Chrome/Edge |
+| **Groq Whisper** | Excellent — trained with Masonic vocabulary hints | API key required |
+
+### Setting Up Groq Whisper
+
+> **Recommended** if you find browser speech recognition stumbling on Masonic terms.
 
 1. Sign up at [console.groq.com](https://console.groq.com/)
 2. Create an API key
-3. Add to your `.env` file:
+3. Add to `.env`:
 
 ```
 GROQ_API_KEY=your-key-here
 ```
 
-4. Restart the app — Groq Whisper will be available as an STT option
-
-> Without Groq, the app uses your browser's built-in speech recognition, which works well for general speech but may struggle with Masonic-specific terms.
+4. Restart the app
 
 ---
 
-## Building .mram Ritual Files
+---
 
-If your lodge secretary hasn't provided an `.mram` file, you can build one from a markdown source file.
+# Creating .mram Files
 
-### Input Format
+---
 
-Create a markdown file where each spoken line appears **twice** — cipher text first, then plain text:
+> **For lodge secretaries** or anyone who needs to build ritual files from scratch.
+
+## Input Format
+
+Create a markdown file where each spoken line appears **twice** — cipher first, then plain:
 
 ```markdown
 ### Opening the Lodge
@@ -212,124 +380,260 @@ SW: * Bros. S. & J.D., p. t. s. y. t. a. p. a. M.
 SW: * Brothers Senior & Junior Deacons, proceed to satisfy yourselves that all present are Masons.
 ```
 
-**Format rules:**
-- `### Heading` marks a new section
-- Lines start with a role abbreviation followed by a colon (e.g., `WM:`, `SW:`, `JD:`)
-- `*` at the start of a line indicates a gavel mark (knock)
-- Text in `(parentheses)` is treated as a stage direction
-- Each line pair: first is cipher, second is plain
+## Format Rules
 
-### Build Command
+| Element | Syntax | Example |
+|---------|--------|---------|
+| **Section heading** | `### Title` | `### Opening the Lodge` |
+| **Speaker line** | `ROLE: text` | `WM: Brother Senior Warden...` |
+| **Gavel mark** | `*` after colon | `WM: * Brother Senior...` |
+| **Stage direction** | `(parentheses)` | `(Senior Deacon rises)` |
+| **Line pairing** | Cipher first, plain second | See example above |
+
+## The .mram File Structure
+
+```mermaid
+flowchart LR
+    subgraph File[".mram Binary File"]
+        Magic["4 bytes\nMRAM"]
+        Version["1 byte\nVersion"]
+        Salt["16 bytes\nSalt"]
+        IV["12 bytes\nIV"]
+        Payload["Variable\nAES-256-GCM\nEncrypted JSON"]
+    end
+
+    subgraph JSON["Decrypted Payload"]
+        Meta["Metadata\nJurisdiction\nDegree / Ceremony"]
+        Roles["Roles Map\nWM / SW / JD / etc."]
+        Sections["Sections\nOrdered ceremony parts"]
+        Lines["Lines Array\nCipher + Plain + Role\nGavels + Actions"]
+    end
+
+    Payload -.->|"PBKDF2\n+ passphrase"| JSON
+
+    style File fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style JSON fill:#14532d,stroke:#4ade80,color:#e2e8f0
+```
+
+## Build Command
 
 ```bash
 npx tsx scripts/build-mram.ts input.md output.mram "YourLodgePassphrase"
 ```
 
-This produces an encrypted `.mram` file that can be shared with lodge members who know the passphrase.
+Share the `.mram` file with lodge members. They'll need the passphrase to open it.
 
 ---
 
-## Deploying to Production
+---
 
-### Deploy on Vercel (Recommended)
+# Deployment
 
-1. Push your code to GitHub
-2. Go to [vercel.com](https://vercel.com/) and import the repository
-3. Add environment variables in the Vercel project settings:
-   - `ANTHROPIC_API_KEY` (required)
-   - `GOOGLE_CLOUD_TTS_API_KEY` (optional)
-   - `ELEVENLABS_API_KEY` (optional)
-   - `GROQ_API_KEY` (optional)
-4. Deploy — Vercel handles the build automatically
+---
 
-### Build for Other Hosting
+## Vercel (Recommended)
+
+| Step | Action |
+|------|--------|
+| **1** | Push code to GitHub |
+| **2** | Import repo at [vercel.com](https://vercel.com/) |
+| **3** | Add environment variables in project settings |
+| **4** | Deploy — Vercel handles the rest |
+
+**Required env vars:**
+
+| Variable | Required? |
+|----------|-----------|
+| `ANTHROPIC_API_KEY` | Yes |
+| `GOOGLE_CLOUD_TTS_API_KEY` | No |
+| `ELEVENLABS_API_KEY` | No |
+| `GROQ_API_KEY` | No |
+
+## Self-Hosting
 
 ```bash
 npm run build
 npm start
 ```
 
-The app runs as a standard Next.js 16 application on port 3000.
+Runs on port 3000 as a standard Next.js 16 application.
 
 ---
 
-## Privacy & Security
+---
 
-| What | Where It Lives |
-|------|---------------|
-| Ritual text (cipher + plain) | Encrypted in your browser's IndexedDB (AES-256-GCM) |
-| Encryption key | Generated and stored in your browser only |
-| Your practice scores | Stored locally in your browser |
-| Speech recognition (browser) | Processed on your device |
-| Browser voice playback | Processed on your device |
-| AI Coach conversations | Plain text sent to Claude API (Anthropic does not train on API data) |
-| Google/ElevenLabs TTS | Plain text sent for speech synthesis when those engines are selected |
-| API keys | Stored server-side only, never exposed to the browser |
-| Your .mram file | **Never stored** — only re-encrypted data is kept |
-
-**No user accounts. No tracking. No analytics. No cookies beyond what Next.js requires.**
+# Privacy & Security
 
 ---
 
-## Tech Stack
+```mermaid
+flowchart LR
+    subgraph Local["Stays on Your Device"]
+        A["Ritual cipher + plain text\nAES-256 encrypted"]
+        B["Encryption key\nBrowser-generated"]
+        C["Practice scores"]
+        D["Browser speech recognition"]
+        E["Browser voice playback"]
+    end
+
+    subgraph Cloud["Sent Externally — Only When Used"]
+        F["AI Coach → Claude API\nPlain text only"]
+        G["Google TTS → plain text"]
+        H["ElevenLabs → plain text"]
+        I["Groq → audio recording"]
+    end
+
+    subgraph Safe["Security Guarantees"]
+        J["API keys stay on server"]
+        K["Anthropic does not train on API data"]
+        L["No user accounts or tracking"]
+        M[".mram file never stored"]
+    end
+
+    style Local fill:#14532d,stroke:#4ade80,color:#e2e8f0
+    style Cloud fill:#78350f,stroke:#fbbf24,color:#e2e8f0
+    style Safe fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+```
+
+## What Stays on Your Device
+
+| Data | Protection |
+|------|-----------|
+| Ritual cipher + plain text | AES-256-GCM encrypted, separate fields in IndexedDB |
+| Encryption key | Generated by your browser, never transmitted |
+| Practice scores | Local browser storage only |
+| Browser speech recognition | Processed entirely on-device |
+| Browser voice playback | Processed entirely on-device |
+
+## What Goes to the Cloud (Only When Used)
+
+| Service | What's Sent | Data Policy |
+|---------|------------|-------------|
+| Claude API (AI Coach) | Plain text only, never cipher | Anthropic does not train on API data |
+| Google Cloud TTS | Plain text for speech synthesis | Google Cloud data processing terms |
+| ElevenLabs TTS | Plain text for speech synthesis | ElevenLabs data processing terms |
+| Groq Whisper | Audio recording for transcription | Groq data processing terms |
+
+## Security Guarantees
+
+- API keys are server-side only — never exposed to the browser
+- PBKDF2 key derivation with **310,000 iterations** (OWASP 2023 standard)
+- AES-256-GCM encryption for all stored data
+- The `.mram` file is **never stored** — only re-encrypted data is kept
+- **No user accounts, no tracking, no analytics**
+
+---
+
+---
+
+# Tech Stack
+
+---
+
+## Architecture
+
+```mermaid
+flowchart TB
+    subgraph Frontend["Frontend — Next.js 16 + React 19"]
+        Pages["Pages\nUpload / Practice / Chat\nListen / Rehearsal"]
+        Components["Components\nDocumentUpload / PracticeMode\nListenMode / RehearsalMode\nChatInterface / DiffDisplay"]
+        Lib["Libraries\nmram-format / storage\ntext-comparison\nspeech-to-text / text-to-speech"]
+        Pages --> Components --> Lib
+    end
+
+    subgraph API["API Routes — Next.js Server"]
+        Chat["/api/chat\nClaude streaming"]
+        TTS["/api/tts/*\nGoogle + ElevenLabs"]
+        STT["/api/transcribe\nGroq Whisper"]
+    end
+
+    subgraph Storage["Client Storage"]
+        IDB["IndexedDB\nAES-256-GCM encrypted\nCipher + Plain separated"]
+        Crypto["Web Crypto API\nKey generation + encryption"]
+    end
+
+    Components --> API
+    Components --> Storage
+    Lib --> Crypto
+
+    style Frontend fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style API fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+    style Storage fill:#14532d,stroke:#4ade80,color:#e2e8f0
+```
 
 | Layer | Technology |
 |-------|-----------|
-| Frontend | Next.js 16 (App Router), React 19, TypeScript |
-| Styling | Tailwind CSS v4 |
-| AI/LLM | Claude (Haiku / Sonnet / Opus) via Vercel AI SDK |
-| Speech-to-Text | Web Speech API + Groq Whisper (optional) |
-| Text-to-Speech | Browser Web Speech + Google Cloud TTS + ElevenLabs |
-| Text Comparison | jsdiff + Double Metaphone + Levenshtein distance |
-| Encryption | AES-256-GCM + PBKDF2 (310,000 iterations) |
-| Storage | IndexedDB with Web Crypto API |
-| Audio Effects | Web Audio API (synthesized gavel knocks) |
-| Ritual Format | .mram encrypted binary |
+| **Frontend** | Next.js 16 (App Router), React 19, TypeScript |
+| **Styling** | Tailwind CSS v4 |
+| **AI / LLM** | Claude (Haiku / Sonnet / Opus) via Vercel AI SDK |
+| **Speech-to-Text** | Web Speech API + Groq Whisper |
+| **Text-to-Speech** | Browser TTS + Google Cloud Neural2 + ElevenLabs |
+| **Text Comparison** | jsdiff + Double Metaphone + Levenshtein distance |
+| **Encryption** | AES-256-GCM + PBKDF2 (310k iterations) |
+| **Local Storage** | IndexedDB with Web Crypto API |
+| **Audio Effects** | Web Audio API (synthesized gavel knocks) |
+| **Ritual Format** | `.mram` custom encrypted binary |
 
 ---
 
-## Troubleshooting
+---
 
-### "Decryption failed" when uploading .mram file
-- Double-check your lodge passphrase (it's case-sensitive)
-- Make sure the `.mram` file hasn't been corrupted during transfer
-- Verify you're using the correct file for your jurisdiction/degree
+# Troubleshooting
 
-### Speech recognition not working
-- Make sure your browser supports the Web Speech API (Chrome and Edge work best)
+---
+
+## "Decryption failed" on upload
+
+- Double-check your lodge passphrase — it's **case-sensitive**
+- Ensure the `.mram` file wasn't corrupted during transfer
+- Verify you have the right file for your jurisdiction/degree
+
+## Speech recognition not working
+
+- Use **Chrome** or **Edge** for best Web Speech API support
 - Grant microphone permission when prompted
-- If accuracy is poor, consider setting up Groq Whisper for better Masonic vocabulary recognition
+- Poor accuracy? Set up **Groq Whisper** for Masonic vocabulary support
 
-### No sound in Listen/Rehearsal mode
-- Check that your device volume is on and not muted
-- Try switching voice engines (Browser TTS → Google → ElevenLabs)
-- Some browsers block auto-playing audio — click a play button to start
+## No sound in Listen / Rehearsal mode
 
-### AI Coach not responding
-- Verify your `ANTHROPIC_API_KEY` is set correctly in `.env`
-- Check that the API key is valid at [console.anthropic.com](https://console.anthropic.com/)
-- Restart the dev server after changing `.env`
+- Check device volume and mute settings
+- Try switching voice engines (Browser TTS, Google, ElevenLabs)
+- Some browsers block autoplay — click a button first to allow audio
 
-### Voice engines not appearing
-- Make sure the API key for that engine is set in `.env`
-- Restart the dev server (`npm run dev`) after adding keys
-- Check the browser console for API errors
+## AI Coach not responding
+
+- Verify `ANTHROPIC_API_KEY` in `.env` is correct
+- Check key validity at [console.anthropic.com](https://console.anthropic.com/)
+- Restart the dev server after any `.env` change
+
+## Voice engines not showing up
+
+- Confirm the API key for that engine is in `.env`
+- Restart the dev server (`npm run dev`)
+- Check the browser console (F12) for API errors
 
 ---
 
-## FAQ
+---
 
-**Q: Can I use this on my phone?**
-A: Yes. The app is fully responsive with a mobile-optimized bottom navigation bar. Use it in any modern mobile browser.
+# FAQ
 
-**Q: Does the AI store my ritual text?**
-A: No. Anthropic's API does not train on data sent through the API. Your ritual text is sent only during active AI Coach conversations and is not retained.
+---
 
-**Q: Can I practice without an internet connection?**
-A: Partially. Solo Practice with Browser TTS works fully offline. AI Coach, Google TTS, and ElevenLabs require an internet connection.
+**Can I use this on my phone?**
+Yes. Fully responsive with mobile-optimized navigation. Works in any modern mobile browser.
 
-**Q: What degrees/ceremonies are supported?**
-A: Any ceremony that's been formatted as an `.mram` file. The app is ceremony-agnostic — it works with whatever ritual text you provide.
+**Does the AI store my ritual text?**
+No. Anthropic does not train on API data. Text is sent only during active chat sessions and is not retained.
 
-**Q: How do I share the app with my lodge?**
-A: Deploy to Vercel (free tier works), then share the URL. Each member uploads the same `.mram` file with the lodge passphrase. No accounts needed.
+**Can I practice offline?**
+Solo Practice with Browser TTS works fully offline. AI Coach and cloud TTS/STT need internet.
+
+**What degrees are supported?**
+Any ceremony formatted as an `.mram` file. The app is ceremony-agnostic.
+
+**How do I share with my lodge?**
+Deploy to Vercel (free tier works), share the URL. Each member uploads the same `.mram` file with the lodge passphrase. No accounts needed.
+
+**Is my data safe?**
+Yes. AES-256-GCM encryption, PBKDF2 key derivation (310k iterations), no server-side storage, no tracking. Your ritual stays in your browser.
