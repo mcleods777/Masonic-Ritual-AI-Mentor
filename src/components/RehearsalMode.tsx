@@ -796,7 +796,7 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
               </div>
             )}
 
-            <div className="flex justify-center">
+            <div className="flex flex-col items-center gap-2">
               <button
                 onClick={stopListening}
                 className="px-6 py-3 bg-red-600 hover:bg-red-500 text-white rounded-lg font-medium transition-colors flex items-center gap-2 animate-pulse"
@@ -806,6 +806,11 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
                 </svg>
                 Done Speaking
               </button>
+              {sttProvider === "whisper" && (
+                <p className="text-xs text-zinc-500">
+                  Auto-stops when you go silent, or tap the button above
+                </p>
+              )}
             </div>
           </div>
         )}

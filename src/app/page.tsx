@@ -32,7 +32,7 @@ export default function HomePage() {
         <p className="text-lg text-zinc-400 mt-4 max-w-2xl mx-auto">
           A privacy-first practice tool for memorizing your ritual work.
           Load your encrypted .mram ritual file, practice from cipher text,
-          and get instant feedback with AI coaching.
+          and get instant accuracy feedback with voice corrections.
         </p>
       </div>
 
@@ -92,10 +92,8 @@ export default function HomePage() {
         </Link>
 
         <Link
-          href="/chat"
-          className={`group bg-zinc-900 rounded-xl border border-zinc-800 hover:border-amber-500/50 p-6 transition-all ${
-            !hasDocuments && !loading ? "opacity-50" : ""
-          }`}
+          href="/walkthrough"
+          className="group bg-zinc-900 rounded-xl border border-zinc-800 hover:border-amber-500/50 p-6 transition-all"
         >
           <div className="w-12 h-12 rounded-xl bg-amber-500/10 flex items-center justify-center mb-4 group-hover:bg-amber-500/20 transition-colors">
             <svg
@@ -108,16 +106,16 @@ export default function HomePage() {
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
+                d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l5.447 2.724A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"
               />
             </svg>
           </div>
           <h3 className="text-lg font-semibold text-zinc-200 group-hover:text-amber-400 transition-colors">
-            AI Coach
+            How It Works
           </h3>
           <p className="text-sm text-zinc-500 mt-2">
-            Chat with a patient AI coach who knows your ritual. Ask
-            questions, get hints, or have it quiz you on the catechism.
+            Learn how the Ritual Mentor works — voice engines, rehearsal
+            modes, privacy architecture, and more.
           </p>
         </Link>
       </div>
@@ -178,7 +176,7 @@ export default function HomePage() {
             {
               step: "4",
               title: "Review",
-              desc: "Get word-by-word accuracy scoring, hear the correct version, and chat with the AI coach.",
+              desc: "Get word-by-word accuracy scoring, hear the correct version spoken back, and track your progress.",
             },
           ].map((item) => (
             <div key={item.step} className="text-center">
@@ -218,8 +216,8 @@ export default function HomePage() {
               Your .mram ritual file is decrypted on your device, then re-encrypted
               with AES-256-GCM and stored in IndexedDB. Cipher text and plain text are
               kept in separate encrypted fields — cipher is shown to you, plain text
-              is only used for AI coaching and accuracy comparison. The AI coach never
-              sees cipher text, and Anthropic does not use API data for training.
+              is only used for accuracy comparison. No ritual text is sent to external
+              servers except when using cloud voice engines (ElevenLabs, Google TTS, Groq Whisper).
             </p>
           </div>
         </div>

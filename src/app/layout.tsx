@@ -12,7 +12,7 @@ const cinzel = Cinzel({
 export const metadata: Metadata = {
   title: "Masonic Ritual Mentor",
   description:
-    "A privacy-first voice-driven practice tool for Masonic ritual memorization. Upload your ritual, practice by speaking, and get AI coaching — all on your device.",
+    "A privacy-first voice-driven practice tool for Masonic ritual memorization. Upload your ritual, practice by speaking, and get instant accuracy feedback — all on your device.",
 };
 
 export default function RootLayout({
