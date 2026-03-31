@@ -409,7 +409,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
     advanceToLine(currentIndex + 1);
   }, [advanceToLine, currentIndex]);
 
-  // Retry the current line — remove last result and reset to user-turn
+  // Retry the current line — remove last result and auto-start listening
   const retryCurrentLine = useCallback(() => {
     stopSpeaking();
     setIsSpeakingFeedback(false);
@@ -417,7 +417,10 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
     setCurrentComparison(null);
     setTranscript("");
     setLineResults((prev) => prev.slice(0, -1));
-    setRehearsalState("user-turn");
+    setRehearsalState("listening");
+    setTimeout(() => {
+      if (!cancelledRef.current) startListeningRef.current();
+    }, 400);
   }, []);
 
   // Fetch AI coaching feedback and speak it aloud
