@@ -34,12 +34,13 @@ export type TTSEngineName = "browser" | "elevenlabs" | "google-cloud" | "deepgra
 
 const TTS_ENGINE_STORAGE_KEY = "tts-engine";
 
-let currentEngine: TTSEngineName = "browser";
+let currentEngine: TTSEngineName = "elevenlabs";
 
 // Restore persisted engine on module load (client only)
 if (typeof window !== "undefined") {
   const stored = localStorage.getItem(TTS_ENGINE_STORAGE_KEY);
   if (
+    stored === "browser" ||
     stored === "elevenlabs" ||
     stored === "google-cloud" ||
     stored === "deepgram" ||
