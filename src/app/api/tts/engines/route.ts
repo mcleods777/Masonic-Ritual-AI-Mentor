@@ -14,5 +14,6 @@ export async function GET() {
     google: !!process.env.GOOGLE_CLOUD_TTS_API_KEY,
     deepgram: !!process.env.DEEPGRAM_API_KEY,
     kokoro: !!process.env.KOKORO_TTS_URL,
+    voxtral: !!process.env.MISTRAL_API_KEY,
   });
 }

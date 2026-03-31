@@ -1,12 +1,13 @@
 /**
  * Text-to-speech — multi-engine support.
  *
- * Five engines:
+ * Six engines:
  *   1. "browser"      — Web Speech Synthesis API (free, works offline)
  *   2. "elevenlabs"   — ElevenLabs cloud API (high-quality)
  *   3. "google-cloud" — Google Cloud TTS Neural2 (high-quality)
  *   4. "deepgram"     — Deepgram Aura-2 (fast, natural)
  *   5. "kokoro"       — Kokoro (self-hosted, free)
+ *   6. "voxtral"      — Mistral Voxtral TTS (natural, multilingual)
  *
  * The public API (speak, speakAsRole, stopSpeaking, etc.) stays the same.
  * Components don't need to know which engine is active — they just call
@@ -22,6 +23,8 @@ import {
   speakDeepgramAsRole,
   speakKokoro,
   speakKokoroAsRole,
+  speakVoxtral,
+  speakVoxtralAsRole,
   stopCloudAudio,
   isCloudAudioPlaying,
 } from "./tts-cloud";
@@ -30,7 +33,7 @@ import {
 // Engine selection
 // ============================================================
 
-export type TTSEngineName = "browser" | "elevenlabs" | "google-cloud" | "deepgram" | "kokoro";
+export type TTSEngineName = "browser" | "elevenlabs" | "google-cloud" | "deepgram" | "kokoro" | "voxtral";
 
 const TTS_ENGINE_STORAGE_KEY = "tts-engine";
 
@@ -44,7 +47,8 @@ if (typeof window !== "undefined") {
     stored === "elevenlabs" ||
     stored === "google-cloud" ||
     stored === "deepgram" ||
-    stored === "kokoro"
+    stored === "kokoro" ||
+    stored === "voxtral"
   ) {
     currentEngine = stored;
   }
@@ -347,6 +351,8 @@ export async function speak(
       return speakDeepgram(text);
     case "kokoro":
       return speakKokoro(text);
+    case "voxtral":
+      return speakVoxtral(text);
     default:
       return speakBrowser(text, options);
   }
@@ -371,6 +377,8 @@ export function speakAsRole(
       return speakDeepgramAsRole(text, role);
     case "kokoro":
       return speakKokoroAsRole(text, role);
+    case "voxtral":
+      return speakVoxtralAsRole(text, role);
     default: {
       const profile = voiceMap?.get(role) || getVoiceForRole(role);
       return speakBrowser(text, {

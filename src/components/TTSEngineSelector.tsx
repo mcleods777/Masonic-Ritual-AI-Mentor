@@ -41,6 +41,11 @@ const ENGINE_OPTIONS: EngineOption[] = [
     label: "Google Cloud",
     description: "Premium — Neural2 voices",
   },
+  {
+    value: "voxtral",
+    label: "Voxtral (Mistral)",
+    description: "Natural — multilingual voices",
+  },
 ];
 
 /**
@@ -56,7 +61,8 @@ export default function TTSEngineSelector() {
     google: boolean;
     deepgram: boolean;
     kokoro: boolean;
-  }>({ elevenlabs: false, google: false, deepgram: false, kokoro: false });
+    voxtral: boolean;
+  }>({ elevenlabs: false, google: false, deepgram: false, kokoro: false, voxtral: false });
   const [loaded, setLoaded] = useState(false);
 
   // Load current engine + check server availability
@@ -84,6 +90,7 @@ export default function TTSEngineSelector() {
     if (engine === "google-cloud") return availability.google;
     if (engine === "deepgram") return availability.deepgram;
     if (engine === "kokoro") return availability.kokoro;
+    if (engine === "voxtral") return availability.voxtral;
     return false;
   };
 

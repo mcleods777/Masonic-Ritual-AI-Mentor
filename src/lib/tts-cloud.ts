@@ -1,5 +1,5 @@
 /**
- * Cloud TTS engines — ElevenLabs, Google Cloud, Deepgram Aura-2, and Kokoro.
+ * Cloud TTS engines — ElevenLabs, Google Cloud, Deepgram Aura-2, Kokoro, and Voxtral.
  *
  * Each engine calls its corresponding Next.js API route (which holds
  * the secret API key) and plays back the returned audio via an
@@ -635,6 +635,134 @@ export async function speakKokoroAsRole(
 }
 
 // ============================================================
+// Voxtral (Mistral)
+// ============================================================
+
+/**
+ * Voxtral preset voice IDs for Masonic officer roles.
+ * Uses the 5 English preset voices distributed across roles.
+ */
+const VOXTRAL_ROLE_VOICES: Record<string, string> = {
+  // Principal officers — authoritative male voices
+  WM:       "neutral_male",      // Neutral — commanding, authoritative
+  "W.M.":   "neutral_male",
+  "W. M.":  "neutral_male",
+  SW:       "casual_male",       // Casual — warm, steady
+  "S.W.":   "casual_male",
+  "S. W.":  "casual_male",
+  JW:       "neutral_male",      // Neutral — clear
+  "J.W.":   "neutral_male",
+  "J. W.":  "neutral_male",
+  // Deacons
+  SD:       "casual_male",
+  "S.D.":   "casual_male",
+  "S. D.":  "casual_male",
+  JD:       "neutral_male",
+  "J.D.":   "neutral_male",
+  "J. D.":  "neutral_male",
+  "S(orJ)D":"casual_male",
+  "S/J D":  "casual_male",
+  // Other officers
+  "S/Sec":  "neutral_male",
+  Sec:      "neutral_male",
+  "Sec.":   "neutral_male",
+  S:        "neutral_male",
+  Tr:       "casual_male",
+  Treas:    "casual_male",
+  "Treas.": "casual_male",
+  Ch:       "neutral_male",
+  Chap:     "neutral_male",
+  "Chap.":  "neutral_male",
+  Marshal:  "casual_male",
+  T:        "casual_male",
+  Tyler:    "casual_male",
+  Candidate:"casual_male",
+  ALL:      "neutral_male",
+  All:      "neutral_male",
+  BR:       "casual_male",
+  Bro:      "casual_male",
+  "Bro.":   "casual_male",
+  "SW/WM":  "neutral_male",
+  Trs:      "casual_male",
+  "WM/Chaplain":"neutral_male",
+  Voucher:  "casual_male",
+  Vchr:     "casual_male",
+  Narrator: "neutral_male",
+  PRAYER:   "neutral_male",
+  Prayer:   "neutral_male",
+};
+
+const VOXTRAL_DEFAULT_VOICE = "casual_male";
+
+export function getVoxtralVoiceForRole(role: string): string {
+  return VOXTRAL_ROLE_VOICES[role] || VOXTRAL_DEFAULT_VOICE;
+}
+
+/** Speak text using Voxtral TTS (with retry for transient errors). */
+export async function speakVoxtral(
+  text: string,
+  voiceId?: string
+): Promise<void> {
+  const MAX_RETRIES = 2;
+  const RETRY_DELAYS = [500, 1500];
+  const signal = getTTSAbortSignal();
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+
+    let resp: Response;
+    try {
+      resp = await fetch("/api/tts/voxtral", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text,
+          voiceId: voiceId || VOXTRAL_DEFAULT_VOICE,
+        }),
+        signal,
+      });
+    } catch (fetchErr) {
+      if (fetchErr instanceof DOMException && fetchErr.name === "AbortError") {
+        throw fetchErr;
+      }
+      if (attempt < MAX_RETRIES) {
+        console.warn(
+          `Voxtral TTS network error, retrying in ${RETRY_DELAYS[attempt]}ms (attempt ${attempt + 1}/${MAX_RETRIES})...`
+        );
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+        continue;
+      }
+      throw fetchErr;
+    }
+
+    if (resp.ok) {
+      await playAudioBlob(await resp.blob());
+      return;
+    }
+
+    const isRetryable = resp.status === 429 || resp.status >= 500;
+    if (isRetryable && attempt < MAX_RETRIES) {
+      console.warn(
+        `Voxtral TTS returned ${resp.status}, retrying in ${RETRY_DELAYS[attempt]}ms (attempt ${attempt + 1}/${MAX_RETRIES})...`
+      );
+      await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+      continue;
+    }
+
+    const err = await resp.json().catch(() => ({ error: resp.statusText }));
+    throw new Error((err as { error?: string }).error || "Voxtral TTS failed");
+  }
+}
+
+/** Speak text as a Masonic officer role using Voxtral TTS. */
+export async function speakVoxtralAsRole(
+  text: string,
+  role: string
+): Promise<void> {
+  return speakVoxtral(text, getVoxtralVoiceForRole(role));
+}
+
+// ============================================================
 // Engine availability
 // ============================================================
 
@@ -644,12 +772,13 @@ export async function fetchEngineAvailability(): Promise<{
   google: boolean;
   deepgram: boolean;
   kokoro: boolean;
+  voxtral: boolean;
 }> {
   try {
     const resp = await fetch("/api/tts/engines");
-    if (!resp.ok) return { elevenlabs: false, google: false, deepgram: false, kokoro: false };
+    if (!resp.ok) return { elevenlabs: false, google: false, deepgram: false, kokoro: false, voxtral: false };
     return resp.json();
   } catch {
-    return { elevenlabs: false, google: false, deepgram: false, kokoro: false };
+    return { elevenlabs: false, google: false, deepgram: false, kokoro: false, voxtral: false };
   }
 }
