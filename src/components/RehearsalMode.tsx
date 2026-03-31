@@ -35,6 +35,7 @@ type RehearsalState =
   | "user-turn"     // Waiting for user to recite
   | "listening"     // User is speaking (STT active)
   | "transcribing"  // Whisper: recording done, waiting for server transcript
+  | "auto-checking" // Browser STT auto-stopped — compute comparison
   | "checking"      // Showing accuracy for user's line
   | "complete";     // Rehearsal finished
 
@@ -59,9 +60,12 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
   const engineRef = useRef<STTEngine | null>(null);
   const sttProviderRef = useRef<STTProvider>(sttProvider);
   sttProviderRef.current = sttProvider;
+  const transcriptRef = useRef<string>("");
+  transcriptRef.current = transcript;
   const voiceMapRef = useRef<Map<string, RoleVoiceProfile>>(new Map());
   const cancelledRef = useRef(false);
   const scriptContainerRef = useRef<HTMLDivElement>(null);
+  const startListeningRef = useRef<() => void>(() => {});
 
   // Extract unique roles from sections (only those with speaker lines)
   const availableRoles = useMemo(() => {
@@ -142,8 +146,13 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
     if (cancelledRef.current) return;
 
     if (section.speaker === selectedRole) {
-      // It's the user's turn
-      setRehearsalState("user-turn");
+      // It's the user's turn — auto-start listening (hands-free)
+      setRehearsalState("listening");
+      // Small delay so the UI updates before mic activates
+      setTimeout(() => {
+        if (!cancelledRef.current) startListeningRef.current();
+      }, 400);
+      return;
     } else if (section.speaker) {
       // AI reads this line
       setRehearsalState("ai-speaking");
@@ -214,7 +223,11 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
       };
 
       engine.onEnd = () => {
-        // Browser engine: may auto-stop after silence (no action needed)
+        // Browser engine: auto-stopped after silence — trigger accuracy check
+        if (provider === "browser" && transcriptRef.current) {
+          engineRef.current = null;
+          setRehearsalState("auto-checking");
+        }
         // Whisper engine: recording stopped, transcript delivered via onResult
       };
 
@@ -224,6 +237,9 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
       setSttError(err instanceof Error ? err.message : "Failed to start speech recognition");
     }
   }, []);
+
+  // Keep ref in sync so advanceToLine can call it without circular deps
+  startListeningRef.current = startListening;
 
   // Stop listening and check accuracy
   const stopListening = useCallback(() => {
@@ -267,6 +283,23 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
         { sectionIndex: currentIndex, accuracy: result.accuracy, comparison: result },
       ]);
       setRehearsalState("checking");
+    }
+  }, [rehearsalState, transcript, currentSection, currentIndex]);
+
+  // Browser STT auto-stopped after silence — compute comparison and show results.
+  useEffect(() => {
+    if (rehearsalState === "auto-checking" && transcript && currentSection) {
+      const cleanRef = cleanRitualText(currentSection.text);
+      const result = compareTexts(transcript, cleanRef);
+      setCurrentComparison(result);
+      setLineResults((prev) => [
+        ...prev,
+        { sectionIndex: currentIndex, accuracy: result.accuracy, comparison: result },
+      ]);
+      setRehearsalState("checking");
+    } else if (rehearsalState === "auto-checking") {
+      // No transcript captured — go back to user-turn
+      setRehearsalState("user-turn");
     }
   }, [rehearsalState, transcript, currentSection, currentIndex]);
 
