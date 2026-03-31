@@ -20,6 +20,8 @@ export interface STTEngine {
   onResult: ((result: STTResult) => void) | null;
   onError: ((error: string) => void) | null;
   onEnd: (() => void) | null;
+  /** Called when silence is detected for the configured duration. */
+  onSilence: (() => void) | null;
 }
 
 export type STTProvider = "browser" | "whisper";
@@ -66,14 +68,31 @@ export function createWebSpeechEngine(): STTEngine {
 
   let listening = false;
 
+  let silenceTimer: ReturnType<typeof setTimeout> | null = null;
+  let hasSpoken = false;
+
+  const BROWSER_SILENCE_MS = 3000;
+
+  function resetSilenceTimer() {
+    if (silenceTimer) clearTimeout(silenceTimer);
+    if (!hasSpoken) return;
+    silenceTimer = setTimeout(() => {
+      if (listening && hasSpoken) {
+        engine.onSilence?.();
+      }
+    }, BROWSER_SILENCE_MS);
+  }
+
   const engine: STTEngine = {
     onResult: null,
     onError: null,
     onEnd: null,
+    onSilence: null,
 
     start() {
       if (listening) return;
       try {
+        hasSpoken = false;
         recognition.start();
         listening = true;
       } catch {
@@ -83,6 +102,7 @@ export function createWebSpeechEngine(): STTEngine {
 
     stop() {
       if (!listening) return;
+      if (silenceTimer) clearTimeout(silenceTimer);
       recognition.stop();
       listening = false;
     },
@@ -107,8 +127,14 @@ export function createWebSpeechEngine(): STTEngine {
       }
     }
 
+    const combined = finalTranscript + interimTranscript;
+    if (combined.trim().length > 0) {
+      hasSpoken = true;
+      resetSilenceTimer();
+    }
+
     engine.onResult({
-      transcript: finalTranscript + interimTranscript,
+      transcript: combined,
       isFinal: interimTranscript.length === 0 && finalTranscript.length > 0,
       confidence:
         event.results.length > 0
@@ -151,11 +177,71 @@ export function createWhisperEngine(): STTEngine {
   let mediaRecorder: MediaRecorder | null = null;
   let audioChunks: Blob[] = [];
   let stream: MediaStream | null = null;
+  let audioContext: AudioContext | null = null;
+  let analyser: AnalyserNode | null = null;
+  let silenceRafId: number | null = null;
+  let lastSoundTime = 0;
+  let hasRecordedSound = false;
+
+  const WHISPER_SILENCE_MS = 3000;
+  const SILENCE_THRESHOLD = 15; // RMS threshold (0-255 scale)
+
+  function startSilenceDetection(mediaStream: MediaStream) {
+    audioContext = new AudioContext();
+    analyser = audioContext.createAnalyser();
+    analyser.fftSize = 512;
+    const source = audioContext.createMediaStreamSource(mediaStream);
+    source.connect(analyser);
+
+    const dataArray = new Uint8Array(analyser.fftSize);
+    lastSoundTime = Date.now();
+
+    function checkAudioLevel() {
+      if (!analyser || !listening) return;
+      analyser.getByteTimeDomainData(dataArray);
+
+      // Calculate RMS
+      let sum = 0;
+      for (let i = 0; i < dataArray.length; i++) {
+        const val = (dataArray[i] - 128) / 128;
+        sum += val * val;
+      }
+      const rms = Math.sqrt(sum / dataArray.length) * 255;
+
+      if (rms > SILENCE_THRESHOLD) {
+        lastSoundTime = Date.now();
+        hasRecordedSound = true;
+      }
+
+      if (hasRecordedSound && Date.now() - lastSoundTime > WHISPER_SILENCE_MS) {
+        engine.onSilence?.();
+        return; // Stop monitoring
+      }
+
+      silenceRafId = requestAnimationFrame(checkAudioLevel);
+    }
+
+    silenceRafId = requestAnimationFrame(checkAudioLevel);
+  }
+
+  function stopSilenceDetection() {
+    if (silenceRafId != null) {
+      cancelAnimationFrame(silenceRafId);
+      silenceRafId = null;
+    }
+    if (audioContext) {
+      audioContext.close().catch(() => {});
+      audioContext = null;
+    }
+    analyser = null;
+    hasRecordedSound = false;
+  }
 
   const engine: STTEngine = {
     onResult: null,
     onError: null,
     onEnd: null,
+    onSilence: null,
 
     async start() {
       if (listening) return;
@@ -180,7 +266,8 @@ export function createWhisperEngine(): STTEngine {
         };
 
         mediaRecorder.onstop = async () => {
-          // Release mic
+          // Clean up audio monitoring and release mic
+          stopSilenceDetection();
           stream?.getTracks().forEach((t) => t.stop());
           stream = null;
 
@@ -237,6 +324,7 @@ export function createWhisperEngine(): STTEngine {
 
         mediaRecorder.start();
         listening = true;
+        startSilenceDetection(stream);
       } catch (err) {
         listening = false;
         stream?.getTracks().forEach((t) => t.stop());
@@ -250,6 +338,7 @@ export function createWhisperEngine(): STTEngine {
     stop() {
       if (!listening) return;
       listening = false;
+      stopSilenceDetection();
       if (mediaRecorder && mediaRecorder.state !== "inactive") {
         mediaRecorder.stop();
       }

@@ -55,7 +55,7 @@ interface MRAMDocument {
 
 // Speaker pattern — matches lines like **WM**: or **Tyler**: or **Vchr**:
 const SPEAKER_PATTERN =
-  /^\*{0,2}(WM|SW|JW|SD|JD|Sec|Trs|Tyl|Tyler|Ch|Chap|ALL|All|BR|Bro|Bros|Voucher|Vchr|Marshal|Candidate|S|T|PRAYER)\*{0,2}\s*:\s*/i;
+  /^\*{0,2}(WM|SW|JW|SD|JD|Sec|Trs|Tyl|Tyler|Ch|Chap|ALL|All|BR|Bro|Bros|Voucher|Vchr|Marshal|Candidate|S|T|PRAYER|Narrator|WM\/Chaplain)\*{0,2}\s*:\s*/i;
 
 // Known roles with display names
 const ROLE_MAP: Record<string, string> = {
@@ -81,6 +81,8 @@ const ROLE_MAP: Record<string, string> = {
   Candidate: "Candidate",
   T: "Tiler",
   S: "Secretary",
+  Narrator: "Narrator",
+  "WM/Chaplain": "WM / Chaplain",
 };
 
 function normalizeRole(role: string): string {
@@ -91,6 +93,7 @@ function normalizeRole(role: string): string {
   if (upper === "CHAP") return "Ch";
   if (upper === "TRS") return "Trs";
   if (upper === "ALL") return "ALL";
+  if (role === "WM/Chaplain") return "Ch";
   // Return as-is for standard abbreviations
   return role;
 }
@@ -254,22 +257,22 @@ function parseDocument(content: string): MRAMDocument {
       while (j < rawParsedLines.length && rawParsedLines[j].type === "empty") j++;
 
       if (j < rawParsedLines.length && rawParsedLines[j].type === "speaker" && rawParsedLines[j].parsed) {
-        const cipherLine = entry.parsed;
-        const plainLine = rawParsedLines[j].parsed!;
+        const firstLine = entry.parsed;
+        const secondLine = rawParsedLines[j].parsed!;
 
         // Only pair if the roles match — otherwise they're separate standalone lines
-        if (cipherLine.role === plainLine.role) {
-          // This is a cipher/plain pair
-          rolesUsed.add(cipherLine.role);
+        if (firstLine.role === secondLine.role) {
+          // This is a plain/cipher pair (first = plain full text, second = cipher abbreviation)
+          rolesUsed.add(firstLine.role);
 
           doc.lines.push({
             id: lineId++,
             section: currentSectionId,
-            role: cipherLine.role,
-            gavels: cipherLine.gavels || plainLine.gavels,
-            action: cipherLine.action || plainLine.action,
-            cipher: cipherLine.rawText,
-            plain: plainLine.rawText,
+            role: firstLine.role,
+            gavels: firstLine.gavels || secondLine.gavels,
+            action: firstLine.action || secondLine.action,
+            cipher: secondLine.rawText,
+            plain: firstLine.rawText,
           });
 
           i = j + 1;
@@ -277,15 +280,15 @@ function parseDocument(content: string): MRAMDocument {
         }
 
         // Roles don't match — treat the first as a standalone line (cipher = plain)
-        rolesUsed.add(cipherLine.role);
+        rolesUsed.add(firstLine.role);
         doc.lines.push({
           id: lineId++,
           section: currentSectionId,
-          role: cipherLine.role,
-          gavels: cipherLine.gavels,
-          action: cipherLine.action,
-          cipher: cipherLine.rawText,
-          plain: cipherLine.rawText,
+          role: firstLine.role,
+          gavels: firstLine.gavels,
+          action: firstLine.action,
+          cipher: firstLine.rawText,
+          plain: firstLine.rawText,
         });
 
         i++;
@@ -348,7 +351,7 @@ function parseDocument(content: string): MRAMDocument {
   }
   // Always include PRAYER if used
   if (doc.lines.some((l) => l.role === "PRAYER")) {
-    doc.roles["PRAYER"] = "Prayer";
+    doc.roles["PRAYER"] = "Chaplain";
   }
 
   return doc;

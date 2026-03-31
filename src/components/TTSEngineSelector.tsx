@@ -22,6 +22,16 @@ const ENGINE_OPTIONS: EngineOption[] = [
     description: "Built-in — free, works offline",
   },
   {
+    value: "kokoro",
+    label: "Kokoro",
+    description: "Free — self-hosted, high-quality",
+  },
+  {
+    value: "deepgram",
+    label: "Deepgram Aura-2",
+    description: "Fast, natural voices",
+  },
+  {
     value: "elevenlabs",
     label: "ElevenLabs",
     description: "Premium — natural, human-like",
@@ -44,7 +54,9 @@ export default function TTSEngineSelector() {
   const [availability, setAvailability] = useState<{
     elevenlabs: boolean;
     google: boolean;
-  }>({ elevenlabs: false, google: false });
+    deepgram: boolean;
+    kokoro: boolean;
+  }>({ elevenlabs: false, google: false, deepgram: false, kokoro: false });
   const [loaded, setLoaded] = useState(false);
 
   // Load current engine + check server availability
@@ -70,6 +82,8 @@ export default function TTSEngineSelector() {
     if (engine === "browser") return true;
     if (engine === "elevenlabs") return availability.elevenlabs;
     if (engine === "google-cloud") return availability.google;
+    if (engine === "deepgram") return availability.deepgram;
+    if (engine === "kokoro") return availability.kokoro;
     return false;
   };
 
@@ -107,7 +121,11 @@ export default function TTSEngineSelector() {
             >
               {opt.label}
               {opt.value !== "browser" &&
-                (available ? ` — ${opt.description}` : " — API key not set")}
+                (available
+                  ? ` — ${opt.description}`
+                  : opt.value === "kokoro"
+                    ? " — URL not set"
+                    : " — API key not set")}
             </option>
           );
         })}

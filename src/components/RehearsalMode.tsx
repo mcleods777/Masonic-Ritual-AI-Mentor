@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import Link from "next/link";
 import type { RitualSectionWithCipher } from "@/lib/storage";
 import { ROLE_DISPLAY_NAMES, cleanRitualText } from "@/lib/document-parser";
 import { compareTexts, type ComparisonResult } from "@/lib/text-comparison";
@@ -23,9 +24,17 @@ import {
 } from "@/lib/text-to-speech";
 import { playGavelKnocks, countGavelMarks } from "@/lib/gavel-sound";
 import DiffDisplay from "./DiffDisplay";
+import {
+  saveSession,
+  buildPerformanceContext,
+  type PracticeSession,
+  type LineScore,
+} from "@/lib/performance-history";
 
 interface RehearsalModeProps {
   sections: RitualSectionWithCipher[];
+  documentId?: string;
+  documentTitle?: string;
 }
 
 type RehearsalState =
@@ -44,7 +53,7 @@ interface LineResult {
   comparison: ComparisonResult;
 }
 
-export default function RehearsalMode({ sections }: RehearsalModeProps) {
+export default function RehearsalMode({ sections, documentId, documentTitle }: RehearsalModeProps) {
   // Setup state
   const [selectedRole, setSelectedRole] = useState<string | null>(null);
   const [rehearsalState, setRehearsalState] = useState<RehearsalState>("setup");
@@ -54,14 +63,31 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
   const [lineResults, setLineResults] = useState<LineResult[]>([]);
   const [sttError, setSttError] = useState<string | null>(null);
   const [inputMode, setInputMode] = useState<"voice" | "type">("voice");
-  const [sttProvider, setSTTProvider] = useState<STTProvider>("browser");
+  const [sttProvider, setSTTProvider] = useState<STTProvider>("whisper");
+  const [aiCoaching, setAiCoaching] = useState(true);
+  const [aiFeedback, setAiFeedback] = useState<string | null>(null);
+  const [isSpeakingFeedback, setIsSpeakingFeedback] = useState(false);
+  const [autoStop, setAutoStop] = useState(true);
 
   const engineRef = useRef<STTEngine | null>(null);
   const sttProviderRef = useRef<STTProvider>(sttProvider);
   sttProviderRef.current = sttProvider;
   const voiceMapRef = useRef<Map<string, RoleVoiceProfile>>(new Map());
   const cancelledRef = useRef(false);
+  const advanceGenRef = useRef(0); // generation counter to prevent overlapping advanceToLine chains
   const scriptContainerRef = useRef<HTMLDivElement>(null);
+  const stopListeningRef = useRef<() => void>(() => { });
+  const autoStopRef = useRef(autoStop);
+  autoStopRef.current = autoStop;
+  const sessionStartRef = useRef<string>(new Date().toISOString());
+  const perfContextRef = useRef<string>("");
+
+  // Load performance context on mount for AI feedback
+  useEffect(() => {
+    buildPerformanceContext()
+      .then((ctx) => { perfContextRef.current = ctx; })
+      .catch(console.error);
+  }, []);
 
   // Extract unique roles from sections (only those with speaker lines)
   const availableRoles = useMemo(() => {
@@ -81,8 +107,33 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
     }
   }, [availableRoles]);
 
-  // Scroll current line into view
+  // Track whether the user is manually scrolling — suppress auto-scroll if so
+  const userScrollingRef = useRef(false);
+  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
+    const container = scriptContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      userScrollingRef.current = true;
+      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+      // Re-enable auto-scroll after 5 seconds of no manual scrolling
+      scrollTimeoutRef.current = setTimeout(() => {
+        userScrollingRef.current = false;
+      }, 5000);
+    };
+
+    container.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      container.removeEventListener("scroll", handleScroll);
+      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+    };
+  }, []);
+
+  // Scroll current line into view (only if user isn't manually scrolling)
+  useEffect(() => {
+    if (userScrollingRef.current) return;
     const el = document.getElementById(`rehearsal-line-${currentIndex}`);
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -113,18 +164,23 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
   // Start the rehearsal — begin advancing through sections
   const startRehearsal = useCallback(() => {
     cancelledRef.current = false;
+    sessionStartRef.current = new Date().toISOString();
     setCurrentIndex(0);
     setLineResults([]);
     setRehearsalState("ready");
     // Advance will be triggered by effect
   }, []);
 
-  // Advance to next line and handle AI speaking vs user turn
-  const advanceToLine = useCallback(async (index: number) => {
+  // Internal advance — walks through lines with a generation guard.
+  // Only the matching generation is allowed to continue; a new call
+  // to advanceToLine() bumps the generation so any old chain exits.
+  const advanceInternal = useCallback(async (index: number, gen: number) => {
     if (cancelledRef.current || index >= sections.length) {
       setRehearsalState("complete");
       return;
     }
+
+    const stale = () => cancelledRef.current || gen !== advanceGenRef.current;
 
     setCurrentIndex(index);
     setTranscript("");
@@ -135,11 +191,11 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
 
     // Check for gavel marks and play knock sounds (use MRAM field first)
     const gavelCount = section.gavels > 0 ? section.gavels : countGavelMarks(section.text);
-    if (gavelCount > 0 && !cancelledRef.current) {
+    if (gavelCount > 0 && !stale()) {
       await playGavelKnocks(gavelCount);
     }
 
-    if (cancelledRef.current) return;
+    if (stale()) return;
 
     if (section.speaker === selectedRole) {
       // It's the user's turn
@@ -148,26 +204,51 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
       // AI reads this line
       setRehearsalState("ai-speaking");
 
-      try {
-        const cleanText = cleanRitualText(section.text);
-        if (cleanText) {
-          await speakAsRole(cleanText, section.speaker, voiceMapRef.current);
+      const cleanText = cleanRitualText(section.text);
+      if (cleanText) {
+        let spoken = false;
+        for (let attempt = 0; attempt < 2 && !spoken; attempt++) {
+          if (stale()) return;
+          try {
+            await speakAsRole(cleanText, section.speaker, voiceMapRef.current);
+            spoken = true;
+          } catch (err) {
+            // Don't retry if this was an intentional abort
+            if (err instanceof DOMException && err.name === "AbortError") return;
+            console.warn(
+              `TTS failed for line ${index} (${section.speaker}), attempt ${attempt + 1}:`,
+              err
+            );
+            if (attempt === 0) {
+              await new Promise((r) => setTimeout(r, 1000));
+            } else {
+              await new Promise((r) => setTimeout(r, 1500));
+            }
+          }
         }
-      } catch (err) {
-        console.warn(`TTS failed for line ${index} (${section.speaker}):`, err);
-        // Brief pause so we don't zip through the script on repeated failures
-        await new Promise((r) => setTimeout(r, 800));
       }
 
-      if (!cancelledRef.current) {
-        // Auto-advance to next line after speaking
-        advanceToLine(index + 1);
+      if (!stale()) {
+        // Small gap between lines to avoid hammering the TTS API
+        await new Promise((r) => setTimeout(r, 150));
+        // Auto-advance to next line (same generation — not a new entry)
+        advanceInternal(index + 1, gen);
       }
     } else {
-      // No speaker (stage direction, etc.) — skip
-      advanceToLine(index + 1);
+      // No speaker (stage direction, etc.) — brief pause then skip
+      await new Promise((r) => setTimeout(r, 150));
+      if (!stale()) {
+        advanceInternal(index + 1, gen);
+      }
     }
   }, [sections, selectedRole]);
+
+  // Public entry point — bumps generation to cancel any running chain
+  const advanceToLine = useCallback((index: number) => {
+    stopSpeaking();
+    const gen = ++advanceGenRef.current;
+    advanceInternal(index, gen);
+  }, [advanceInternal]);
 
   // Trigger first advance when rehearsal starts
   useEffect(() => {
@@ -201,11 +282,8 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
 
       engine.onResult = (result) => {
         setTranscript(result.transcript);
-        // Whisper returns a single final result after transcription completes.
-        // Automatically move to checking state.
-        if (provider === "whisper" && result.isFinal) {
-          setRehearsalState("listening"); // briefly show transcript before check runs
-        }
+        // Whisper: the final transcript update triggers the "transcribing" → "checking"
+        // effect. No state change needed here — the effect handles the transition.
       };
 
       engine.onError = (error) => {
@@ -218,12 +296,31 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
         // Whisper engine: recording stopped, transcript delivered via onResult
       };
 
+      engine.onSilence = () => {
+        if (!autoStopRef.current) return;
+        stopListeningRef.current();
+      };
+
       engine.start();
       setRehearsalState("listening");
     } catch (err) {
       setSttError(err instanceof Error ? err.message : "Failed to start speech recognition");
     }
   }, []);
+
+  // Auto-start listening when it becomes the user's turn (voice mode)
+  useEffect(() => {
+    if (rehearsalState !== "user-turn" || inputMode !== "voice") return;
+
+    // Brief delay so the user sees/hears the "YOUR TURN" cue before mic activates
+    const timer = setTimeout(() => {
+      if (!cancelledRef.current) {
+        startListening();
+      }
+    }, 600);
+
+    return () => clearTimeout(timer);
+  }, [rehearsalState, inputMode, startListening]);
 
   // Stop listening and check accuracy
   const stopListening = useCallback(() => {
@@ -253,6 +350,7 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
       setRehearsalState("checking");
     }
   }, [transcript, currentSection, currentIndex]);
+  stopListeningRef.current = stopListening;
 
   // When Whisper finishes transcribing, the transcript state updates.
   // This effect detects that and moves from "transcribing" → "checking".
@@ -286,8 +384,54 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
 
   // Continue to next line after checking
   const continueAfterCheck = useCallback(() => {
+    stopSpeaking();
+    setIsSpeakingFeedback(false);
+    setAiFeedback(null);
     advanceToLine(currentIndex + 1);
   }, [advanceToLine, currentIndex]);
+
+  // Fetch AI coaching feedback and speak it aloud
+  const fetchAndSpeakFeedback = useCallback(
+    async (comparison: ComparisonResult) => {
+      if (!aiCoaching || !isTTSAvailable()) return;
+
+      try {
+        const res = await fetch("/api/rehearsal-feedback", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            accuracy: comparison.accuracy,
+            wrongWords: comparison.wrongWords,
+            missingWords: comparison.missingWords,
+            troubleSpots: comparison.troubleSpots,
+            lineNumber: lineResults.length + 1,
+            totalLines: userLineCount,
+            performanceContext: perfContextRef.current,
+          }),
+        });
+
+        if (!res.ok) return;
+        const { feedback } = await res.json();
+        if (!feedback || cancelledRef.current) return;
+
+        setAiFeedback(feedback);
+        setIsSpeakingFeedback(true);
+        await speak(feedback, { rate: 0.95 });
+      } catch {
+        // Non-critical — silently skip if feedback fails
+      } finally {
+        setIsSpeakingFeedback(false);
+      }
+    },
+    [aiCoaching, lineResults.length, userLineCount]
+  );
+
+  // Trigger AI coaching feedback when a line is checked
+  useEffect(() => {
+    if (rehearsalState === "checking" && currentComparison && aiCoaching) {
+      fetchAndSpeakFeedback(currentComparison);
+    }
+  }, [rehearsalState, currentComparison, aiCoaching, fetchAndSpeakFeedback]);
 
   // Skip user's line (they can't remember)
   const skipLine = useCallback(() => {
@@ -329,6 +473,8 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
     setCurrentComparison(null);
     setLineResults([]);
     setSttError(null);
+    setAiFeedback(null);
+    setIsSpeakingFeedback(false);
   }, []);
 
   // Restart rehearsal
@@ -336,33 +482,148 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
     setLineResults([]);
     setCurrentComparison(null);
     setTranscript("");
+    setAiFeedback(null);
+    setIsSpeakingFeedback(false);
     startRehearsal();
   }, [startRehearsal]);
 
-  // Click-to-speak: tap any word in the script view
-  const handleWordClick = useCallback(
-    async (word: string, role: string | null, e: React.MouseEvent) => {
-      e.stopPropagation();
+  // Jump to any line — speaks the clicked line first, then continues rehearsal.
+  const jumpToLine = useCallback(
+    async (index: number) => {
+      if (index < 0 || index >= sections.length) return;
 
-      // If the AI is currently speaking a line, cancel the recursive
-      // advance so it doesn't start the next line and overlap.
-      if (rehearsalState === "ai-speaking") {
-        cancelledRef.current = true;
+      // Stop everything in-flight
+      const gen = ++advanceGenRef.current;
+      cancelledRef.current = false;
+      stopSpeaking();
+      if (engineRef.current) {
+        engineRef.current.stop();
+        engineRef.current = null;
+      }
+      setAiFeedback(null);
+      setIsSpeakingFeedback(false);
+      setTranscript("");
+      setCurrentComparison(null);
+      setSttError(null);
+      setCurrentIndex(index);
+
+      const section = sections[index];
+      const stale = () => cancelledRef.current || gen !== advanceGenRef.current;
+
+      // Play gavel knocks if present
+      const gavelCount = section.gavels > 0 ? section.gavels : countGavelMarks(section.text);
+      if (gavelCount > 0 && !stale()) {
+        await playGavelKnocks(gavelCount);
+      }
+      if (stale()) return;
+
+      // Speak the clicked line (even stage directions / narrator)
+      const cleanText = cleanRitualText(section.text);
+      if (cleanText && section.speaker) {
+        setRehearsalState("ai-speaking");
+        try {
+          await speakAsRole(cleanText, section.speaker, voiceMapRef.current);
+        } catch {
+          /* ignore */
+        }
       }
 
+      if (stale()) return;
+
+      // Now continue rehearsal from the next line using advanceToLine
+      // (which bumps generation, killing this chain's gen — that's fine)
+      advanceToLine(index + 1);
+    },
+    [sections, advanceToLine],
+  );
+
+  // Click-to-speak: tap the current line's text to re-hear it (one-shot).
+  // Non-current lines are handled by jumpToLine on the outer div.
+  const handleCurrentLineSpeak = useCallback(
+    async (index: number, e: React.MouseEvent) => {
+      e.stopPropagation();
+      const section = sections[index];
+      if (!section) return;
+
+      // Kill any running advanceInternal chain (bumps generation + stops audio)
+      ++advanceGenRef.current;
+      cancelledRef.current = true;
       stopSpeaking();
-      if (role) {
+
+      // Clear the "AI speaking" overlay so it doesn't stick
+      if (rehearsalState === "ai-speaking") {
+        setRehearsalState("user-turn");
+      }
+
+      const cleanText = cleanRitualText(section.text);
+      if (!cleanText) return;
+
+      if (section.speaker) {
         try {
-          await speakAsRole(word, role, voiceMapRef.current);
+          await speakAsRole(cleanText, section.speaker, voiceMapRef.current);
         } catch {
-          await speak(word);
+          try { await speak(cleanText); } catch { /* ignore */ }
         }
       } else {
-        await speak(word);
+        try { await speak(cleanText); } catch { /* ignore */ }
       }
     },
-    [rehearsalState],
+    [rehearsalState, sections],
   );
+
+  // Save session to performance history when rehearsal completes
+  useEffect(() => {
+    if (rehearsalState !== "complete" || lineResults.length === 0) return;
+    if (!documentId) return;
+
+    const degree = sections[0]?.degree || "Unknown";
+    const duration = Math.round(
+      (Date.now() - new Date(sessionStartRef.current).getTime()) / 1000
+    );
+
+    // Collect all trouble spots across lines
+    const allTroubleSpots = new Map<string, number>();
+    for (const r of lineResults) {
+      for (const word of r.comparison.troubleSpots) {
+        allTroubleSpots.set(word, (allTroubleSpots.get(word) || 0) + 1);
+      }
+    }
+    const topTroubleSpots = [...allTroubleSpots.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([w]) => w);
+
+    const sessionId = crypto.randomUUID();
+    const session: PracticeSession = {
+      id: sessionId,
+      documentId,
+      documentTitle: documentTitle || "Unknown",
+      mode: "rehearsal",
+      role: selectedRole,
+      degree,
+      sectionName: null,
+      overallAccuracy,
+      linesAttempted: lineResults.length,
+      linesNailed: lineResults.filter((r) => r.accuracy >= 90).length,
+      troubleSpots: topTroubleSpots,
+      startedAt: sessionStartRef.current,
+      duration,
+    };
+
+    const lineScores: LineScore[] = lineResults.map((r, i) => ({
+      id: `${sessionId}-line-${i}`,
+      sessionId,
+      sectionName: sections[r.sectionIndex]?.sectionName || "Unknown",
+      lineIndex: r.sectionIndex,
+      accuracy: r.accuracy,
+      wrongWords: r.comparison.wrongWords,
+      missingWords: r.comparison.missingWords,
+      troubleSpots: r.comparison.troubleSpots,
+      timestamp: new Date().toISOString(),
+    }));
+
+    saveSession(session, lineScores).catch(console.error);
+  }, [rehearsalState, lineResults, documentId, documentTitle, sections, selectedRole, overallAccuracy]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -447,8 +708,8 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
                   <button
                     onClick={() => setSTTProvider("browser")}
                     className={`px-4 py-2 text-xs font-medium transition-colors ${sttProvider === "browser"
-                        ? "bg-amber-600 text-white"
-                        : "bg-zinc-800 text-zinc-400 hover:text-zinc-200"
+                      ? "bg-amber-600 text-white"
+                      : "bg-zinc-800 text-zinc-400 hover:text-zinc-200"
                       }`}
                   >
                     Browser
@@ -456,8 +717,8 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
                   <button
                     onClick={() => setSTTProvider("whisper")}
                     className={`px-4 py-2 text-xs font-medium transition-colors ${sttProvider === "whisper"
-                        ? "bg-amber-600 text-white"
-                        : "bg-zinc-800 text-zinc-400 hover:text-zinc-200"
+                      ? "bg-amber-600 text-white"
+                      : "bg-zinc-800 text-zinc-400 hover:text-zinc-200"
                       }`}
                   >
                     Whisper (Groq)
@@ -467,6 +728,54 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
                   {sttProvider === "whisper"
                     ? "Higher accuracy, Masonic vocabulary hints"
                     : "Free, real-time, browser-native"}
+                </span>
+              </div>
+
+              {/* AI Coaching toggle */}
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-zinc-500 uppercase tracking-wide">AI Coach:</span>
+                <button
+                  onClick={() => setAiCoaching(!aiCoaching)}
+                  className={`
+                    relative inline-flex h-6 w-11 items-center rounded-full transition-colors
+                    ${aiCoaching ? "bg-amber-600" : "bg-zinc-700"}
+                  `}
+                >
+                  <span
+                    className={`
+                      inline-block h-4 w-4 rounded-full bg-white transition-transform
+                      ${aiCoaching ? "translate-x-6" : "translate-x-1"}
+                    `}
+                  />
+                </button>
+                <span className="text-xs text-zinc-600">
+                  {aiCoaching
+                    ? "AI gives spoken feedback after each line"
+                    : "No AI feedback between lines"}
+                </span>
+              </div>
+
+              {/* Auto-stop toggle */}
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-zinc-500 uppercase tracking-wide">Auto-Stop:</span>
+                <button
+                  onClick={() => setAutoStop(!autoStop)}
+                  className={`
+                    relative inline-flex h-6 w-11 items-center rounded-full transition-colors
+                    ${autoStop ? "bg-amber-600" : "bg-zinc-700"}
+                  `}
+                >
+                  <span
+                    className={`
+                      inline-block h-4 w-4 rounded-full bg-white transition-transform
+                      ${autoStop ? "translate-x-6" : "translate-x-1"}
+                    `}
+                  />
+                </button>
+                <span className="text-xs text-zinc-600">
+                  {autoStop
+                    ? "Auto-submits after 3s of silence"
+                    : "Manual — press Done Speaking to submit"}
                 </span>
               </div>
 
@@ -510,8 +819,8 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
           <div className="grid grid-cols-3 gap-4 mb-6">
             <div className="bg-zinc-800 rounded-lg p-4 text-center">
               <p className={`text-3xl font-bold ${overallAccuracy >= 85 ? "text-green-400" :
-                  overallAccuracy >= 70 ? "text-amber-400" :
-                    overallAccuracy >= 50 ? "text-orange-400" : "text-red-400"
+                overallAccuracy >= 70 ? "text-amber-400" :
+                  overallAccuracy >= 50 ? "text-orange-400" : "text-red-400"
                 }`}>
                 {overallAccuracy}%
               </p>
@@ -543,8 +852,8 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
                     className="flex items-center gap-3 px-4 py-3 bg-zinc-800/50 rounded-lg"
                   >
                     <span className={`text-lg font-bold w-12 text-right ${result.accuracy >= 90 ? "text-green-400" :
-                        result.accuracy >= 70 ? "text-amber-400" :
-                          result.accuracy >= 50 ? "text-orange-400" : "text-red-400"
+                      result.accuracy >= 70 ? "text-amber-400" :
+                        result.accuracy >= 50 ? "text-orange-400" : "text-red-400"
                       }`}>
                       {result.accuracy}%
                     </span>
@@ -558,7 +867,7 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
             </div>
           )}
 
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
             <button
               onClick={restartRehearsal}
               className="px-6 py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-medium transition-colors"
@@ -571,6 +880,15 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
             >
               Change Role
             </button>
+            <Link
+              href="/progress"
+              className="px-6 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg font-medium transition-colors flex items-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              </svg>
+              View Progress
+            </Link>
           </div>
         </div>
       </div>
@@ -618,16 +936,16 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
           const isUserSection = section.speaker === selectedRole;
           const gavels = section.gavels > 0 ? section.gavels : countGavelMarks(section.text);
           const cleanText = cleanRitualText(section.text);
-          const displayText = section.cipherText && section.cipherText !== section.text
-            ? section.cipherText
-            : cleanText;
+          const displayText = section.cipherText || cleanText;
 
           return (
             <div
               key={section.id}
               id={`rehearsal-line-${i}`}
+              onClick={() => !isCurrent && jumpToLine(i)}
               className={`
                 flex gap-3 px-3 py-2 rounded-lg mb-1 transition-all
+                ${!isCurrent ? "cursor-pointer hover:bg-white/5" : ""}
                 ${isPast ? "opacity-30" : ""}
                 ${isCurrent && isUserSection ? "bg-amber-500/10 border border-amber-500/30" : ""}
                 ${isCurrent && !isUserSection ? "bg-blue-500/10 border border-blue-500/20" : ""}
@@ -662,21 +980,12 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
                 {isCurrent && isUserSection && rehearsalState !== "checking" ? (
                   <span className="italic text-amber-400/70">[ Your line — recite from memory ]</span>
                 ) : displayText ? (
-                  <span className="inline">
-                    {displayText.split(/(\s+)/).map((seg, wi) => {
-                      if (/^\s+$/.test(seg)) {
-                        return <span key={wi}>{seg}</span>;
-                      }
-                      return (
-                        <span
-                          key={wi}
-                          onClick={(e) => handleWordClick(seg, section.speaker, e)}
-                          className="inline-block cursor-pointer rounded px-0.5 -mx-0.5 transition-colors hover:bg-white/10"
-                        >
-                          {seg}
-                        </span>
-                      );
-                    })}
+                  <span
+                    className={`inline rounded transition-colors ${isCurrent ? "cursor-pointer hover:bg-white/5" : ""}`}
+                    onClick={isCurrent ? (e) => handleCurrentLineSpeak(i, e) : undefined}
+                    title={isCurrent ? "Click to hear this line again" : undefined}
+                  >
+                    {displayText}
                   </span>
                 ) : (
                   <span className="italic text-zinc-600">[stage direction]</span>
@@ -706,10 +1015,34 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
             <p className="text-zinc-400 text-sm max-w-lg mx-auto font-mono">
               {currentSection.cipherText || cleanRitualText(currentSection.text)}
             </p>
+
+            {/* Navigation buttons */}
+            <div className="flex justify-center items-center gap-3">
+              <button
+                onClick={() => jumpToLine(currentIndex - 1)}
+                disabled={currentIndex === 0}
+                className="px-4 py-2 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-30 disabled:cursor-not-allowed text-zinc-200 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                </svg>
+                Back
+              </button>
+              <button
+                onClick={() => jumpToLine(currentIndex + 1)}
+                disabled={currentIndex >= sections.length - 1}
+                className="px-4 py-2 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-30 disabled:cursor-not-allowed text-zinc-200 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
+              >
+                Next
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+            </div>
           </div>
         )}
 
-        {/* User's turn — waiting to start */}
+        {/* User's turn — waiting to start (auto-listens in voice mode) */}
         {rehearsalState === "user-turn" && currentSection && (
           <div className="space-y-4">
             <div className="text-center">
@@ -717,24 +1050,28 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
                 YOUR TURN — {selectedRole}
               </span>
               <p className="text-zinc-400 text-sm">
-                Recite your line from memory. You can speak or type.
+                {inputMode === "voice"
+                  ? "Mic activating — recite your line from memory..."
+                  : "Recite your line from memory. You can speak or type."}
               </p>
             </div>
 
             <div className="flex justify-center gap-3">
-              <button
-                onClick={() => {
-                  setInputMode("voice");
-                  startListening();
-                }}
-                className="px-6 py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
-              >
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
-                  <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
-                </svg>
-                Speak
-              </button>
+              {inputMode !== "voice" && (
+                <button
+                  onClick={() => {
+                    setInputMode("voice");
+                    startListening();
+                  }}
+                  className="px-6 py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+                >
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
+                    <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
+                  </svg>
+                  Speak
+                </button>
+              )}
               <button
                 onClick={() => {
                   setInputMode("type");
@@ -789,6 +1126,11 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
                 Listening — speak your line...
               </span>
             </div>
+            {autoStop && (
+              <p className="text-xs text-zinc-500 text-center">
+                Will auto-submit after 3 seconds of silence
+              </p>
+            )}
 
             {transcript && (
               <div className="p-4 bg-zinc-800/50 rounded-lg border border-zinc-700">
@@ -842,6 +1184,32 @@ export default function RehearsalMode({ sections }: RehearsalModeProps) {
                     <p className="text-sm text-zinc-300">
                       {cleanRitualText(currentSection.text)}
                     </p>
+                  </div>
+                )}
+
+                {/* AI Coach feedback */}
+                {aiCoaching && (
+                  <div className="p-3 bg-amber-900/20 rounded-lg border border-amber-700/30">
+                    {aiFeedback ? (
+                      <div className="flex items-start gap-2">
+                        {isSpeakingFeedback && (
+                          <div className="flex gap-0.5 items-center pt-1 flex-shrink-0">
+                            <div className="w-1 h-3 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                            <div className="w-1 h-4 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                            <div className="w-1 h-3 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                          </div>
+                        )}
+                        <p className="text-sm text-amber-200/90 italic">{aiFeedback}</p>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 text-amber-400/60">
+                        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        </svg>
+                        <span className="text-xs">AI Coach is thinking...</span>
+                      </div>
+                    )}
                   </div>
                 )}
 
