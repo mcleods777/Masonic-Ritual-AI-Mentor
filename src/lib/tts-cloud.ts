@@ -1,5 +1,5 @@
 /**
- * Cloud TTS engines — ElevenLabs and Google Cloud Text-to-Speech.
+ * Cloud TTS engines — ElevenLabs, Google Cloud, Deepgram Aura-2, and Kokoro.
  *
  * Each engine calls its corresponding Next.js API route (which holds
  * the secret API key) and plays back the returned audio via an
@@ -12,6 +12,14 @@
 
 let currentAudio: HTMLAudioElement | null = null;
 let currentResolve: (() => void) | null = null;
+let currentAbort: AbortController | null = null;
+
+/** Get a new AbortSignal for a TTS fetch. Aborts any previous in-flight fetch. */
+export function getTTSAbortSignal(): AbortSignal {
+  if (currentAbort) currentAbort.abort();
+  currentAbort = new AbortController();
+  return currentAbort.signal;
+}
 
 /** Play an audio blob and resolve when it finishes. */
 export function playAudioBlob(blob: Blob): Promise<void> {
@@ -44,8 +52,13 @@ export function playAudioBlob(blob: Blob): Promise<void> {
   });
 }
 
-/** Stop whatever cloud audio is currently playing. */
+/** Stop whatever cloud audio is currently playing and abort in-flight fetches. */
 export function stopCloudAudio(): void {
+  // Abort any in-flight TTS fetch so it doesn't start playback after we stop
+  if (currentAbort) {
+    currentAbort.abort();
+    currentAbort = null;
+  }
   if (currentAudio) {
     currentAudio.pause();
     currentAudio.src = "";
@@ -73,46 +86,69 @@ export function isCloudAudioPlaying(): boolean {
  * Uses the publicly-available premade voices so every account has them.
  */
 const ELEVENLABS_ROLE_VOICES: Record<string, string> = {
+  // Voices verified available on the account (all male):
+  // Adam   (pNInz6obpgDQGcFmaJgB) — Dominant, Firm
+  // Brian  (nPczCjzI2devNBz1zQrb) — Deep, Resonant, Comforting
+  // George (JBFqnCBsd6RMkjVDRZzb) — Warm, British Storyteller
+  // Eric   (cjVigY5qzO86Huf0OWal) — Smooth, Trustworthy
+  // Chris  (iP95p4xoKVk53GoZ742B) — Charming, Down-to-Earth
+  // Bill   (pqHfZKP75CvOlQylNhV4) — Wise, Mature
+  // Charlie(IKne3meq5aSn9XLyUdCD) — Deep, Confident
+  // Daniel (onwK4e9ZLuTAKqWW03F9) — Steady Broadcaster
+  // Roger  (CwhRBWXzGAHq8TQ4Fs17) — Laid-Back, Resonant
+  // Liam   (TX3LPaxmHKxFdv7VOQHJ) — Energetic
+  // Harry  (SOYHLrjzK2X1ezoPC6cr) — Fierce Warrior
+  // Callum (N2lVS1w4EtoT3dr4eOWO) — Husky
+  // Will   (bIHbv24MWmeRgasZH58o) — Relaxed Optimist
+
   // Principal officers
-  WM:       "pNInz6obpgDQGcFmaJgB", // Adam — deep, authoritative
+  WM:       "pNInz6obpgDQGcFmaJgB", // Adam — dominant, firm
   "W.M.":   "pNInz6obpgDQGcFmaJgB",
   "W. M.":  "pNInz6obpgDQGcFmaJgB",
-  SW:       "TxGEqnHWrfWFTfGW9XjX", // Josh — clear, measured
-  "S.W.":   "TxGEqnHWrfWFTfGW9XjX",
-  "S. W.":  "TxGEqnHWrfWFTfGW9XjX",
-  JW:       "VR6AewLTigWG4xSOukaG", // Arnold — crisp
-  "J.W.":   "VR6AewLTigWG4xSOukaG",
-  "J. W.":  "VR6AewLTigWG4xSOukaG",
+  SW:       "nPczCjzI2devNBz1zQrb", // Brian — deep, resonant
+  "S.W.":   "nPczCjzI2devNBz1zQrb",
+  "S. W.":  "nPczCjzI2devNBz1zQrb",
+  JW:       "JBFqnCBsd6RMkjVDRZzb", // George — warm, British
+  "J.W.":   "JBFqnCBsd6RMkjVDRZzb",
+  "J. W.":  "JBFqnCBsd6RMkjVDRZzb",
   // Deacons
-  SD:       "ErXwobaYiN019PkySvjV", // Antoni — warm
-  "S.D.":   "ErXwobaYiN019PkySvjV",
-  "S. D.":  "ErXwobaYiN019PkySvjV",
-  JD:       "yoZ06aMxZJJ28mfd3POQ", // Sam — raspy
-  "J.D.":   "yoZ06aMxZJJ28mfd3POQ",
-  "J. D.":  "yoZ06aMxZJJ28mfd3POQ",
-  "S(orJ)D":"ErXwobaYiN019PkySvjV",
-  "S/J D":  "ErXwobaYiN019PkySvjV",
+  SD:       "cjVigY5qzO86Huf0OWal", // Eric — smooth, trustworthy
+  "S.D.":   "cjVigY5qzO86Huf0OWal",
+  "S. D.":  "cjVigY5qzO86Huf0OWal",
+  JD:       "iP95p4xoKVk53GoZ742B", // Chris — charming
+  "J.D.":   "iP95p4xoKVk53GoZ742B",
+  "J. D.":  "iP95p4xoKVk53GoZ742B",
+  "S(orJ)D":"cjVigY5qzO86Huf0OWal",
+  "S/J D":  "cjVigY5qzO86Huf0OWal",
   // Other officers
-  "S/Sec":  "TxGEqnHWrfWFTfGW9XjX",
-  Sec:      "TxGEqnHWrfWFTfGW9XjX",
-  "Sec.":   "TxGEqnHWrfWFTfGW9XjX",
-  S:        "TxGEqnHWrfWFTfGW9XjX",
-  Tr:       "VR6AewLTigWG4xSOukaG",
-  Treas:    "VR6AewLTigWG4xSOukaG",
-  "Treas.": "VR6AewLTigWG4xSOukaG",
-  Ch:       "pNInz6obpgDQGcFmaJgB",
-  Chap:     "pNInz6obpgDQGcFmaJgB",
-  "Chap.":  "pNInz6obpgDQGcFmaJgB",
-  Marshal:  "ErXwobaYiN019PkySvjV",
-  T:        "yoZ06aMxZJJ28mfd3POQ",
-  Tyler:    "yoZ06aMxZJJ28mfd3POQ",
-  Candidate:"VR6AewLTigWG4xSOukaG",
-  ALL:      "pNInz6obpgDQGcFmaJgB",
+  "S/Sec":  "pqHfZKP75CvOlQylNhV4", // Bill — wise, mature
+  Sec:      "pqHfZKP75CvOlQylNhV4",
+  "Sec.":   "pqHfZKP75CvOlQylNhV4",
+  S:        "pqHfZKP75CvOlQylNhV4",
+  Tr:       "IKne3meq5aSn9XLyUdCD", // Charlie — deep, confident
+  Treas:    "IKne3meq5aSn9XLyUdCD",
+  "Treas.": "IKne3meq5aSn9XLyUdCD",
+  Ch:       "onwK4e9ZLuTAKqWW03F9", // Daniel — steady broadcaster
+  Chap:     "onwK4e9ZLuTAKqWW03F9",
+  "Chap.":  "onwK4e9ZLuTAKqWW03F9",
+  Marshal:  "TX3LPaxmHKxFdv7VOQHJ", // Liam — energetic
+  T:        "CwhRBWXzGAHq8TQ4Fs17", // Roger — laid-back, resonant
+  Tyler:    "CwhRBWXzGAHq8TQ4Fs17",
+  Candidate:"N2lVS1w4EtoT3dr4eOWO", // Callum — husky
+  ALL:      "pNInz6obpgDQGcFmaJgB", // Adam (WM leads unison)
   All:      "pNInz6obpgDQGcFmaJgB",
-  BR:       "ErXwobaYiN019PkySvjV",
-  Bro:      "ErXwobaYiN019PkySvjV",
-  "Bro.":   "ErXwobaYiN019PkySvjV",
-  "SW/WM":  "pNInz6obpgDQGcFmaJgB",
+  BR:       "N2lVS1w4EtoT3dr4eOWO", // Callum
+  Bro:      "N2lVS1w4EtoT3dr4eOWO",
+  "Bro.":   "N2lVS1w4EtoT3dr4eOWO",
+  "SW/WM":  "pNInz6obpgDQGcFmaJgB", // Adam
+  // Additional role aliases
+  Trs:      "IKne3meq5aSn9XLyUdCD", // Charlie
+  "WM/Chaplain":"onwK4e9ZLuTAKqWW03F9", // Daniel
+  Voucher:  "bIHbv24MWmeRgasZH58o", // Will — relaxed
+  Vchr:     "bIHbv24MWmeRgasZH58o",
+  Narrator: "SOYHLrjzK2X1ezoPC6cr", // Harry — commanding narrator
+  PRAYER:   "onwK4e9ZLuTAKqWW03F9", // Daniel
+  Prayer:   "onwK4e9ZLuTAKqWW03F9",
 };
 
 const ELEVENLABS_DEFAULT_VOICE = "pNInz6obpgDQGcFmaJgB"; // Adam
@@ -121,26 +157,64 @@ export function getElevenLabsVoiceForRole(role: string): string {
   return ELEVENLABS_ROLE_VOICES[role] || ELEVENLABS_DEFAULT_VOICE;
 }
 
-/** Speak text using ElevenLabs. */
+/** Speak text using ElevenLabs (with retry for transient errors). */
 export async function speakElevenLabs(
   text: string,
   voiceId?: string
 ): Promise<void> {
-  const resp = await fetch("/api/tts/elevenlabs", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      text,
-      voiceId: voiceId || ELEVENLABS_DEFAULT_VOICE,
-    }),
-  });
+  const MAX_RETRIES = 2;
+  const RETRY_DELAYS = [500, 1500]; // ms backoff between retries
+  const signal = getTTSAbortSignal();
 
-  if (!resp.ok) {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    // Re-throw abort errors immediately — don't retry intentional cancellations
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+
+    let resp: Response;
+    try {
+      resp = await fetch("/api/tts/elevenlabs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text,
+          voiceId: voiceId || ELEVENLABS_DEFAULT_VOICE,
+        }),
+        signal,
+      });
+    } catch (fetchErr) {
+      // Abort errors should not be retried
+      if (fetchErr instanceof DOMException && fetchErr.name === "AbortError") {
+        throw fetchErr;
+      }
+      // Network error — retry if we can
+      if (attempt < MAX_RETRIES) {
+        console.warn(
+          `ElevenLabs TTS network error, retrying in ${RETRY_DELAYS[attempt]}ms (attempt ${attempt + 1}/${MAX_RETRIES})...`
+        );
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+        continue;
+      }
+      throw fetchErr;
+    }
+
+    if (resp.ok) {
+      await playAudioBlob(await resp.blob());
+      return;
+    }
+
+    // Retry on transient errors (429 rate limit, 500/503 server errors)
+    const isRetryable = resp.status === 429 || resp.status >= 500;
+    if (isRetryable && attempt < MAX_RETRIES) {
+      console.warn(
+        `ElevenLabs TTS returned ${resp.status}, retrying in ${RETRY_DELAYS[attempt]}ms (attempt ${attempt + 1}/${MAX_RETRIES})...`
+      );
+      await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+      continue;
+    }
+
     const err = await resp.json().catch(() => ({ error: resp.statusText }));
     throw new Error((err as { error?: string }).error || "ElevenLabs TTS failed");
   }
-
-  await playAudioBlob(await resp.blob());
 }
 
 /** Speak text as a Masonic officer role using ElevenLabs. */
@@ -205,7 +279,15 @@ const GOOGLE_ROLE_VOICES: Record<string, GoogleVoiceProfile> = {
   BR:       { name: "en-US-Neural2-I", pitch: 0.0,  rate: 0.95 },
   Bro:      { name: "en-US-Neural2-I", pitch: 0.0,  rate: 0.95 },
   "Bro.":   { name: "en-US-Neural2-I", pitch: 0.0,  rate: 0.95 },
-  "SW/WM":  { name: "en-US-Neural2-D", pitch: -1.5, rate: 0.90 },
+  "SW/WM":      { name: "en-US-Neural2-D", pitch: -1.5, rate: 0.90 },
+  // Additional role aliases from ritual files
+  Trs:          { name: "en-US-Neural2-J", pitch: -1.0, rate: 0.95 },
+  "WM/Chaplain":{ name: "en-US-Neural2-D", pitch: -3.0, rate: 0.85 },
+  Voucher:      { name: "en-US-Neural2-I", pitch: 0.0,  rate: 0.95 },
+  Vchr:         { name: "en-US-Neural2-I", pitch: 0.0,  rate: 0.95 },
+  Narrator:     { name: "en-US-Neural2-A", pitch: 0.0,  rate: 1.0 },
+  PRAYER:       { name: "en-US-Neural2-D", pitch: -3.0, rate: 0.85 },
+  Prayer:       { name: "en-US-Neural2-D", pitch: -3.0, rate: 0.85 },
 };
 
 const GOOGLE_DEFAULT_VOICE: GoogleVoiceProfile = {
@@ -227,18 +309,40 @@ export async function speakGoogleCloud(
 ): Promise<void> {
   const MAX_RETRIES = 2;
   const RETRY_DELAYS = [500, 1500]; // ms backoff between retries
+  const signal = getTTSAbortSignal();
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    const resp = await fetch("/api/tts/google", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        text,
-        voiceName: voiceName ?? GOOGLE_DEFAULT_VOICE.name,
-        pitch: pitch ?? GOOGLE_DEFAULT_VOICE.pitch,
-        speakingRate: speakingRate ?? GOOGLE_DEFAULT_VOICE.rate,
-      }),
-    });
+    // Re-throw abort errors immediately — don't retry intentional cancellations
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+
+    let resp: Response;
+    try {
+      resp = await fetch("/api/tts/google", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text,
+          voiceName: voiceName ?? GOOGLE_DEFAULT_VOICE.name,
+          pitch: pitch ?? GOOGLE_DEFAULT_VOICE.pitch,
+          speakingRate: speakingRate ?? GOOGLE_DEFAULT_VOICE.rate,
+        }),
+        signal,
+      });
+    } catch (fetchErr) {
+      // Abort errors should not be retried
+      if (fetchErr instanceof DOMException && fetchErr.name === "AbortError") {
+        throw fetchErr;
+      }
+      // Network error — retry if we can
+      if (attempt < MAX_RETRIES) {
+        console.warn(
+          `Google TTS network error, retrying in ${RETRY_DELAYS[attempt]}ms (attempt ${attempt + 1}/${MAX_RETRIES})...`
+        );
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+        continue;
+      }
+      throw fetchErr;
+    }
 
     if (resp.ok) {
       await playAudioBlob(await resp.blob());
@@ -270,6 +374,267 @@ export async function speakGoogleCloudAsRole(
 }
 
 // ============================================================
+// Deepgram Aura-2
+// ============================================================
+
+/**
+ * Deepgram Aura-2 voice model IDs for Masonic officer roles.
+ * Uses distinct Aura-2 voices so each officer sounds different.
+ */
+const DEEPGRAM_ROLE_VOICES: Record<string, string> = {
+  // Principal officers — deeper, authoritative
+  WM:       "aura-2-zeus-en",     // Zeus — commanding, deep
+  "W.M.":   "aura-2-zeus-en",
+  "W. M.":  "aura-2-zeus-en",
+  SW:       "aura-2-orion-en",    // Orion — clear, steady
+  "S.W.":   "aura-2-orion-en",
+  "S. W.":  "aura-2-orion-en",
+  JW:       "aura-2-arcas-en",    // Arcas — measured
+  "J.W.":   "aura-2-arcas-en",
+  "J. W.":  "aura-2-arcas-en",
+  // Deacons
+  SD:       "aura-2-orpheus-en",  // Orpheus — warm
+  "S.D.":   "aura-2-orpheus-en",
+  "S. D.":  "aura-2-orpheus-en",
+  JD:       "aura-2-perseus-en",  // Perseus — distinct
+  "J.D.":   "aura-2-perseus-en",
+  "J. D.":  "aura-2-perseus-en",
+  "S(orJ)D":"aura-2-orpheus-en",
+  "S/J D":  "aura-2-orpheus-en",
+  // Other officers
+  "S/Sec":  "aura-2-orion-en",
+  Sec:      "aura-2-orion-en",
+  "Sec.":   "aura-2-orion-en",
+  S:        "aura-2-orion-en",
+  Tr:       "aura-2-arcas-en",
+  Treas:    "aura-2-arcas-en",
+  "Treas.": "aura-2-arcas-en",
+  Ch:       "aura-2-helios-en",   // Helios — resonant
+  Chap:     "aura-2-helios-en",
+  "Chap.":  "aura-2-helios-en",
+  Marshal:  "aura-2-orpheus-en",
+  T:        "aura-2-angus-en",    // Angus — distinctive accent
+  Tyler:    "aura-2-angus-en",
+  Candidate:"aura-2-arcas-en",
+  ALL:      "aura-2-zeus-en",
+  All:      "aura-2-zeus-en",
+  BR:       "aura-2-orpheus-en",
+  Bro:      "aura-2-orpheus-en",
+  "Bro.":   "aura-2-orpheus-en",
+  "SW/WM":      "aura-2-zeus-en",
+  // Additional role aliases from ritual files
+  Trs:          "aura-2-arcas-en",
+  "WM/Chaplain":"aura-2-helios-en",
+  Voucher:      "aura-2-orpheus-en",
+  Vchr:         "aura-2-orpheus-en",
+  Narrator:     "aura-2-orion-en",
+  PRAYER:       "aura-2-helios-en",
+  Prayer:       "aura-2-helios-en",
+};
+
+const DEEPGRAM_DEFAULT_VOICE = "aura-2-orion-en";
+
+export function getDeepgramVoiceForRole(role: string): string {
+  return DEEPGRAM_ROLE_VOICES[role] || DEEPGRAM_DEFAULT_VOICE;
+}
+
+/** Speak text using Deepgram Aura-2 (with retry for transient errors). */
+export async function speakDeepgram(
+  text: string,
+  model?: string
+): Promise<void> {
+  const MAX_RETRIES = 3;
+  const RETRY_DELAYS = [400, 1000, 2000];
+  const signal = getTTSAbortSignal();
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    // Re-throw abort errors immediately — don't retry intentional cancellations
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+
+    let resp: Response;
+    try {
+      resp = await fetch("/api/tts/deepgram", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text,
+          model: model || DEEPGRAM_DEFAULT_VOICE,
+        }),
+        signal,
+      });
+    } catch (fetchErr) {
+      // Abort errors should not be retried
+      if (fetchErr instanceof DOMException && fetchErr.name === "AbortError") {
+        throw fetchErr;
+      }
+      // Network error — retry if we can
+      if (attempt < MAX_RETRIES) {
+        console.warn(
+          `Deepgram TTS network error, retrying in ${RETRY_DELAYS[attempt]}ms (attempt ${attempt + 1}/${MAX_RETRIES})...`
+        );
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+        continue;
+      }
+      throw fetchErr;
+    }
+
+    if (resp.ok) {
+      await playAudioBlob(await resp.blob());
+      return;
+    }
+
+    // Retry on transient errors (429 rate limit, 500/503 server errors)
+    const isRetryable = resp.status === 429 || resp.status >= 500;
+    if (isRetryable && attempt < MAX_RETRIES) {
+      console.warn(
+        `Deepgram TTS returned ${resp.status}, retrying in ${RETRY_DELAYS[attempt]}ms (attempt ${attempt + 1}/${MAX_RETRIES})...`
+      );
+      await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+      continue;
+    }
+
+    const err = await resp.json().catch(() => ({ error: resp.statusText }));
+    throw new Error((err as { error?: string }).error || "Deepgram TTS failed");
+  }
+}
+
+/** Speak text as a Masonic officer role using Deepgram Aura-2. */
+export async function speakDeepgramAsRole(
+  text: string,
+  role: string
+): Promise<void> {
+  return speakDeepgram(text, getDeepgramVoiceForRole(role));
+}
+
+// ============================================================
+// Kokoro (self-hosted, free)
+// ============================================================
+
+/**
+ * Kokoro voice IDs for Masonic officer roles.
+ * Uses a mix of American and British voices for variety.
+ */
+const KOKORO_ROLE_VOICES: Record<string, { voice: string; speed: number }> = {
+  // Principal officers — deeper, deliberate
+  WM:       { voice: "bm_george",  speed: 0.90 },   // British male — authoritative
+  "W.M.":   { voice: "bm_george",  speed: 0.90 },
+  "W. M.":  { voice: "bm_george",  speed: 0.90 },
+  SW:       { voice: "am_adam",    speed: 0.93 },   // American male — steady
+  "S.W.":   { voice: "am_adam",    speed: 0.93 },
+  "S. W.":  { voice: "am_adam",    speed: 0.93 },
+  JW:       { voice: "am_michael", speed: 0.93 },   // American male — clear
+  "J.W.":   { voice: "am_michael", speed: 0.93 },
+  "J. W.":  { voice: "am_michael", speed: 0.93 },
+  // Deacons
+  SD:       { voice: "bm_daniel",  speed: 0.97 },   // British male — warm
+  "S.D.":   { voice: "bm_daniel",  speed: 0.97 },
+  "S. D.":  { voice: "bm_daniel",  speed: 0.97 },
+  JD:       { voice: "bm_lewis",   speed: 0.97 },   // British male — distinct
+  "J.D.":   { voice: "bm_lewis",   speed: 0.97 },
+  "J. D.":  { voice: "bm_lewis",   speed: 0.97 },
+  "S(orJ)D":{ voice: "bm_daniel",  speed: 0.97 },
+  "S/J D":  { voice: "bm_daniel",  speed: 0.97 },
+  // Other officers
+  "S/Sec":  { voice: "am_adam",    speed: 1.0 },
+  Sec:      { voice: "am_adam",    speed: 1.0 },
+  "Sec.":   { voice: "am_adam",    speed: 1.0 },
+  S:        { voice: "am_adam",    speed: 1.0 },
+  Tr:       { voice: "am_michael", speed: 0.95 },
+  Treas:    { voice: "am_michael", speed: 0.95 },
+  "Treas.": { voice: "am_michael", speed: 0.95 },
+  Ch:       { voice: "bm_george",  speed: 0.85 },   // Chaplain — slowest, deepest
+  Chap:     { voice: "bm_george",  speed: 0.85 },
+  "Chap.":  { voice: "bm_george",  speed: 0.85 },
+  Marshal:  { voice: "bm_daniel",  speed: 0.95 },
+  T:        { voice: "bm_lewis",   speed: 1.0 },
+  Tyler:    { voice: "bm_lewis",   speed: 1.0 },
+  Candidate:{ voice: "am_adam",    speed: 0.90 },
+  ALL:      { voice: "bm_george",  speed: 0.88 },
+  All:      { voice: "bm_george",  speed: 0.88 },
+  BR:       { voice: "bm_daniel",  speed: 0.95 },
+  Bro:      { voice: "bm_daniel",  speed: 0.95 },
+  "Bro.":   { voice: "bm_daniel",  speed: 0.95 },
+  "SW/WM":  { voice: "bm_george",  speed: 0.90 },
+};
+
+const KOKORO_DEFAULT_VOICE = { voice: "am_adam", speed: 1.0 };
+
+export function getKokoroVoiceForRole(role: string): { voice: string; speed: number } {
+  return KOKORO_ROLE_VOICES[role] || KOKORO_DEFAULT_VOICE;
+}
+
+/** Speak text using Kokoro TTS (with retry for transient errors). */
+export async function speakKokoro(
+  text: string,
+  voice?: string,
+  speed?: number
+): Promise<void> {
+  const MAX_RETRIES = 2;
+  const RETRY_DELAYS = [500, 1500]; // ms backoff between retries
+  const signal = getTTSAbortSignal();
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    // Re-throw abort errors immediately — don't retry intentional cancellations
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+
+    let resp: Response;
+    try {
+      resp = await fetch("/api/tts/kokoro", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text,
+          voice: voice ?? KOKORO_DEFAULT_VOICE.voice,
+          speed: speed ?? KOKORO_DEFAULT_VOICE.speed,
+        }),
+        signal,
+      });
+    } catch (fetchErr) {
+      // Abort errors should not be retried
+      if (fetchErr instanceof DOMException && fetchErr.name === "AbortError") {
+        throw fetchErr;
+      }
+      // Network error — retry if we can
+      if (attempt < MAX_RETRIES) {
+        console.warn(
+          `Kokoro TTS network error, retrying in ${RETRY_DELAYS[attempt]}ms (attempt ${attempt + 1}/${MAX_RETRIES})...`
+        );
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+        continue;
+      }
+      throw fetchErr;
+    }
+
+    if (resp.ok) {
+      await playAudioBlob(await resp.blob());
+      return;
+    }
+
+    // Retry on transient errors (429 rate limit, 500/503 server errors)
+    const isRetryable = resp.status === 429 || resp.status >= 500;
+    if (isRetryable && attempt < MAX_RETRIES) {
+      console.warn(
+        `Kokoro TTS returned ${resp.status}, retrying in ${RETRY_DELAYS[attempt]}ms (attempt ${attempt + 1}/${MAX_RETRIES})...`
+      );
+      await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+      continue;
+    }
+
+    const err = await resp.json().catch(() => ({ error: resp.statusText }));
+    throw new Error((err as { error?: string }).error || "Kokoro TTS failed");
+  }
+}
+
+/** Speak text as a Masonic officer role using Kokoro TTS. */
+export async function speakKokoroAsRole(
+  text: string,
+  role: string
+): Promise<void> {
+  const profile = getKokoroVoiceForRole(role);
+  return speakKokoro(text, profile.voice, profile.speed);
+}
+
+// ============================================================
 // Engine availability
 // ============================================================
 
@@ -277,12 +642,14 @@ export async function speakGoogleCloudAsRole(
 export async function fetchEngineAvailability(): Promise<{
   elevenlabs: boolean;
   google: boolean;
+  deepgram: boolean;
+  kokoro: boolean;
 }> {
   try {
     const resp = await fetch("/api/tts/engines");
-    if (!resp.ok) return { elevenlabs: false, google: false };
+    if (!resp.ok) return { elevenlabs: false, google: false, deepgram: false, kokoro: false };
     return resp.json();
   } catch {
-    return { elevenlabs: false, google: false };
+    return { elevenlabs: false, google: false, deepgram: false, kokoro: false };
   }
 }

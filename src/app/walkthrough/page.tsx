@@ -13,7 +13,7 @@ export default function WalkthroughPage() {
         </h1>
         <p className="text-zinc-400 mt-3 max-w-2xl mx-auto text-lg">
           A visual guide to how your ritual gets parsed, practiced, and
-          coached with AI and voice.
+          enhanced with voice AI.
         </p>
       </div>
 
@@ -29,8 +29,8 @@ export default function WalkthroughPage() {
             { href: "#listen", icon: "M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z", label: "Listen Mode" },
             { href: "#rehearsal", icon: "M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z", label: "Rehearsal" },
             { href: "#solo", icon: "M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z", label: "Solo Practice" },
+            { href: "#progress", icon: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z", label: "Progress" },
             { href: "#tts", icon: "M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z", label: "Voice AI" },
-            { href: "#chat", icon: "M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z", label: "AI Coach" },
             { href: "#privacy", icon: "M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z", label: "Privacy" },
           ].map((item) => (
             <a
@@ -61,11 +61,10 @@ export default function WalkthroughPage() {
           </div>
 
           {/* 4 App Pages */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+          <div className="grid grid-cols-3 gap-3 mb-6">
             <MiniCard icon="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" label="Home" color="zinc" />
             <MiniCard icon="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" label="Upload" color="blue" />
             <MiniCard icon="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" label="Practice" color="amber" />
-            <MiniCard icon="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" label="AI Coach" color="purple" />
           </div>
 
           <DownArrow />
@@ -100,28 +99,16 @@ export default function WalkthroughPage() {
               </div>
               <p className="text-zinc-400 text-xs">Reads lines aloud with distinct voices per officer role. Listens when you speak your lines.</p>
             </div>
-            <div className="bg-purple-500/5 border border-purple-500/20 rounded-xl p-5">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center">
-                  <svg className="w-4 h-4 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-                  </svg>
-                </div>
-                <p className="text-purple-300 font-semibold text-sm">Claude AI Coach</p>
-              </div>
-              <p className="text-zinc-400 text-xs">Chat with an AI that knows your ritual. Ask questions, get hints, and receive coaching.</p>
-            </div>
           </div>
         </div>
 
         <DownArrow label="connects to" />
 
         {/* External services */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-3 gap-3">
           <ServiceCard label="Browser Speech" desc="Free, on-device" color="green" />
           <ServiceCard label="Google Cloud TTS" desc="Premium voices" color="blue" />
           <ServiceCard label="ElevenLabs" desc="Premium voices" color="blue" />
-          <ServiceCard label="Claude API" desc="AI coaching" color="purple" />
         </div>
       </Section>
 
@@ -309,8 +296,13 @@ export default function WalkthroughPage() {
             icon="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"
             color="blue"
             title="2. Recite from memory"
-            desc="Speak your lines aloud (the app transcribes in real time) or type them from memory."
-          />
+            desc="Speak your lines aloud (the app transcribes in real time) using either built-in Browser Speech or high-accuracy OpenAI Whisper STT powered by Groq, or type them from memory."
+          >
+            <div className="flex flex-wrap gap-2 mt-3">
+              <Tag>Browser STT (Free, Fast)</Tag>
+              <Tag>OpenAI Whisper STT (High Accuracy)</Tag>
+            </div>
+          </FlowStep>
           <DownArrow />
 
           {/* Accuracy visualization */}
@@ -359,7 +351,37 @@ export default function WalkthroughPage() {
       </Section>
 
       {/* ================================================================ */}
-      {/* 6. VOICE AI (TTS)                                                */}
+      {/* 6. PROGRESS TRACKING                                             */}
+      {/* ================================================================ */}
+      <Section id="progress" title="Progress Tracking" subtitle="Track your accuracy, streaks, and trouble spots over time">
+        <div className="max-w-lg mx-auto">
+          <FlowStep
+            icon="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+            color="amber"
+            title="History is saved automatically"
+            desc="Every time you finish a Practice or Rehearsal session, your accuracy, trouble words, and time spent are saved locally to IndexedDB."
+          />
+          <DownArrow />
+
+          <div className="bg-zinc-800/40 rounded-xl border border-zinc-700/50 p-5">
+            <h3 className="text-zinc-200 font-semibold text-sm mb-3">Progress Dashboard</h3>
+            <div className="space-y-3">
+              <div className="bg-blue-500/5 border border-blue-500/20 rounded-lg p-3">
+                <p className="text-blue-300 font-medium text-xs mb-1">Accuracy Trends & Streaks</p>
+                <p className="text-zinc-400 text-[11px]">View a sparkline chart of your last 20 sessions and track your current practice streak.</p>
+              </div>
+              <div className="bg-red-500/5 border border-red-500/20 rounded-lg p-3">
+                <p className="text-red-300 font-medium text-xs mb-1">Persistent Trouble Spots</p>
+                <p className="text-zinc-400 text-[11px]">The app identifies the specific words and sections you repeatedly miss so you know what to drill.</p>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </Section>
+
+      {/* ================================================================ */}
+      {/* 7. VOICE AI (TTS)                                                */}
       {/* ================================================================ */}
       <Section id="tts" title="Voice AI (Text-to-Speech)" subtitle="Three voice engines, each with unique voices per officer">
         <div className="max-w-2xl mx-auto">
@@ -463,73 +485,6 @@ export default function WalkthroughPage() {
       </Section>
 
       {/* ================================================================ */}
-      {/* 7. AI COACH                                                      */}
-      {/* ================================================================ */}
-      <Section id="chat" title="AI Coach (Claude)" subtitle="Chat with an AI that knows your specific ritual text">
-        <div className="max-w-lg mx-auto">
-          {/* Example chat bubble */}
-          <div className="bg-zinc-800/40 rounded-xl border border-zinc-700/50 p-5 mb-2">
-            <div className="flex items-start gap-3">
-              <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center flex-shrink-0 mt-0.5">
-                <svg className="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
-                </svg>
-              </div>
-              <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg rounded-tl-none px-4 py-2.5">
-                <p className="text-amber-200 text-sm">&ldquo;What comes after &lsquo;I was conducted to the center of the Lodge&rsquo;?&rdquo;</p>
-              </div>
-            </div>
-          </div>
-
-          <DownArrow />
-
-          {/* Server processing */}
-          <FlowStep
-            icon="M5.25 14.25h13.5m-13.5 0a3 3 0 01-3-3m3 3a3 3 0 100 6h13.5a3 3 0 100-6m-16.5-3a3 3 0 013-3h13.5a3 3 0 013 3m-19.5 0a4.5 4.5 0 01.9-2.7L5.737 5.1a3.375 3.375 0 012.7-1.35h7.126c1.062 0 2.062.5 2.7 1.35l2.587 3.45a4.5 4.5 0 01.9 2.7m0 0a3 3 0 01-3 3m0 3h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008zm-3 6h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008z"
-            color="purple"
-            title="Sent to your server"
-            desc="Your question goes to the app's server along with the plain text of your ritual (as context for the AI). Cipher text is never sent."
-          >
-            <div className="bg-purple-500/5 border border-purple-500/20 rounded-lg p-3 mt-3 text-xs text-purple-300/70">
-              <span className="text-purple-400 font-semibold">System prompt:</span> &ldquo;You are a patient Past Master and Masonic ritual coach. ONLY quote from this ritual text. NEVER reveal grips or passwords...&rdquo;
-            </div>
-          </FlowStep>
-
-          <DownArrow />
-
-          <FlowStep
-            icon="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"
-            color="purple"
-            title="Claude AI responds"
-            desc="The response streams back in real time. You pick the model:"
-          >
-            <div className="flex flex-wrap gap-2 mt-3">
-              <Tag>Haiku (fastest)</Tag>
-              <Tag>Sonnet (balanced)</Tag>
-              <Tag>Opus (smartest)</Tag>
-            </div>
-          </FlowStep>
-
-          <DownArrow />
-
-          {/* AI response bubble */}
-          <div className="bg-zinc-800/40 rounded-xl border border-zinc-700/50 p-5">
-            <div className="flex items-start gap-3">
-              <div className="w-8 h-8 rounded-full bg-purple-500/20 flex items-center justify-center flex-shrink-0 mt-0.5">
-                <svg className="w-4 h-4 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-                </svg>
-              </div>
-              <div className="bg-purple-500/5 border border-purple-500/20 rounded-lg rounded-tl-none px-4 py-2.5">
-                <p className="text-purple-200 text-sm">&ldquo;The next line is: &lsquo;and there caused to kneel for the benefit of Lodge prayer.&rsquo; Would you like me to give you a hint for the prayer itself?&rdquo;</p>
-              </div>
-            </div>
-            <p className="text-zinc-500 text-xs mt-3 ml-11">The AI can also read its response aloud using your selected voice engine.</p>
-          </div>
-        </div>
-      </Section>
-
-      {/* ================================================================ */}
       {/* 8. PRIVACY & SECURITY                                            */}
       {/* ================================================================ */}
       <Section id="privacy" title="Privacy & Security" subtitle="Your ritual text is treated with the discretion it deserves">
@@ -571,7 +526,6 @@ export default function WalkthroughPage() {
               </div>
             </div>
             <ul className="space-y-3">
-              <PrivacyItem color="amber" text="AI Coach: plain text only goes to Claude API (never cipher)" />
               <PrivacyItem color="amber" text="Google TTS: line text for voice synthesis" />
               <PrivacyItem color="amber" text="ElevenLabs: line text for voice synthesis" />
             </ul>

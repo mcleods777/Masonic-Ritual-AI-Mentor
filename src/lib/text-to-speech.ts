@@ -1,10 +1,12 @@
 /**
  * Text-to-speech — multi-engine support.
  *
- * Three engines:
- *   1. "browser"     — Web Speech Synthesis API (free, works offline)
- *   2. "elevenlabs"  — ElevenLabs cloud API (high-quality)
+ * Five engines:
+ *   1. "browser"      — Web Speech Synthesis API (free, works offline)
+ *   2. "elevenlabs"   — ElevenLabs cloud API (high-quality)
  *   3. "google-cloud" — Google Cloud TTS Neural2 (high-quality)
+ *   4. "deepgram"     — Deepgram Aura-2 (fast, natural)
+ *   5. "kokoro"       — Kokoro (self-hosted, free)
  *
  * The public API (speak, speakAsRole, stopSpeaking, etc.) stays the same.
  * Components don't need to know which engine is active — they just call
@@ -16,6 +18,10 @@ import {
   speakElevenLabsAsRole,
   speakGoogleCloud,
   speakGoogleCloudAsRole,
+  speakDeepgram,
+  speakDeepgramAsRole,
+  speakKokoro,
+  speakKokoroAsRole,
   stopCloudAudio,
   isCloudAudioPlaying,
 } from "./tts-cloud";
@@ -24,7 +30,7 @@ import {
 // Engine selection
 // ============================================================
 
-export type TTSEngineName = "browser" | "elevenlabs" | "google-cloud";
+export type TTSEngineName = "browser" | "elevenlabs" | "google-cloud" | "deepgram" | "kokoro";
 
 const TTS_ENGINE_STORAGE_KEY = "tts-engine";
 
@@ -33,7 +39,12 @@ let currentEngine: TTSEngineName = "browser";
 // Restore persisted engine on module load (client only)
 if (typeof window !== "undefined") {
   const stored = localStorage.getItem(TTS_ENGINE_STORAGE_KEY);
-  if (stored === "elevenlabs" || stored === "google-cloud") {
+  if (
+    stored === "elevenlabs" ||
+    stored === "google-cloud" ||
+    stored === "deepgram" ||
+    stored === "kokoro"
+  ) {
     currentEngine = stored;
   }
 }
@@ -64,7 +75,7 @@ export interface TTSOptions {
 
 const DEFAULT_OPTIONS: TTSOptions = {
   rate: 0.9,
-  pitch: 1,
+  pitch: 0.7,
   volume: 1,
 };
 
@@ -81,51 +92,60 @@ export interface RoleVoiceProfile {
 
 /**
  * Default voice profiles per role — pitch and rate vary to distinguish speakers.
- * Pitch range: 0.7 (deep) to 1.3 (higher).
- * Rate range: 0.8 (slow/formal) to 1.0 (normal).
+ * All pitches kept in the masculine range (0.5–0.8) so even Android/mobile
+ * default voices sound like men. Officers are differentiated primarily by
+ * rate and subtle pitch shifts within that range.
  */
 const ROLE_VOICE_PROFILES: Record<string, RoleVoiceProfile> = {
-  // Principal officers — deeper, more deliberate
-  WM:        { pitch: 0.75, rate: 0.82 },
-  'W.M.':    { pitch: 0.75, rate: 0.82 },
-  'W. M.':   { pitch: 0.75, rate: 0.82 },
-  SW:        { pitch: 0.88, rate: 0.87 },
-  'S.W.':    { pitch: 0.88, rate: 0.87 },
-  'S. W.':   { pitch: 0.88, rate: 0.87 },
-  JW:        { pitch: 1.0,  rate: 0.87 },
-  'J.W.':    { pitch: 1.0,  rate: 0.87 },
-  'J. W.':   { pitch: 1.0,  rate: 0.87 },
-  // Deacons — slightly higher, a bit quicker
-  SD:        { pitch: 1.05, rate: 0.92 },
-  'S.D.':    { pitch: 1.05, rate: 0.92 },
-  'S. D.':   { pitch: 1.05, rate: 0.92 },
-  JD:        { pitch: 1.15, rate: 0.92 },
-  'J.D.':    { pitch: 1.15, rate: 0.92 },
-  'J. D.':   { pitch: 1.15, rate: 0.92 },
-  'S(orJ)D': { pitch: 1.1,  rate: 0.92 },
-  'S/J D':   { pitch: 1.1,  rate: 0.92 },
+  // Principal officers — deepest, most deliberate
+  WM:        { pitch: 0.55, rate: 0.82 },
+  'W.M.':    { pitch: 0.55, rate: 0.82 },
+  'W. M.':   { pitch: 0.55, rate: 0.82 },
+  SW:        { pitch: 0.62, rate: 0.87 },
+  'S.W.':    { pitch: 0.62, rate: 0.87 },
+  'S. W.':   { pitch: 0.62, rate: 0.87 },
+  JW:        { pitch: 0.68, rate: 0.87 },
+  'J.W.':    { pitch: 0.68, rate: 0.87 },
+  'J. W.':   { pitch: 0.68, rate: 0.87 },
+  // Deacons — slightly higher but still masculine, a bit quicker
+  SD:        { pitch: 0.72, rate: 0.92 },
+  'S.D.':    { pitch: 0.72, rate: 0.92 },
+  'S. D.':   { pitch: 0.72, rate: 0.92 },
+  JD:        { pitch: 0.78, rate: 0.92 },
+  'J.D.':    { pitch: 0.78, rate: 0.92 },
+  'J. D.':   { pitch: 0.78, rate: 0.92 },
+  'S(orJ)D': { pitch: 0.75, rate: 0.92 },
+  'S/J D':   { pitch: 0.75, rate: 0.92 },
   // Other officers
-  'S/Sec':   { pitch: 0.95, rate: 0.95 },
-  Sec:       { pitch: 0.95, rate: 0.95 },
-  'Sec.':    { pitch: 0.95, rate: 0.95 },
-  S:         { pitch: 0.95, rate: 0.95 },
-  Tr:        { pitch: 0.92, rate: 0.90 },
-  Treas:     { pitch: 0.92, rate: 0.90 },
-  'Treas.':  { pitch: 0.92, rate: 0.90 },
-  Ch:        { pitch: 0.80, rate: 0.78 },
-  Chap:      { pitch: 0.80, rate: 0.78 },
-  'Chap.':   { pitch: 0.80, rate: 0.78 },
-  Marshal:   { pitch: 1.0,  rate: 0.90 },
-  T:         { pitch: 1.20, rate: 0.90 },
-  Tyler:     { pitch: 1.20, rate: 0.90 },
-  Candidate: { pitch: 1.10, rate: 0.85 },
+  'S/Sec':   { pitch: 0.70, rate: 0.95 },
+  Sec:       { pitch: 0.70, rate: 0.95 },
+  'Sec.':    { pitch: 0.70, rate: 0.95 },
+  S:         { pitch: 0.70, rate: 0.95 },
+  Tr:        { pitch: 0.65, rate: 0.90 },
+  Treas:     { pitch: 0.65, rate: 0.90 },
+  'Treas.':  { pitch: 0.65, rate: 0.90 },
+  Ch:        { pitch: 0.50, rate: 0.78 },
+  Chap:      { pitch: 0.50, rate: 0.78 },
+  'Chap.':   { pitch: 0.50, rate: 0.78 },
+  Marshal:   { pitch: 0.68, rate: 0.90 },
+  T:         { pitch: 0.80, rate: 0.90 },
+  Tyler:     { pitch: 0.80, rate: 0.90 },
+  Candidate: { pitch: 0.75, rate: 0.85 },
   // Group/other
-  ALL:       { pitch: 0.95, rate: 0.80 },
-  All:       { pitch: 0.95, rate: 0.80 },
-  BR:        { pitch: 1.08, rate: 0.90 },
-  Bro:       { pitch: 1.08, rate: 0.90 },
-  'Bro.':    { pitch: 1.08, rate: 0.90 },
-  'SW/WM':   { pitch: 0.82, rate: 0.85 },
+  ALL:       { pitch: 0.65, rate: 0.80 },
+  All:       { pitch: 0.65, rate: 0.80 },
+  BR:        { pitch: 0.72, rate: 0.90 },
+  Bro:       { pitch: 0.72, rate: 0.90 },
+  'Bro.':    { pitch: 0.72, rate: 0.90 },
+  'SW/WM':       { pitch: 0.58, rate: 0.85 },
+  // Additional role aliases from ritual files
+  Trs:           { pitch: 0.65, rate: 0.90 },
+  'WM/Chaplain': { pitch: 0.50, rate: 0.78 },
+  Voucher:       { pitch: 0.72, rate: 0.90 },
+  Vchr:          { pitch: 0.72, rate: 0.90 },
+  Narrator:      { pitch: 0.68, rate: 0.92 },
+  PRAYER:        { pitch: 0.50, rate: 0.78 },
+  Prayer:        { pitch: 0.50, rate: 0.78 },
 };
 
 /**
@@ -133,26 +153,81 @@ const ROLE_VOICE_PROFILES: Record<string, RoleVoiceProfile> = {
  * Falls back to neutral defaults if the role isn't mapped.
  */
 export function getVoiceForRole(role: string): RoleVoiceProfile {
-  return ROLE_VOICE_PROFILES[role] || { pitch: 1.0, rate: 0.9 };
+  return ROLE_VOICE_PROFILES[role] || { pitch: 0.7, rate: 0.9 };
 }
 
 /**
- * Assign distinct voices from the available voice list to each role.
- * Spreads voices across roles for maximum variety.
+ * Known male voice names across platforms, ordered by preference.
+ * We match substrings so "Microsoft David Desktop" matches "david".
+ */
+const MALE_VOICE_NAMES = [
+  // Windows
+  "david", "mark", "james", "george", "richard", "guy",
+  // macOS / iOS
+  "daniel", "alex", "fred", "ralph", "tom", "lee", "oliver", "aaron",
+  "arthur", "brian", "charles", "edmund", "gordon", "reed", "rishi", "thomas",
+  // Chrome / Android
+  "google uk english male", "google us english",
+  // Generic
+  "male",
+];
+
+const FEMALE_VOICE_NAMES = [
+  "female", "zira", "samantha", "victoria", "karen", "moira",
+  "fiona", "susan", "kate", "tessa", "allison", "ava",
+  "catherine", "grandma", "martha", "nicky", "serena",
+  "jenny", "aria", "eva", "elsa", "hazel", "clara",
+  "linda", "michelle", "sonia", "libby", "emily",
+];
+
+/**
+ * Score a voice for "maleness" — higher is more likely male.
+ * Returns -1 for known female, 0 for unknown, 1+ for likely male.
+ */
+function maleScore(voice: SpeechSynthesisVoice): number {
+  const name = voice.name.toLowerCase();
+  if (FEMALE_VOICE_NAMES.some((f) => name.includes(f))) return -1;
+  for (let i = 0; i < MALE_VOICE_NAMES.length; i++) {
+    if (name.includes(MALE_VOICE_NAMES[i])) return MALE_VOICE_NAMES.length - i;
+  }
+  return 0;
+}
+
+/**
+ * Find the single best male voice available on this device.
+ */
+function findBestMaleVoice(): SpeechSynthesisVoice | null {
+  const voices = getVoices();
+  if (voices.length === 0) return null;
+
+  let best: SpeechSynthesisVoice | null = null;
+  let bestScore = -Infinity;
+
+  for (const v of voices) {
+    const s = maleScore(v);
+    if (s > bestScore) {
+      bestScore = s;
+      best = v;
+    }
+  }
+
+  return best;
+}
+
+/**
+ * Assign voices to each role for browser TTS.
+ * Uses a single male voice for all roles — pitch and rate variation
+ * from the role profiles provides differentiation between officers.
  * (Only meaningful for the "browser" engine.)
  */
 export function assignVoicesToRoles(roles: string[]): Map<string, RoleVoiceProfile> {
-  const voices = getVoices();
+  const maleVoice = findBestMaleVoice();
   const map = new Map<string, RoleVoiceProfile>();
 
-  for (let i = 0; i < roles.length; i++) {
-    const role = roles[i];
+  for (const role of roles) {
     const profile = getVoiceForRole(role);
-
-    // Spread available voices across roles
-    if (voices.length > 0) {
-      const voiceIndex = i % voices.length;
-      map.set(role, { ...profile, voiceName: voices[voiceIndex].name });
+    if (maleVoice) {
+      map.set(role, { ...profile, voiceName: maleVoice.name });
     } else {
       map.set(role, profile);
     }
@@ -188,7 +263,7 @@ export function getVoices(): SpeechSynthesisVoice[] {
 }
 
 /**
- * Pick the best default browser voice
+ * Pick the best default browser voice — prefers male voices for Masonic ritual.
  */
 function getBestVoice(preferredName?: string): SpeechSynthesisVoice | null {
   const voices = getVoices();
@@ -199,20 +274,8 @@ function getBestVoice(preferredName?: string): SpeechSynthesisVoice | null {
     if (preferred) return preferred;
   }
 
-  const preferredVoices = [
-    "Google UK English Male",
-    "Google US English",
-    "Daniel", // macOS
-    "Alex", // macOS
-    "Microsoft David", // Windows
-  ];
-
-  for (const name of preferredVoices) {
-    const voice = voices.find((v) => v.name.includes(name));
-    if (voice) return voice;
-  }
-
-  return voices[0] || null;
+  // Use the same male-preference scoring as role assignment
+  return findBestMaleVoice() || voices[0];
 }
 
 /** Speak using the browser Web Speech API. */
@@ -279,6 +342,10 @@ export async function speak(
       return speakElevenLabs(text);
     case "google-cloud":
       return speakGoogleCloud(text);
+    case "deepgram":
+      return speakDeepgram(text);
+    case "kokoro":
+      return speakKokoro(text);
     default:
       return speakBrowser(text, options);
   }
@@ -299,6 +366,10 @@ export function speakAsRole(
       return speakElevenLabsAsRole(text, role);
     case "google-cloud":
       return speakGoogleCloudAsRole(text, role);
+    case "deepgram":
+      return speakDeepgramAsRole(text, role);
+    case "kokoro":
+      return speakKokoroAsRole(text, role);
     default: {
       const profile = voiceMap?.get(role) || getVoiceForRole(role);
       return speakBrowser(text, {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import type { RitualSectionWithCipher } from "@/lib/storage";
 import { compareTexts, type ComparisonResult } from "@/lib/text-comparison";
 import {
@@ -15,16 +15,30 @@ import {
   isTTSAvailable,
 } from "@/lib/text-to-speech";
 import DiffDisplay from "./DiffDisplay";
-import { getRoleIcon } from "./MasonicIcons";
+import {
+  saveSession,
+  type PracticeSession,
+  type LineScore,
+} from "@/lib/performance-history";
+
+interface GroupedSection {
+  sectionName: string;
+  degree: string;
+  text: string;        // Combined plain text of all lines
+  cipherText: string;  // Combined cipher text of all lines
+  speakers: string[];  // Unique speakers in this section
+}
 
 interface PracticeModeProps {
   sections: RitualSectionWithCipher[];
+  documentId?: string;
+  documentTitle?: string;
 }
 
 type PracticeState = "idle" | "listening" | "reviewing";
 
-export default function PracticeMode({ sections }: PracticeModeProps) {
-  const [selectedSection, setSelectedSection] = useState<RitualSectionWithCipher | null>(
+export default function PracticeMode({ sections, documentId, documentTitle }: PracticeModeProps) {
+  const [selectedSection, setSelectedSection] = useState<GroupedSection | null>(
     null
   );
   const [practiceState, setPracticeState] = useState<PracticeState>("idle");
@@ -35,16 +49,40 @@ export default function PracticeMode({ sections }: PracticeModeProps) {
   const [isSpeakingCorrection, setIsSpeakingCorrection] = useState(false);
 
   const engineRef = useRef<STTEngine | null>(null);
+  const speakGenRef = useRef(0);
 
-  // Group sections by degree
-  const sectionsByDegree = sections.reduce<Record<string, RitualSectionWithCipher[]>>(
-    (acc, section) => {
-      if (!acc[section.degree]) acc[section.degree] = [];
-      acc[section.degree].push(section);
-      return acc;
-    },
-    {}
-  );
+  // Group individual lines into actual ritual sections, then group by degree
+  const sectionsByDegree = useMemo(() => {
+    // First, group lines by sectionName to create one entry per ritual section
+    const groupedMap = new Map<string, GroupedSection>();
+    for (const line of sections) {
+      const key = `${line.degree}::${line.sectionName}`;
+      const existing = groupedMap.get(key);
+      if (existing) {
+        existing.text += "\n" + line.text;
+        existing.cipherText += "\n" + line.cipherText;
+        if (line.speaker && !existing.speakers.includes(line.speaker)) {
+          existing.speakers.push(line.speaker);
+        }
+      } else {
+        groupedMap.set(key, {
+          sectionName: line.sectionName,
+          degree: line.degree,
+          text: line.text,
+          cipherText: line.cipherText,
+          speakers: line.speaker ? [line.speaker] : [],
+        });
+      }
+    }
+
+    // Then group by degree for display
+    const byDegree: Record<string, GroupedSection[]> = {};
+    for (const group of groupedMap.values()) {
+      if (!byDegree[group.degree]) byDegree[group.degree] = [];
+      byDegree[group.degree].push(group);
+    }
+    return byDegree;
+  }, [sections]);
 
   const startListening = useCallback(() => {
     if (!isWebSpeechAvailable()) {
@@ -117,7 +155,10 @@ export default function PracticeMode({ sections }: PracticeModeProps) {
     if (!comparison || !selectedSection || !isTTSAvailable()) return;
 
     setIsSpeakingCorrection(true);
+    const gen = ++speakGenRef.current;
     try {
+      stopSpeaking();
+
       const diffs = comparison.diffs;
       const phrases: string[] = [];
       const CONTEXT = 3;
@@ -171,9 +212,37 @@ export default function PracticeMode({ sections }: PracticeModeProps) {
         const script = phrases
           .map((p, idx) => (phrases.length > 1 ? `Number ${idx + 1}. ${p}` : p))
           .join(". ... ");
-        await speak(`${intro} ... ${script}`, { rate: 0.85 });
+
+        // Retry once on TTS failure
+        let spoken = false;
+        for (let attempt = 0; attempt < 2 && !spoken; attempt++) {
+          try {
+            if (gen !== speakGenRef.current) return;
+            await speak(`${intro} ... ${script}`, { rate: 0.85 });
+            spoken = true;
+          } catch (err) {
+            if (err instanceof DOMException && err.name === "AbortError") return;
+            console.warn(`Correction TTS failed, attempt ${attempt + 1}:`, err);
+            if (attempt === 0) await new Promise((r) => setTimeout(r, 1000));
+          }
+        }
       }
-      await speakFeedback(comparison.accuracy);
+
+      // Small gap before feedback to avoid hammering the TTS API
+      await new Promise((r) => setTimeout(r, 150));
+
+      // Retry feedback speech once on failure
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          if (gen !== speakGenRef.current) return;
+          await speakFeedback(comparison.accuracy);
+          break;
+        } catch (err) {
+          if (err instanceof DOMException && err.name === "AbortError") return;
+          console.warn(`Feedback TTS failed, attempt ${attempt + 1}:`, err);
+          if (attempt === 0) await new Promise((r) => setTimeout(r, 1500));
+        }
+      }
     } finally {
       setIsSpeakingCorrection(false);
     }
@@ -191,6 +260,47 @@ export default function PracticeMode({ sections }: PracticeModeProps) {
     setSttError(null);
     setIsSpeakingCorrection(false);
   }, []);
+
+  // Save solo practice session to performance history when comparison completes
+  const lastSavedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!comparison || !selectedSection || !documentId) return;
+    // Avoid double-saving the same comparison
+    const key = `${selectedSection.sectionName}-${comparison.accuracy}-${Date.now()}`;
+    if (lastSavedRef.current === key) return;
+    lastSavedRef.current = key;
+
+    const sessionId = crypto.randomUUID();
+    const session: PracticeSession = {
+      id: sessionId,
+      documentId,
+      documentTitle: documentTitle || "Unknown",
+      mode: "solo",
+      role: null,
+      degree: selectedSection.degree,
+      sectionName: selectedSection.sectionName,
+      overallAccuracy: comparison.accuracy,
+      linesAttempted: 1,
+      linesNailed: comparison.accuracy >= 90 ? 1 : 0,
+      troubleSpots: comparison.troubleSpots.slice(0, 10),
+      startedAt: new Date().toISOString(),
+      duration: 0,
+    };
+
+    const lineScore: LineScore = {
+      id: `${sessionId}-line-0`,
+      sessionId,
+      sectionName: selectedSection.sectionName,
+      lineIndex: 0,
+      accuracy: comparison.accuracy,
+      wrongWords: comparison.wrongWords,
+      missingWords: comparison.missingWords,
+      troubleSpots: comparison.troubleSpots,
+      timestamp: new Date().toISOString(),
+    };
+
+    saveSession(session, [lineScore]).catch(console.error);
+  }, [comparison, selectedSection, documentId, documentTitle]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -218,29 +328,23 @@ export default function PracticeMode({ sections }: PracticeModeProps) {
             <div className="grid gap-2">
               {degreeSections.map((section) => (
                 <button
-                  key={section.id}
+                  key={`${section.degree}::${section.sectionName}`}
                   onClick={() => {
                     reset();
                     setSelectedSection(section);
                   }}
                   className={`
                     text-left px-4 py-3 rounded-lg border transition-all
-                    ${selectedSection?.id === section.id
+                    ${selectedSection?.sectionName === section.sectionName && selectedSection?.degree === section.degree
                       ? "border-amber-500 bg-amber-500/10 text-amber-200"
                       : "border-zinc-700 hover:border-zinc-600 text-zinc-400 hover:text-zinc-300"
                     }
                   `}
                 >
                   <span className="font-medium">{section.sectionName}</span>
-                  {section.speaker && (
-                    <span className="ml-2 flex items-center gap-1.5 inline-flex text-xs text-zinc-500">
-                      (
-                      {(() => {
-                        const Icon = getRoleIcon(section.speaker);
-                        return Icon ? <Icon className="w-3.5 h-3.5 text-amber-500/70" /> : null;
-                      })()}
-                      {section.speaker}
-                      )
+                  {section.speakers.length > 0 && (
+                    <span className="ml-2 inline-flex items-center gap-1.5 text-xs text-zinc-500">
+                      ({section.speakers.join(", ")})
                     </span>
                   )}
                   {/* Show cipher text preview by default */}
@@ -260,14 +364,9 @@ export default function PracticeMode({ sections }: PracticeModeProps) {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-zinc-200 flex items-center gap-2">
               {selectedSection.sectionName}
-              {selectedSection.speaker && (
+              {selectedSection.speakers.length > 0 && (
                 <span className="flex items-center gap-2 text-amber-500 ml-2">
-                  —
-                  {(() => {
-                    const Icon = getRoleIcon(selectedSection.speaker);
-                    return Icon ? <Icon className="w-5 h-5" /> : null;
-                  })()}
-                  {selectedSection.speaker}
+                  — {selectedSection.speakers.join(", ")}
                 </span>
               )}
             </h2>
@@ -290,7 +389,7 @@ export default function PracticeMode({ sections }: PracticeModeProps) {
           <div className="mb-4 p-4 bg-zinc-800/50 rounded-lg border border-zinc-700">
             <p className={`text-sm leading-relaxed whitespace-pre-wrap ${showPlainText ? "text-zinc-300" : "text-amber-200/80 font-mono"
               }`}>
-              {showPlainText ? selectedSection.text : selectedSection.cipherText}
+              {showPlainText ? selectedSection.text : (selectedSection.cipherText || selectedSection.text)}
             </p>
             {!showPlainText && (
               <p className="text-xs text-zinc-600 mt-2 italic">

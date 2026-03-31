@@ -20,6 +20,8 @@ export interface STTEngine {
   onResult: ((result: STTResult) => void) | null;
   onError: ((error: string) => void) | null;
   onEnd: (() => void) | null;
+  /** Called when silence is detected for the configured duration. */
+  onSilence: (() => void) | null;
 }
 
 export type STTProvider = "browser" | "whisper";
@@ -66,14 +68,31 @@ export function createWebSpeechEngine(): STTEngine {
 
   let listening = false;
 
+  let silenceTimer: ReturnType<typeof setTimeout> | null = null;
+  let hasSpoken = false;
+
+  const BROWSER_SILENCE_MS = 3000;
+
+  function resetSilenceTimer() {
+    if (silenceTimer) clearTimeout(silenceTimer);
+    if (!hasSpoken) return;
+    silenceTimer = setTimeout(() => {
+      if (listening && hasSpoken) {
+        engine.onSilence?.();
+      }
+    }, BROWSER_SILENCE_MS);
+  }
+
   const engine: STTEngine = {
     onResult: null,
     onError: null,
     onEnd: null,
+    onSilence: null,
 
     start() {
       if (listening) return;
       try {
+        hasSpoken = false;
         recognition.start();
         listening = true;
       } catch {
@@ -83,6 +102,7 @@ export function createWebSpeechEngine(): STTEngine {
 
     stop() {
       if (!listening) return;
+      if (silenceTimer) clearTimeout(silenceTimer);
       recognition.stop();
       listening = false;
     },
@@ -107,8 +127,14 @@ export function createWebSpeechEngine(): STTEngine {
       }
     }
 
+    const combined = finalTranscript + interimTranscript;
+    if (combined.trim().length > 0) {
+      hasSpoken = true;
+      resetSilenceTimer();
+    }
+
     engine.onResult({
-      transcript: finalTranscript + interimTranscript,
+      transcript: combined,
       isFinal: interimTranscript.length === 0 && finalTranscript.length > 0,
       confidence:
         event.results.length > 0
@@ -178,6 +204,7 @@ export function createWhisperEngine(): STTEngine {
     onResult: null,
     onError: null,
     onEnd: null,
+    onSilence: null,
 
     async start() {
       if (listening) return;
@@ -317,7 +344,7 @@ export function createWhisperEngine(): STTEngine {
                 silenceDuration >= VAD_SILENCE_DURATION_MS
               ) {
                 // Auto-stop recording — triggers onstop → transcription
-                engine.stop();
+                engine.onSilence?.();
               }
             }
           }, VAD_POLL_INTERVAL_MS);

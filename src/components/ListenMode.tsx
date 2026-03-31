@@ -5,7 +5,6 @@ import type { RitualSectionWithCipher } from "@/lib/storage";
 import { ROLE_DISPLAY_NAMES, cleanRitualText } from "@/lib/document-parser";
 import { getRoleIcon } from "./MasonicIcons";
 import {
-  speak,
   speakAsRole,
   assignVoicesToRoles,
   stopSpeaking,
@@ -26,6 +25,7 @@ export default function ListenMode({ sections }: ListenModeProps) {
   const cancelledRef = useRef(false);
   const pausedRef = useRef(false);
   const resumeRef = useRef<(() => void) | null>(null);
+  const playGenRef = useRef(0); // generation counter to prevent overlapping playFrom loops
   const voiceMapRef = useRef<Map<string, RoleVoiceProfile>>(new Map());
   const scriptContainerRef = useRef<HTMLDivElement>(null);
 
@@ -45,8 +45,33 @@ export default function ListenMode({ sections }: ListenModeProps) {
     }
   }, [availableRoles]);
 
-  // Scroll current line into view
+  // Track whether the user is manually scrolling — suppress auto-scroll if so
+  const userScrollingRef = useRef(false);
+  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
+    const container = scriptContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      userScrollingRef.current = true;
+      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+      // Re-enable auto-scroll after 5 seconds of no manual scrolling
+      scrollTimeoutRef.current = setTimeout(() => {
+        userScrollingRef.current = false;
+      }, 5000);
+    };
+
+    container.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      container.removeEventListener("scroll", handleScroll);
+      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+    };
+  }, []);
+
+  // Scroll current line into view (only if user isn't manually scrolling)
+  useEffect(() => {
+    if (userScrollingRef.current) return;
     const el = document.getElementById(`listen-line-${currentIndex}`);
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -61,12 +86,16 @@ export default function ListenMode({ sections }: ListenModeProps) {
   // Walk through every line, speaking each one
   const playFrom = useCallback(
     async (startIndex: number) => {
+      // Bump generation so any previous playFrom loop will exit
+      const gen = ++playGenRef.current;
       cancelledRef.current = false;
       pausedRef.current = false;
       setPlayState("playing");
 
       for (let i = startIndex; i < sections.length; i++) {
-        if (cancelledRef.current) return;
+        if (cancelledRef.current || gen !== playGenRef.current) return;
+
+        const stale = () => cancelledRef.current || gen !== playGenRef.current;
 
         // Handle pause — wait until resumed
         if (pausedRef.current) {
@@ -74,7 +103,7 @@ export default function ListenMode({ sections }: ListenModeProps) {
           await new Promise<void>((resolve) => {
             resumeRef.current = resolve;
           });
-          if (cancelledRef.current) return;
+          if (stale()) return;
           setPlayState("playing");
         }
 
@@ -83,21 +112,36 @@ export default function ListenMode({ sections }: ListenModeProps) {
 
         // Play gavel knocks if present (use MRAM field first, then parse from text)
         const gavelCount = section.gavels > 0 ? section.gavels : countGavelMarks(section.text);
-        if (gavelCount > 0 && !cancelledRef.current) {
+        if (gavelCount > 0 && !stale()) {
           await playGavelKnocks(gavelCount);
         }
-        if (cancelledRef.current) return;
+        if (stale()) return;
 
-        // Speak the line if it has a speaker
+        // Speak the line if it has a speaker (retry once on failure)
         if (section.speaker) {
           const cleanText = cleanRitualText(section.text);
           if (cleanText) {
-            try {
-              await speakAsRole(cleanText, section.speaker, voiceMapRef.current);
-            } catch (err) {
-              console.warn(`TTS failed for line ${i} (${section.speaker}):`, err);
-              // Brief pause so we don't zip through the script on repeated failures
-              await new Promise((r) => setTimeout(r, 800));
+            let spoken = false;
+            for (let attempt = 0; attempt < 2 && !spoken; attempt++) {
+              if (stale()) return;
+              try {
+                await speakAsRole(cleanText, section.speaker, voiceMapRef.current);
+                spoken = true;
+              } catch (err) {
+                // Don't retry if this was an intentional abort (user tapped a different line)
+                if (err instanceof DOMException && err.name === "AbortError") return;
+                console.warn(
+                  `TTS failed for line ${i} (${section.speaker}), attempt ${attempt + 1}:`,
+                  err
+                );
+                if (attempt === 0) {
+                  // Wait before retry
+                  await new Promise((r) => setTimeout(r, 1000));
+                } else {
+                  // Final failure — pause before advancing so user notices the skip
+                  await new Promise((r) => setTimeout(r, 1500));
+                }
+              }
             }
           }
         }
@@ -105,9 +149,14 @@ export default function ListenMode({ sections }: ListenModeProps) {
         else {
           await new Promise((r) => setTimeout(r, 600));
         }
+
+        // Small gap between lines to avoid hammering the TTS API
+        if (!stale() && i < sections.length - 1) {
+          await new Promise((r) => setTimeout(r, 150));
+        }
       }
 
-      if (!cancelledRef.current) {
+      if (!cancelledRef.current && gen === playGenRef.current) {
         setPlayState("finished");
       }
     },
@@ -155,10 +204,12 @@ export default function ListenMode({ sections }: ListenModeProps) {
 
       if (playState === "idle" || playState === "finished") {
         // One-shot: speak just this line
+        const gen = ++playGenRef.current;
         stopSpeaking();
         setCurrentIndex(index);
         const gavelCount = section.gavels > 0 ? section.gavels : countGavelMarks(section.text);
         if (gavelCount > 0) await playGavelKnocks(gavelCount);
+        if (gen !== playGenRef.current) return;
         if (section.speaker) {
           const cleanText = cleanRitualText(section.text);
           if (cleanText) {
@@ -171,46 +222,19 @@ export default function ListenMode({ sections }: ListenModeProps) {
         }
       } else if (playState === "playing" || playState === "paused") {
         // Jump playback to this line and continue from here
-        cancelledRef.current = true;
+        // stopSpeaking() cancels current audio; playFrom() bumps generation
+        // so the old loop exits at its next checkpoint
         stopSpeaking();
         if (resumeRef.current) {
           resumeRef.current();
           resumeRef.current = null;
         }
-        // Small delay to let the current playback stop cleanly
-        await new Promise((r) => setTimeout(r, 100));
         playFrom(index);
       }
     },
     [playState, sections, playFrom],
   );
 
-  /* -------------------------------------------------------------- */
-  /*  Click-to-speak: tap any individual word to hear it             */
-  /* -------------------------------------------------------------- */
-  const handleWordClick = useCallback(
-    async (word: string, role: string | null, e: React.MouseEvent) => {
-      e.stopPropagation();
-
-      // If the ceremony loop is running, pause it first so the loop
-      // doesn't advance to the next line and overlap with the word.
-      if (playState === "playing") {
-        pausedRef.current = true;
-      }
-
-      stopSpeaking();
-      if (role) {
-        try {
-          await speakAsRole(word, role, voiceMapRef.current);
-        } catch {
-          await speak(word);
-        }
-      } else {
-        await speak(word);
-      }
-    },
-    [playState],
-  );
 
   // Cleanup on unmount
   useEffect(() => {
@@ -234,7 +258,7 @@ export default function ListenMode({ sections }: ListenModeProps) {
             </h2>
             <p className="text-sm text-zinc-500 mt-1">
               Sit back and listen to the full ceremony read aloud, each officer in a distinct voice.
-              Tap any line to hear it, or tap a single word.
+              Tap any line to hear it.
             </p>
           </div>
           {!isTTSAvailable() && (
@@ -343,9 +367,7 @@ export default function ListenMode({ sections }: ListenModeProps) {
           const isCurrent = i === currentIndex && playState !== "idle";
           const gavels = section.gavels > 0 ? section.gavels : countGavelMarks(section.text);
           const cleanText = cleanRitualText(section.text);
-          const displayText = section.cipherText && section.cipherText !== section.text
-            ? section.cipherText
-            : cleanText;
+          const displayText = section.cipherText || cleanText;
 
           return (
             <div
@@ -388,22 +410,7 @@ export default function ListenMode({ sections }: ListenModeProps) {
                   </span>
                 )}
                 {displayText ? (
-                  <span className="inline">
-                    {displayText.split(/(\s+)/).map((seg, wi) => {
-                      if (/^\s+$/.test(seg)) {
-                        return <span key={wi}>{seg}</span>;
-                      }
-                      return (
-                        <span
-                          key={wi}
-                          onClick={(e) => handleWordClick(seg, section.speaker, e)}
-                          className="inline-block cursor-pointer rounded px-0.5 -mx-0.5 transition-colors hover:bg-white/10"
-                        >
-                          {seg}
-                        </span>
-                      );
-                    })}
-                  </span>
+                  <span>{displayText}</span>
                 ) : (
                   <span className="italic text-zinc-600">[stage direction]</span>
                 )}

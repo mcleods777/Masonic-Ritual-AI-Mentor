@@ -188,7 +188,7 @@ function PracticeContent() {
 
       {sections.length > 0 ? (
         activeTab === "rehearsal" && hasMultipleSpeakers ? (
-          <RehearsalMode sections={sections} />
+          <RehearsalMode sections={sections} documentId={selectedDocId || undefined} documentTitle={documents.find(d => d.id === selectedDocId)?.title} />
         ) : activeTab === "rehearsal" && !hasMultipleSpeakers ? (
           <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-6 text-center">
             <p className="text-zinc-400">
@@ -217,7 +217,7 @@ function PracticeContent() {
             </button>
           </div>
         ) : (
-          <PracticeMode sections={sections} />
+          <PracticeMode sections={sections} documentId={selectedDocId || undefined} documentTitle={documents.find(d => d.id === selectedDocId)?.title} />
         )
       ) : (
         <div className="text-center py-12 text-zinc-500">

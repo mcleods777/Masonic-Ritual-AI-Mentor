@@ -32,7 +32,7 @@ export default function HomePage() {
         <p className="text-lg text-zinc-400 mt-4 max-w-2xl mx-auto">
           A privacy-first practice tool for memorizing your ritual work.
           Load your encrypted .mram ritual file, practice from cipher text,
-          and get instant accuracy feedback with voice corrections.
+          and get instant feedback with voice AI.
         </p>
       </div>
 
@@ -92,7 +92,7 @@ export default function HomePage() {
         </Link>
 
         <Link
-          href="/walkthrough"
+          href="/progress"
           className="group bg-zinc-900 rounded-xl border border-zinc-800 hover:border-amber-500/50 p-6 transition-all"
         >
           <div className="w-12 h-12 rounded-xl bg-amber-500/10 flex items-center justify-center mb-4 group-hover:bg-amber-500/20 transition-colors">
@@ -106,18 +106,19 @@ export default function HomePage() {
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l5.447 2.724A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"
+                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
               />
             </svg>
           </div>
           <h3 className="text-lg font-semibold text-zinc-200 group-hover:text-amber-400 transition-colors">
-            How It Works
+            Progress
           </h3>
           <p className="text-sm text-zinc-500 mt-2">
-            Learn how the Ritual Mentor works — voice engines, rehearsal
-            modes, privacy architecture, and more.
+            Track your accuracy over time, see trends, identify persistent
+            trouble spots, and celebrate your streaks.
           </p>
         </Link>
+
       </div>
 
       {/* Documents list */}
@@ -176,7 +177,7 @@ export default function HomePage() {
             {
               step: "4",
               title: "Review",
-              desc: "Get word-by-word accuracy scoring, hear the correct version spoken back, and track your progress.",
+              desc: "Get word-by-word accuracy scoring, hear the correct version, and track your progress over time.",
             },
           ].map((item) => (
             <div key={item.step} className="text-center">
@@ -216,8 +217,8 @@ export default function HomePage() {
               Your .mram ritual file is decrypted on your device, then re-encrypted
               with AES-256-GCM and stored in IndexedDB. Cipher text and plain text are
               kept in separate encrypted fields — cipher is shown to you, plain text
-              is only used for accuracy comparison. No ritual text is sent to external
-              servers except when using cloud voice engines (ElevenLabs, Google TTS, Groq Whisper).
+              is only used for accuracy comparison. Anthropic does not use API data
+              for training.
             </p>
           </div>
         </div>
