@@ -430,10 +430,21 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
         });
 
         if (!res.ok) return;
-        const { feedback } = await res.json();
-        if (!feedback || cancelledRef.current) return;
 
-        setAiFeedback(feedback);
+        // Stream the response — show text as it arrives, then speak once complete
+        const reader = res.body?.getReader();
+        if (!reader) return;
+        const decoder = new TextDecoder();
+        let feedback = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (cancelledRef.current) { reader.cancel(); return; }
+          if (done) break;
+          feedback += decoder.decode(value, { stream: true });
+          setAiFeedback(feedback);
+        }
+        if (!feedback.trim()) return;
+
         setIsSpeakingFeedback(true);
         await speak(feedback, { rate: 0.95 });
       } catch {
