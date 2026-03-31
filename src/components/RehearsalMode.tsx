@@ -409,6 +409,17 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
     advanceToLine(currentIndex + 1);
   }, [advanceToLine, currentIndex]);
 
+  // Retry the current line — remove last result and reset to user-turn
+  const retryCurrentLine = useCallback(() => {
+    stopSpeaking();
+    setIsSpeakingFeedback(false);
+    setAiFeedback(null);
+    setCurrentComparison(null);
+    setTranscript("");
+    setLineResults((prev) => prev.slice(0, -1));
+    setRehearsalState("user-turn");
+  }, []);
+
   // Fetch AI coaching feedback and speak it aloud
   const fetchAndSpeakFeedback = useCallback(
     async (comparison: ComparisonResult) => {
@@ -1248,7 +1259,16 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
                   </div>
                 )}
 
-                <div className="flex justify-center">
+                <div className="flex justify-center gap-3">
+                  <button
+                    onClick={retryCurrentLine}
+                    className="px-6 py-3 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 rounded-lg font-semibold transition-colors flex items-center gap-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    Retry Line
+                  </button>
                   <button
                     onClick={continueAfterCheck}
                     className="px-8 py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-semibold transition-colors flex items-center gap-2"
