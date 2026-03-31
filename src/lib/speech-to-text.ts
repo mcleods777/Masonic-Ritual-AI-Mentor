@@ -162,7 +162,15 @@ export function createWebSpeechEngine(): STTEngine {
 
 // ============================================================
 // Groq Whisper engine (MediaRecorder → server → Groq API)
+// Now includes Voice Activity Detection (VAD) via AnalyserNode
+// to auto-stop recording after the user goes silent.
 // ============================================================
+
+/** VAD tuning constants */
+const VAD_SILENCE_THRESHOLD = 0.015; // RMS below this = silence
+const VAD_SILENCE_DURATION_MS = 1800; // ms of silence before auto-stop
+const VAD_MIN_SPEECH_MS = 500; // ignore silence until user has spoken this long
+const VAD_POLL_INTERVAL_MS = 100; // how often we sample the audio level
 
 export function createWhisperEngine(): STTEngine {
   if (typeof window === "undefined") {
@@ -178,63 +186,18 @@ export function createWhisperEngine(): STTEngine {
   let audioChunks: Blob[] = [];
   let stream: MediaStream | null = null;
   let audioContext: AudioContext | null = null;
-  let analyser: AnalyserNode | null = null;
-  let silenceRafId: number | null = null;
-  let lastSoundTime = 0;
-  let hasRecordedSound = false;
+  let vadInterval: ReturnType<typeof setInterval> | null = null;
 
-  const WHISPER_SILENCE_MS = 3000;
-  const SILENCE_THRESHOLD = 15; // RMS threshold (0-255 scale)
-
-  function startSilenceDetection(mediaStream: MediaStream) {
-    audioContext = new AudioContext();
-    analyser = audioContext.createAnalyser();
-    analyser.fftSize = 512;
-    const source = audioContext.createMediaStreamSource(mediaStream);
-    source.connect(analyser);
-
-    const dataArray = new Uint8Array(analyser.fftSize);
-    lastSoundTime = Date.now();
-
-    function checkAudioLevel() {
-      if (!analyser || !listening) return;
-      analyser.getByteTimeDomainData(dataArray);
-
-      // Calculate RMS
-      let sum = 0;
-      for (let i = 0; i < dataArray.length; i++) {
-        const val = (dataArray[i] - 128) / 128;
-        sum += val * val;
-      }
-      const rms = Math.sqrt(sum / dataArray.length) * 255;
-
-      if (rms > SILENCE_THRESHOLD) {
-        lastSoundTime = Date.now();
-        hasRecordedSound = true;
-      }
-
-      if (hasRecordedSound && Date.now() - lastSoundTime > WHISPER_SILENCE_MS) {
-        engine.onSilence?.();
-        return; // Stop monitoring
-      }
-
-      silenceRafId = requestAnimationFrame(checkAudioLevel);
+  /** Clean up VAD resources */
+  function stopVAD() {
+    if (vadInterval !== null) {
+      clearInterval(vadInterval);
+      vadInterval = null;
     }
-
-    silenceRafId = requestAnimationFrame(checkAudioLevel);
-  }
-
-  function stopSilenceDetection() {
-    if (silenceRafId != null) {
-      cancelAnimationFrame(silenceRafId);
-      silenceRafId = null;
-    }
-    if (audioContext) {
+    if (audioContext && audioContext.state !== "closed") {
       audioContext.close().catch(() => {});
-      audioContext = null;
     }
-    analyser = null;
-    hasRecordedSound = false;
+    audioContext = null;
   }
 
   const engine: STTEngine = {
@@ -266,8 +229,10 @@ export function createWhisperEngine(): STTEngine {
         };
 
         mediaRecorder.onstop = async () => {
-          // Clean up audio monitoring and release mic
-          stopSilenceDetection();
+          // Stop VAD monitoring
+          stopVAD();
+
+          // Release mic
           stream?.getTracks().forEach((t) => t.stop());
           stream = null;
 
@@ -316,6 +281,7 @@ export function createWhisperEngine(): STTEngine {
 
         mediaRecorder.onerror = () => {
           listening = false;
+          stopVAD();
           stream?.getTracks().forEach((t) => t.stop());
           stream = null;
           engine.onError?.("Recording failed");
@@ -324,9 +290,72 @@ export function createWhisperEngine(): STTEngine {
 
         mediaRecorder.start();
         listening = true;
-        startSilenceDetection(stream);
+
+        // ── Voice Activity Detection via AnalyserNode ──
+        // Monitor audio levels and auto-stop after sustained silence.
+        try {
+          audioContext = new AudioContext();
+          const source = audioContext.createMediaStreamSource(stream);
+          const analyser = audioContext.createAnalyser();
+          analyser.fftSize = 512;
+          source.connect(analyser);
+
+          const dataArray = new Float32Array(analyser.fftSize);
+          let speechDetected = false;
+          let speechStartTime = 0;
+          let silenceStartTime = 0;
+
+          vadInterval = setInterval(() => {
+            if (!listening) {
+              stopVAD();
+              return;
+            }
+
+            analyser.getFloatTimeDomainData(dataArray);
+
+            // Compute RMS (root-mean-square) of the audio signal
+            let sumSquares = 0;
+            for (let i = 0; i < dataArray.length; i++) {
+              sumSquares += dataArray[i] * dataArray[i];
+            }
+            const rms = Math.sqrt(sumSquares / dataArray.length);
+
+            const now = Date.now();
+
+            if (rms >= VAD_SILENCE_THRESHOLD) {
+              // Sound detected
+              if (!speechDetected) {
+                speechDetected = true;
+                speechStartTime = now;
+              }
+              silenceStartTime = 0; // reset silence timer
+            } else if (speechDetected) {
+              // Silence detected after speech
+              if (silenceStartTime === 0) {
+                silenceStartTime = now;
+              }
+
+              const speechDuration = now - speechStartTime;
+              const silenceDuration = now - silenceStartTime;
+
+              // Only auto-stop if user has spoken long enough and silence has persisted
+              if (
+                speechDuration >= VAD_MIN_SPEECH_MS &&
+                silenceDuration >= VAD_SILENCE_DURATION_MS
+              ) {
+                // Auto-stop recording — triggers onstop → transcription
+                engine.onSilence?.();
+              }
+            }
+          }, VAD_POLL_INTERVAL_MS);
+        } catch {
+          // VAD setup failed — fall back to manual "Done Speaking" button
+          // (recording still works, just no auto-stop)
+          console.warn("VAD setup failed; falling back to manual stop");
+        }
       } catch (err) {
         listening = false;
+        stopVAD();
         stream?.getTracks().forEach((t) => t.stop());
         stream = null;
         engine.onError?.(
@@ -338,7 +367,7 @@ export function createWhisperEngine(): STTEngine {
     stop() {
       if (!listening) return;
       listening = false;
-      stopSilenceDetection();
+      stopVAD();
       if (mediaRecorder && mediaRecorder.state !== "inactive") {
         mediaRecorder.stop();
       }

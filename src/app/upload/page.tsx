@@ -110,7 +110,7 @@ export default function UploadPage() {
         <p className="text-xs text-zinc-600">
           Ritual files (.mram) are encrypted and can only be opened with the
           correct passphrase from your lodge. They contain both the cipher text
-          for practice and the full text for AI coaching, securely bundled
+          for practice and the full text for accuracy comparison, securely bundled
           together. Contact your lodge secretary for the file and passphrase.
         </p>
       </div>

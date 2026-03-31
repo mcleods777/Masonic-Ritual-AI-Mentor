@@ -44,6 +44,7 @@ type RehearsalState =
   | "user-turn"     // Waiting for user to recite
   | "listening"     // User is speaking (STT active)
   | "transcribing"  // Whisper: recording done, waiting for server transcript
+  | "auto-checking" // Browser STT auto-stopped — compute comparison
   | "checking"      // Showing accuracy for user's line
   | "complete";     // Rehearsal finished
 
@@ -72,10 +73,13 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   const engineRef = useRef<STTEngine | null>(null);
   const sttProviderRef = useRef<STTProvider>(sttProvider);
   sttProviderRef.current = sttProvider;
+  const transcriptRef = useRef<string>("");
+  transcriptRef.current = transcript;
   const voiceMapRef = useRef<Map<string, RoleVoiceProfile>>(new Map());
   const cancelledRef = useRef(false);
   const advanceGenRef = useRef(0); // generation counter to prevent overlapping advanceToLine chains
   const scriptContainerRef = useRef<HTMLDivElement>(null);
+  const startListeningRef = useRef<() => void>(() => {});
   const stopListeningRef = useRef<() => void>(() => { });
   const autoStopRef = useRef(autoStop);
   autoStopRef.current = autoStop;
@@ -198,8 +202,13 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
     if (stale()) return;
 
     if (section.speaker === selectedRole) {
-      // It's the user's turn
-      setRehearsalState("user-turn");
+      // It's the user's turn — auto-start listening (hands-free)
+      setRehearsalState("listening");
+      // Small delay so the UI updates before mic activates
+      setTimeout(() => {
+        if (!cancelledRef.current) startListeningRef.current();
+      }, 400);
+      return;
     } else if (section.speaker) {
       // AI reads this line
       setRehearsalState("ai-speaking");
@@ -292,7 +301,11 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
       };
 
       engine.onEnd = () => {
-        // Browser engine: may auto-stop after silence (no action needed)
+        // Browser engine: auto-stopped after silence — trigger accuracy check
+        if (provider === "browser" && transcriptRef.current) {
+          engineRef.current = null;
+          setRehearsalState("auto-checking");
+        }
         // Whisper engine: recording stopped, transcript delivered via onResult
       };
 
@@ -308,19 +321,8 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
     }
   }, []);
 
-  // Auto-start listening when it becomes the user's turn (voice mode)
-  useEffect(() => {
-    if (rehearsalState !== "user-turn" || inputMode !== "voice") return;
-
-    // Brief delay so the user sees/hears the "YOUR TURN" cue before mic activates
-    const timer = setTimeout(() => {
-      if (!cancelledRef.current) {
-        startListening();
-      }
-    }, 600);
-
-    return () => clearTimeout(timer);
-  }, [rehearsalState, inputMode, startListening]);
+  // Keep ref in sync so advanceToLine can call it without circular deps
+  startListeningRef.current = startListening;
 
   // Stop listening and check accuracy
   const stopListening = useCallback(() => {
@@ -365,6 +367,23 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
         { sectionIndex: currentIndex, accuracy: result.accuracy, comparison: result },
       ]);
       setRehearsalState("checking");
+    }
+  }, [rehearsalState, transcript, currentSection, currentIndex]);
+
+  // Browser STT auto-stopped after silence — compute comparison and show results.
+  useEffect(() => {
+    if (rehearsalState === "auto-checking" && transcript && currentSection) {
+      const cleanRef = cleanRitualText(currentSection.text);
+      const result = compareTexts(transcript, cleanRef);
+      setCurrentComparison(result);
+      setLineResults((prev) => [
+        ...prev,
+        { sectionIndex: currentIndex, accuracy: result.accuracy, comparison: result },
+      ]);
+      setRehearsalState("checking");
+    } else if (rehearsalState === "auto-checking") {
+      // No transcript captured — go back to user-turn
+      setRehearsalState("user-turn");
     }
   }, [rehearsalState, transcript, currentSection, currentIndex]);
 
@@ -1138,7 +1157,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
               </div>
             )}
 
-            <div className="flex justify-center">
+            <div className="flex flex-col items-center gap-2">
               <button
                 onClick={stopListening}
                 className="px-6 py-3 bg-red-600 hover:bg-red-500 text-white rounded-lg font-medium transition-colors flex items-center gap-2 animate-pulse"
@@ -1148,6 +1167,11 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
                 </svg>
                 Done Speaking
               </button>
+              {sttProvider === "whisper" && (
+                <p className="text-xs text-zinc-500">
+                  Auto-stops when you go silent, or tap the button above
+                </p>
+              )}
             </div>
           </div>
         )}
