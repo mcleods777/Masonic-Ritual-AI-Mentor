@@ -409,6 +409,20 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
     advanceToLine(currentIndex + 1);
   }, [advanceToLine, currentIndex]);
 
+  // Retry the current line — remove last result and auto-start listening
+  const retryCurrentLine = useCallback(() => {
+    stopSpeaking();
+    setIsSpeakingFeedback(false);
+    setAiFeedback(null);
+    setCurrentComparison(null);
+    setTranscript("");
+    setLineResults((prev) => prev.slice(0, -1));
+    setRehearsalState("listening");
+    setTimeout(() => {
+      if (!cancelledRef.current) startListeningRef.current();
+    }, 400);
+  }, []);
+
   // Fetch AI coaching feedback and speak it aloud
   const fetchAndSpeakFeedback = useCallback(
     async (comparison: ComparisonResult) => {
@@ -430,10 +444,21 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
         });
 
         if (!res.ok) return;
-        const { feedback } = await res.json();
-        if (!feedback || cancelledRef.current) return;
 
-        setAiFeedback(feedback);
+        // Stream the response — show text as it arrives, then speak once complete
+        const reader = res.body?.getReader();
+        if (!reader) return;
+        const decoder = new TextDecoder();
+        let feedback = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (cancelledRef.current) { reader.cancel(); return; }
+          if (done) break;
+          feedback += decoder.decode(value, { stream: true });
+          setAiFeedback(feedback);
+        }
+        if (!feedback.trim()) return;
+
         setIsSpeakingFeedback(true);
         await speak(feedback, { rate: 0.95 });
       } catch {
@@ -1237,10 +1262,21 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
                   </div>
                 )}
 
-                <div className="flex justify-center">
+                <div className="flex justify-center gap-3">
+                  <button
+                    onClick={retryCurrentLine}
+                    disabled={aiCoaching && (!aiFeedback || isSpeakingFeedback)}
+                    className="px-6 py-3 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40 disabled:cursor-not-allowed text-zinc-200 rounded-lg font-semibold transition-colors flex items-center gap-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    Retry Line
+                  </button>
                   <button
                     onClick={continueAfterCheck}
-                    className="px-8 py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-semibold transition-colors flex items-center gap-2"
+                    disabled={aiCoaching && (!aiFeedback || isSpeakingFeedback)}
+                    className="px-8 py-3 bg-amber-600 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg font-semibold transition-colors flex items-center gap-2"
                   >
                     Continue
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

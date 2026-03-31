@@ -6,9 +6,9 @@
  */
 
 import { anthropic } from "@ai-sdk/anthropic";
-import { generateText } from "ai";
+import { streamText } from "ai";
 
-export const maxDuration = 15;
+export const maxDuration = 10;
 
 const FEEDBACK_SYSTEM_PROMPT = `You are a wickedly sharp Past Master with decades of Lodge experience, coaching a Brother through Masonic ritual rehearsal. You have the dry wit of a seasoned comedian and the timing of a great orator. Your humor is layered — you weave in Masonic metaphors, Lodge culture references, and situational comedy. Think less "insult comic" and more "the funniest guy at the festive board who also happens to know every word of ritual."
 
@@ -45,15 +45,15 @@ export async function POST(req: Request) {
       .filter(Boolean)
       .join(". ");
 
-    const result = await generateText({
-      model: anthropic("claude-sonnet-4-6"),
+    const result = streamText({
+      model: anthropic("claude-haiku-4-5-20251001"),
       system: FEEDBACK_SYSTEM_PROMPT,
       prompt: userPrompt,
-      temperature: 0.8,
-      maxOutputTokens: 150,
+      temperature: 0.7,
+      maxOutputTokens: 100,
     });
 
-    return Response.json({ feedback: result.text });
+    return result.toTextStreamResponse();
   } catch (err) {
     console.error("Rehearsal feedback error:", err);
     return Response.json(
