@@ -712,7 +712,7 @@ const VOXTRAL_ROLE_GROUPS: string[][] = [
 ];
 
 /** Map a role to a group index (0-9). Returns -1 if not found. */
-function roleToGroup(role: string): number {
+export function roleToGroup(role: string): number {
   for (let i = 0; i < VOXTRAL_ROLE_GROUPS.length; i++) {
     if (VOXTRAL_ROLE_GROUPS[i].includes(role)) return i;
   }
