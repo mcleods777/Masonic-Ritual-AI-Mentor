@@ -11,7 +11,7 @@ import type { MRAMDocument, MRAMRitualSection } from "./mram-format";
 import { mramToSections, mramToPlainText } from "./mram-format";
 
 const DB_NAME = "masonic-ritual-mentor";
-const DB_VERSION = 2;
+const DB_VERSION = 3; // v3: adds voices store (see voice-storage.ts)
 const DOCUMENTS_STORE = "documents";
 const SECTIONS_STORE = "sections";
 const SETTINGS_STORE = "settings";
@@ -44,6 +44,11 @@ function openDB(): Promise<IDBDatabase> {
 
       if (!db.objectStoreNames.contains(SETTINGS_STORE)) {
         db.createObjectStore(SETTINGS_STORE, { keyPath: "key" });
+      }
+
+      // v3: voices store for local Voxtral voice samples
+      if (!db.objectStoreNames.contains("voices")) {
+        db.createObjectStore("voices", { keyPath: "id" });
       }
     };
   });

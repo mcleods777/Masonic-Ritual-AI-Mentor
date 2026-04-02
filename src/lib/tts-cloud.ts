@@ -639,53 +639,45 @@ export async function speakKokoroAsRole(
 // ============================================================
 
 /**
- * Voxtral voice management.
+ * Voxtral voice management with local voice storage.
  *
- * The Mistral cloud API requires either a voice_id (UUID from the Voices API)
- * or ref_audio (base64 audio for one-off cloning). Preset names like
- * "casual_male" only work with self-hosted vLLM deployments.
+ * Voice recordings are stored in the browser's IndexedDB (see voice-storage.ts)
+ * and sent as ref_audio with each TTS request for zero-shot voice cloning.
+ * This works on Mistral's free tier — no paid plan needed.
  *
- * On first use we fetch saved voice profiles from /api/tts/voxtral/voices
- * and cache them. Each Masonic role is assigned to a voice by name pattern
- * matching, with round-robin distribution when fewer voices exist than roles.
+ * Local voices are loaded once per session and distributed across Masonic
+ * officer role groups round-robin style.
  */
 
-interface VoxtralVoice {
-  id: string;
-  name: string;
-  gender?: string;
-}
+import { listVoices, type LocalVoice } from "./voice-storage";
 
-/** Cached voice profiles — fetched once per session. */
-let voxtralVoicesCache: VoxtralVoice[] | null = null;
-let voxtralVoicesFetchPromise: Promise<VoxtralVoice[]> | null = null;
+/** Cached local voice profiles — loaded once per session from IndexedDB. */
+let localVoicesCache: LocalVoice[] | null = null;
+let localVoicesFetchPromise: Promise<LocalVoice[]> | null = null;
 
-/** Fetch and cache Voxtral voice profiles from the server. */
-async function getVoxtralVoices(): Promise<VoxtralVoice[]> {
-  if (voxtralVoicesCache) return voxtralVoicesCache;
-  if (voxtralVoicesFetchPromise) return voxtralVoicesFetchPromise;
+/** Load and cache local voices from IndexedDB. */
+async function getLocalVoices(): Promise<LocalVoice[]> {
+  if (localVoicesCache) return localVoicesCache;
+  if (localVoicesFetchPromise) return localVoicesFetchPromise;
 
-  voxtralVoicesFetchPromise = (async () => {
+  localVoicesFetchPromise = (async () => {
     try {
-      const resp = await fetch("/api/tts/voxtral/voices");
-      if (!resp.ok) return [];
-      const data = (await resp.json()) as { voices: VoxtralVoice[] };
-      voxtralVoicesCache = data.voices || [];
-      return voxtralVoicesCache;
+      localVoicesCache = await listVoices();
+      return localVoicesCache;
     } catch {
       return [];
     } finally {
-      voxtralVoicesFetchPromise = null;
+      localVoicesFetchPromise = null;
     }
   })();
 
-  return voxtralVoicesFetchPromise;
+  return localVoicesFetchPromise;
 }
 
-/** Clear the voices cache (e.g. after creating new voices). */
+/** Clear the local voices cache (call after recording a new voice). */
 export function clearVoxtralVoicesCache(): void {
-  voxtralVoicesCache = null;
-  voxtralVoicesFetchPromise = null;
+  localVoicesCache = null;
+  localVoicesFetchPromise = null;
 }
 
 /**
@@ -724,23 +716,23 @@ function roleToGroup(role: string): number {
 }
 
 /**
- * Get the voice UUID for a Masonic role.
- * Distributes available voices across role groups round-robin style.
- * Returns undefined if no voices are available.
+ * Get the ref_audio base64 string for a Masonic role.
+ * Distributes available local voices across role groups round-robin.
+ * Returns undefined if no local voices are recorded.
  */
-async function getVoxtralVoiceForRole(role: string): Promise<string | undefined> {
-  const voices = await getVoxtralVoices();
+async function getRefAudioForRole(role: string): Promise<string | undefined> {
+  const voices = await getLocalVoices();
   if (voices.length === 0) return undefined;
 
   const group = roleToGroup(role);
   const idx = group >= 0 ? group % voices.length : 0;
-  return voices[idx].id;
+  return voices[idx].audioBase64;
 }
 
 /** Speak text using Voxtral TTS (with retry for transient errors). */
 export async function speakVoxtral(
   text: string,
-  voiceId?: string
+  refAudio?: string
 ): Promise<void> {
   const MAX_RETRIES = 2;
   const RETRY_DELAYS = [500, 1500];
@@ -756,9 +748,7 @@ export async function speakVoxtral(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text,
-          // Pass voiceId only if we have one — the server will attempt
-          // to find a saved voice if neither voiceId nor refAudio is set
-          ...(voiceId ? { voiceId } : {}),
+          ...(refAudio ? { refAudio } : {}),
         }),
         signal,
       });
@@ -800,8 +790,8 @@ export async function speakVoxtralAsRole(
   text: string,
   role: string
 ): Promise<void> {
-  const voiceId = await getVoxtralVoiceForRole(role);
-  return speakVoxtral(text, voiceId);
+  const refAudio = await getRefAudioForRole(role);
+  return speakVoxtral(text, refAudio);
 }
 
 // ============================================================
