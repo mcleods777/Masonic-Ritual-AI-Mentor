@@ -7,6 +7,7 @@ import {
   deleteVoice,
   type LocalVoice,
 } from "@/lib/voice-storage";
+import { clearVoxtralVoicesCache } from "@/lib/tts-cloud";
 
 // ============================================================
 // Types
@@ -128,8 +129,15 @@ export default function VoicesPage() {
       setDuration(0);
       setRecordingState("recording");
 
+      // Auto-stop at 10 seconds — Voxtral only needs 2-3s for cloning,
+      // but 10s gives room for quality. Longer recordings add latency.
+      const MAX_DURATION_MS = 10000;
       timerRef.current = setInterval(() => {
-        setDuration(Math.floor((Date.now() - startTimeRef.current) / 1000));
+        const elapsed = Date.now() - startTimeRef.current;
+        setDuration(Math.floor(elapsed / 1000));
+        if (elapsed >= MAX_DURATION_MS) {
+          stopRecording();
+        }
       }, 200);
     } catch (err) {
       setError(
@@ -258,6 +266,7 @@ export default function VoicesPage() {
       };
 
       await saveVoice(voice);
+      clearVoxtralVoicesCache();
 
       setSuccess(
         `Voice "${voice.name}" saved! It will be used when you select Voxtral for TTS.`
@@ -279,6 +288,7 @@ export default function VoicesPage() {
     if (!confirm(`Delete voice "${name}"?`)) return;
     try {
       await deleteVoice(id);
+      clearVoxtralVoicesCache();
       fetchVoices();
     } catch {
       setError("Failed to delete voice");
@@ -349,7 +359,7 @@ export default function VoicesPage() {
         {/* Tips */}
         <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3">
           <p className="text-xs text-amber-400/80">
-            <strong>Tips:</strong> 3-5 seconds is ideal (smaller file = faster TTS).
+            <strong>Tips:</strong> 3-5 seconds is ideal. Shorter recordings = faster TTS response.
             Speak in the tone you want for rehearsal. A quiet room helps cloning quality.
           </p>
         </div>
