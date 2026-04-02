@@ -734,6 +734,15 @@ export async function speakVoxtral(
   text: string,
   refAudio?: string
 ): Promise<void> {
+  // If no refAudio provided (e.g. feedback/correction speech), use the
+  // first available local voice so the request doesn't fail silently.
+  if (!refAudio) {
+    const voices = await getLocalVoices();
+    if (voices.length > 0) {
+      refAudio = voices[0].audioBase64;
+    }
+  }
+
   const MAX_RETRIES = 2;
   const RETRY_DELAYS = [500, 1500];
   const signal = getTTSAbortSignal();
