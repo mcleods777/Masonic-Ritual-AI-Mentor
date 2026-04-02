@@ -2,11 +2,12 @@
  * Rehearsal Feedback API Route
  *
  * Generates brief, spoken AI coaching feedback after the user recites
- * a line in rehearsal mode. Uses Sonnet for wit and intelligence.
+ * a line in rehearsal mode. Uses Llama 3.3 on Groq for fast, free,
+ * open-source inference. Streams the response for low latency.
+ *
+ * Falls back to Mistral Small if GROQ_API_KEY is not set but
+ * MISTRAL_API_KEY is available.
  */
-
-import { anthropic } from "@ai-sdk/anthropic";
-import { streamText } from "ai";
 
 export const maxDuration = 10;
 
@@ -26,10 +27,55 @@ RULES:
 - NEVER reveal grips, passwords, signs, or modes of recognition.
 - Do NOT use markdown, bullet points, or formatting — spoken text only.`;
 
+/** Provider config resolved from available API keys. */
+function getProvider(): {
+  url: string;
+  apiKey: string;
+  model: string;
+  authHeader: string;
+} | null {
+  // Prefer Groq (free, fast, open-source models)
+  if (process.env.GROQ_API_KEY) {
+    return {
+      url: "https://api.groq.com/openai/v1/chat/completions",
+      apiKey: process.env.GROQ_API_KEY,
+      model: process.env.FEEDBACK_MODEL || "llama-3.3-70b-versatile",
+      authHeader: `Bearer ${process.env.GROQ_API_KEY}`,
+    };
+  }
+
+  // Fallback to Mistral
+  if (process.env.MISTRAL_API_KEY) {
+    return {
+      url: "https://api.mistral.ai/v1/chat/completions",
+      apiKey: process.env.MISTRAL_API_KEY,
+      model: process.env.FEEDBACK_MODEL || "mistral-small-latest",
+      authHeader: `Bearer ${process.env.MISTRAL_API_KEY}`,
+    };
+  }
+
+  return null;
+}
+
 export async function POST(req: Request) {
+  const provider = getProvider();
+  if (!provider) {
+    return Response.json(
+      { error: "No LLM API key configured (set GROQ_API_KEY or MISTRAL_API_KEY)" },
+      { status: 500 }
+    );
+  }
+
   try {
-    const { accuracy, wrongWords, missingWords, troubleSpots, lineNumber, totalLines, performanceContext } =
-      await req.json();
+    const {
+      accuracy,
+      wrongWords,
+      missingWords,
+      troubleSpots,
+      lineNumber,
+      totalLines,
+      performanceContext,
+    } = await req.json();
 
     const userPrompt = [
       `The Brother just recited line ${lineNumber} of ${totalLines}.`,
@@ -39,21 +85,100 @@ export async function POST(req: Request) {
       troubleSpots?.length > 0
         ? `Trouble spots: ${troubleSpots.slice(0, 5).join(", ")}`
         : null,
-      performanceContext ? `\nPerformance history context:\n${performanceContext}` : null,
+      performanceContext
+        ? `\nPerformance history context:\n${performanceContext}`
+        : null,
       `Give brief spoken feedback.`,
     ]
       .filter(Boolean)
       .join(". ");
 
-    const result = streamText({
-      model: anthropic("claude-haiku-4-5-20251001"),
-      system: FEEDBACK_SYSTEM_PROMPT,
-      prompt: userPrompt,
-      temperature: 0.7,
-      maxOutputTokens: 100,
+    // Stream from Groq/Mistral OpenAI-compatible endpoint
+    const response = await fetch(provider.url, {
+      method: "POST",
+      headers: {
+        Authorization: provider.authHeader,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: provider.model,
+        messages: [
+          { role: "system", content: FEEDBACK_SYSTEM_PROMPT },
+          { role: "user", content: userPrompt },
+        ],
+        temperature: 0.7,
+        max_tokens: 100,
+        stream: true,
+      }),
     });
 
-    return result.toTextStreamResponse();
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error(`Feedback LLM error (${response.status}):`, errText);
+      return Response.json(
+        { error: `LLM API error: ${response.status}` },
+        { status: response.status }
+      );
+    }
+
+    // Transform SSE stream → plain text stream for the client
+    const reader = response.body?.getReader();
+    if (!reader) {
+      return Response.json(
+        { error: "No response body from LLM" },
+        { status: 500 }
+      );
+    }
+
+    const stream = new ReadableStream({
+      async start(controller) {
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+
+            for (const line of lines) {
+              if (!line.startsWith("data: ")) continue;
+              const data = line.slice(6);
+              if (data === "[DONE]") continue;
+
+              try {
+                const parsed = JSON.parse(data) as {
+                  choices?: Array<{
+                    delta?: { content?: string };
+                  }>;
+                };
+                const content = parsed.choices?.[0]?.delta?.content;
+                if (content) {
+                  controller.enqueue(new TextEncoder().encode(content));
+                }
+              } catch {
+                // Skip malformed chunks
+              }
+            }
+          }
+        } catch (err) {
+          console.error("Feedback stream error:", err);
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Transfer-Encoding": "chunked",
+        "Cache-Control": "no-cache",
+      },
+    });
   } catch (err) {
     console.error("Rehearsal feedback error:", err);
     return Response.json(
