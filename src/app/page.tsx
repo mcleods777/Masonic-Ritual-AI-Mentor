@@ -124,7 +124,7 @@ export default function HomePage() {
       {/* Documents list */}
       {!loading && hasDocuments && (
         <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-6">
-          <h2 className="text-lg font-semibold text-zinc-200 mb-4">
+          <h2 className="text-2xl font-semibold text-zinc-200 mb-4">
             Your Documents
           </h2>
           <div className="space-y-2">
@@ -154,7 +154,7 @@ export default function HomePage() {
 
       {/* How it Works */}
       <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-6">
-        <h2 className="text-lg font-semibold text-zinc-200 mb-6">
+        <h2 className="text-2xl font-semibold text-zinc-200 mb-6">
           How It Works
         </h2>
         <div className="grid md:grid-cols-4 gap-6">
@@ -210,7 +210,7 @@ export default function HomePage() {
             </svg>
           </div>
           <div>
-            <h3 className="text-sm font-semibold text-zinc-200">
+            <h3 className="text-base font-semibold text-zinc-200">
               Privacy First
             </h3>
             <p className="text-sm text-zinc-500 mt-1">
