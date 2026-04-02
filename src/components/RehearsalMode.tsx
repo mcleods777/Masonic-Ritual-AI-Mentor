@@ -20,6 +20,8 @@ import {
   assignVoicesToRoles,
   stopSpeaking,
   isTTSAvailable,
+  getLastTTSError,
+  clearLastTTSError,
   type RoleVoiceProfile,
 } from "@/lib/text-to-speech";
 import { playGavelKnocks, countGavelMarks } from "@/lib/gavel-sound";
@@ -68,6 +70,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   const [aiCoaching, setAiCoaching] = useState(true);
   const [aiFeedback, setAiFeedback] = useState<string | null>(null);
   const [isSpeakingFeedback, setIsSpeakingFeedback] = useState(false);
+  const [ttsToast, setTtsToast] = useState<string | null>(null);
   const [autoStop, setAutoStop] = useState(true);
 
   const engineRef = useRef<STTEngine | null>(null);
@@ -221,6 +224,13 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
           try {
             await speakAsRole(cleanText, section.speaker, voiceMapRef.current);
             spoken = true;
+            // Check if a fallback was used (primary engine failed but browser worked)
+            const fallbackMsg = getLastTTSError();
+            if (fallbackMsg) {
+              setTtsToast(fallbackMsg + " — using browser voice as fallback");
+              clearLastTTSError();
+              setTimeout(() => setTtsToast(null), 5000);
+            }
           } catch (err) {
             // Don't retry if this was an intentional abort
             if (err instanceof DOMException && err.name === "AbortError") return;
@@ -942,6 +952,20 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   // Active rehearsal (ai-speaking, user-turn, listening, transcribing, checking)
   return (
     <div className="space-y-4">
+      {/* TTS fallback toast */}
+      {ttsToast && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3 flex items-center justify-between">
+          <p className="text-amber-400 text-xs">{ttsToast}</p>
+          <button
+            onClick={() => setTtsToast(null)}
+            className="text-amber-500/50 hover:text-amber-400 ml-3"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
       {/* Header bar */}
       <div className="flex items-center justify-between">
         <div>

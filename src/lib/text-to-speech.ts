@@ -335,57 +335,110 @@ export function isTTSAvailable(): boolean {
   return isWebSpeechPresent();
 }
 
+/** Last TTS error for UI feedback. Cleared on successful speech. */
+let lastTTSError: string | null = null;
+
+/** Get the last TTS error (for UI display). */
+export function getLastTTSError(): string | null {
+  return lastTTSError;
+}
+
+/** Clear the last TTS error. */
+export function clearLastTTSError(): void {
+  lastTTSError = null;
+}
+
 /**
  * Speak the given text aloud using the current engine.
+ * Falls back to Deepgram → Browser if the primary engine fails.
  */
 export async function speak(
   text: string,
   options: TTSOptions = {}
 ): Promise<void> {
-  switch (currentEngine) {
-    case "elevenlabs":
-      return speakElevenLabs(text);
-    case "google-cloud":
-      return speakGoogleCloud(text);
-    case "deepgram":
-      return speakDeepgram(text);
-    case "kokoro":
-      return speakKokoro(text);
-    case "voxtral":
-      return speakVoxtral(text);
-    default:
-      return speakBrowser(text, options);
+  const primary = () => {
+    switch (currentEngine) {
+      case "elevenlabs": return speakElevenLabs(text);
+      case "google-cloud": return speakGoogleCloud(text);
+      case "deepgram": return speakDeepgram(text);
+      case "kokoro": return speakKokoro(text);
+      case "voxtral": return speakVoxtral(text);
+      default: return speakBrowser(text, options);
+    }
+  };
+
+  try {
+    await primary();
+    lastTTSError = null;
+  } catch (err) {
+    // Don't fallback on intentional aborts
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
+
+    const msg = err instanceof Error ? err.message : "TTS failed";
+    console.warn(`${currentEngine} TTS failed, falling back: ${msg}`);
+    lastTTSError = `${currentEngine} failed: ${msg}`;
+
+    // Already on browser — nothing to fall back to
+    if (currentEngine === "browser") throw err;
+
+    // Try browser TTS as universal fallback
+    try {
+      await speakBrowser(text, options);
+    } catch {
+      // Browser also failed — propagate original error
+      throw err;
+    }
   }
 }
 
 /**
  * Speak text as a specific officer role using the current engine.
- * For browser, uses pitch/rate voice profiles.
- * For cloud engines, uses distinct voices per role.
+ * Falls back to Browser TTS if the primary engine fails.
  */
-export function speakAsRole(
+export async function speakAsRole(
   text: string,
   role: string,
   voiceMap?: Map<string, RoleVoiceProfile>
 ): Promise<void> {
-  switch (currentEngine) {
-    case "elevenlabs":
-      return speakElevenLabsAsRole(text, role);
-    case "google-cloud":
-      return speakGoogleCloudAsRole(text, role);
-    case "deepgram":
-      return speakDeepgramAsRole(text, role);
-    case "kokoro":
-      return speakKokoroAsRole(text, role);
-    case "voxtral":
-      return speakVoxtralAsRole(text, role);
-    default: {
+  const primary = () => {
+    switch (currentEngine) {
+      case "elevenlabs": return speakElevenLabsAsRole(text, role);
+      case "google-cloud": return speakGoogleCloudAsRole(text, role);
+      case "deepgram": return speakDeepgramAsRole(text, role);
+      case "kokoro": return speakKokoroAsRole(text, role);
+      case "voxtral": return speakVoxtralAsRole(text, role);
+      default: {
+        const profile = voiceMap?.get(role) || getVoiceForRole(role);
+        return speakBrowser(text, {
+          pitch: profile.pitch,
+          rate: profile.rate,
+          voiceName: profile.voiceName,
+        });
+      }
+    }
+  };
+
+  try {
+    await primary();
+    lastTTSError = null;
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
+
+    const msg = err instanceof Error ? err.message : "TTS failed";
+    console.warn(`${currentEngine} TTS (role: ${role}) failed, falling back: ${msg}`);
+    lastTTSError = `${currentEngine} failed for ${role}: ${msg}`;
+
+    if (currentEngine === "browser") throw err;
+
+    try {
       const profile = voiceMap?.get(role) || getVoiceForRole(role);
-      return speakBrowser(text, {
+      await speakBrowser(text, {
         pitch: profile.pitch,
         rate: profile.rate,
         voiceName: profile.voiceName,
       });
+    } catch {
+      throw err;
     }
   }
 }
