@@ -678,6 +678,8 @@ async function getLocalVoices(): Promise<LocalVoice[]> {
 export function clearVoxtralVoicesCache(): void {
   localVoicesCache = null;
   localVoicesFetchPromise = null;
+  // Also clear the per-role audio cache
+  refAudioByGroup = {};
 }
 
 /**
@@ -716,17 +718,37 @@ function roleToGroup(role: string): number {
 }
 
 /**
+ * Per-role audio cache. Avoids re-reading from IndexedDB on every TTS call.
+ * Keyed by role group index. Cleared when voices change.
+ */
+let refAudioByGroup: Record<number, string> = {};
+
+/**
  * Get the ref_audio base64 string for a Masonic role.
  * Distributes available local voices across role groups round-robin.
+ * Caches per-group to avoid redundant IndexedDB reads.
  * Returns undefined if no local voices are recorded.
  */
 async function getRefAudioForRole(role: string): Promise<string | undefined> {
+  const group = roleToGroup(role);
+  const groupKey = group >= 0 ? group : 0;
+
+  // Return cached audio if available
+  if (refAudioByGroup[groupKey]) return refAudioByGroup[groupKey];
+
   const voices = await getLocalVoices();
   if (voices.length === 0) return undefined;
 
-  const group = roleToGroup(role);
-  const idx = group >= 0 ? group % voices.length : 0;
-  return voices[idx].audioBase64;
+  const idx = groupKey % voices.length;
+  const audio = voices[idx].audioBase64;
+  refAudioByGroup[groupKey] = audio;
+  return audio;
+}
+
+/** Check if any local voices exist (for pre-flight UI checks). */
+export async function hasLocalVoices(): Promise<boolean> {
+  const voices = await getLocalVoices();
+  return voices.length > 0;
 }
 
 /** Speak text using Voxtral TTS (with retry for transient errors). */

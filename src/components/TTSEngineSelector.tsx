@@ -7,7 +7,7 @@ import {
   stopSpeaking,
   type TTSEngineName,
 } from "@/lib/text-to-speech";
-import { fetchEngineAvailability } from "@/lib/tts-cloud";
+import { fetchEngineAvailability, hasLocalVoices } from "@/lib/tts-cloud";
 
 interface EngineOption {
   value: TTSEngineName;
@@ -64,6 +64,7 @@ export default function TTSEngineSelector() {
     voxtral: boolean;
   }>({ elevenlabs: false, google: false, deepgram: false, kokoro: false, voxtral: false });
   const [loaded, setLoaded] = useState(false);
+  const [voxtralWarning, setVoxtralWarning] = useState(false);
 
   // Load current engine + check server availability
   useEffect(() => {
@@ -75,9 +76,18 @@ export default function TTSEngineSelector() {
   }, []);
 
   const handleChange = useCallback(
-    (e: React.ChangeEvent<HTMLSelectElement>) => {
+    async (e: React.ChangeEvent<HTMLSelectElement>) => {
       const engine = e.target.value as TTSEngineName;
       stopSpeaking();
+
+      // Warn if selecting Voxtral without recorded voices
+      if (engine === "voxtral") {
+        const hasVoices = await hasLocalVoices();
+        setVoxtralWarning(!hasVoices);
+      } else {
+        setVoxtralWarning(false);
+      }
+
       setTTSEngine(engine);
       setSelected(engine);
     },
@@ -137,6 +147,14 @@ export default function TTSEngineSelector() {
           );
         })}
       </select>
+      {voxtralWarning && (
+        <a
+          href="/voices"
+          className="text-amber-400 text-xs hover:text-amber-300 transition-colors whitespace-nowrap"
+        >
+          Record a voice first
+        </a>
+      )}
     </div>
   );
 }

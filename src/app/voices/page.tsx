@@ -7,6 +7,7 @@ import {
   deleteVoice,
   type LocalVoice,
 } from "@/lib/voice-storage";
+import { clearVoxtralVoicesCache } from "@/lib/tts-cloud";
 
 // ============================================================
 // Types
@@ -128,8 +129,14 @@ export default function VoicesPage() {
       setDuration(0);
       setRecordingState("recording");
 
+      // Auto-stop at 15 seconds to keep file size reasonable for ref_audio
+      const MAX_DURATION_MS = 15000;
       timerRef.current = setInterval(() => {
-        setDuration(Math.floor((Date.now() - startTimeRef.current) / 1000));
+        const elapsed = Date.now() - startTimeRef.current;
+        setDuration(Math.floor(elapsed / 1000));
+        if (elapsed >= MAX_DURATION_MS) {
+          stopRecording();
+        }
       }, 200);
     } catch (err) {
       setError(
@@ -258,6 +265,7 @@ export default function VoicesPage() {
       };
 
       await saveVoice(voice);
+      clearVoxtralVoicesCache();
 
       setSuccess(
         `Voice "${voice.name}" saved! It will be used when you select Voxtral for TTS.`
@@ -279,6 +287,7 @@ export default function VoicesPage() {
     if (!confirm(`Delete voice "${name}"?`)) return;
     try {
       await deleteVoice(id);
+      clearVoxtralVoicesCache();
       fetchVoices();
     } catch {
       setError("Failed to delete voice");
