@@ -20,7 +20,7 @@ export default function HomePage() {
   return (
     <div className="space-y-8">
       {/* Hero */}
-      <div className="text-center py-6 md:py-20">
+      <div className="text-center py-6 md:py-20 animate-fade-up">
         <div className="hidden md:flex w-20 h-20 mx-auto rounded-2xl bg-amber-500/10 border border-amber-500/20 items-center justify-center mb-6">
           <svg className="w-10 h-10 text-amber-500" viewBox="0 0 24 24" fill="currentColor">
             <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
@@ -38,7 +38,7 @@ export default function HomePage() {
       {/* Primary Action */}
       <Link
         href="/upload"
-        className="group block bg-zinc-900 rounded-xl border border-zinc-800 hover:border-amber-500/50 p-6 md:p-8 transition-all"
+        className="group block bg-zinc-900 rounded-xl border border-zinc-800 hover:border-amber-500/50 p-6 md:p-8 transition-all animate-fade-up-delay-1"
       >
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
@@ -57,7 +57,7 @@ export default function HomePage() {
       </Link>
 
       {/* Secondary Actions */}
-      <div className="grid grid-cols-2 gap-3 md:gap-4">
+      <div className="grid grid-cols-2 gap-3 md:gap-4 animate-fade-up-delay-2">
         <Link
           href="/practice"
           className={`group flex flex-col md:flex-row items-start gap-2 md:gap-4 bg-zinc-900 rounded-xl border border-zinc-800 hover:border-amber-500/50 p-4 md:p-6 transition-all ${
