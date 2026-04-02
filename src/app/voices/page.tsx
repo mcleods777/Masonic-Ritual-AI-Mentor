@@ -182,11 +182,16 @@ export default function VoicesPage() {
     setRecordingState("uploading");
 
     try {
-      // Convert blob to base64
-      const arrayBuffer = await audioBlob.arrayBuffer();
-      const base64 = btoa(
-        String.fromCharCode(...new Uint8Array(arrayBuffer))
-      );
+      // Convert blob to base64 (chunk-safe for large recordings)
+      const base64 = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          // result is "data:<mime>;base64,<data>" — strip the prefix
+          const dataUrl = reader.result as string;
+          resolve(dataUrl.split(",")[1]);
+        };
+        reader.readAsDataURL(audioBlob);
+      });
 
       const resp = await fetch("/api/tts/voxtral/voices", {
         method: "POST",
