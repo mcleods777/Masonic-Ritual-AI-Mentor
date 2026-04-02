@@ -639,63 +639,102 @@ export async function speakKokoroAsRole(
 // ============================================================
 
 /**
- * Voxtral preset voice IDs for Masonic officer roles.
- * Uses the 5 English preset voices distributed across roles.
+ * Voxtral voice management.
+ *
+ * The Mistral cloud API requires either a voice_id (UUID from the Voices API)
+ * or ref_audio (base64 audio for one-off cloning). Preset names like
+ * "casual_male" only work with self-hosted vLLM deployments.
+ *
+ * On first use we fetch saved voice profiles from /api/tts/voxtral/voices
+ * and cache them. Each Masonic role is assigned to a voice by name pattern
+ * matching, with round-robin distribution when fewer voices exist than roles.
  */
-const VOXTRAL_ROLE_VOICES: Record<string, string> = {
-  // Principal officers — authoritative male voices
-  WM:       "neutral_male",      // Neutral — commanding, authoritative
-  "W.M.":   "neutral_male",
-  "W. M.":  "neutral_male",
-  SW:       "casual_male",       // Casual — warm, steady
-  "S.W.":   "casual_male",
-  "S. W.":  "casual_male",
-  JW:       "neutral_male",      // Neutral — clear
-  "J.W.":   "neutral_male",
-  "J. W.":  "neutral_male",
-  // Deacons
-  SD:       "casual_male",
-  "S.D.":   "casual_male",
-  "S. D.":  "casual_male",
-  JD:       "neutral_male",
-  "J.D.":   "neutral_male",
-  "J. D.":  "neutral_male",
-  "S(orJ)D":"casual_male",
-  "S/J D":  "casual_male",
-  // Other officers
-  "S/Sec":  "neutral_male",
-  Sec:      "neutral_male",
-  "Sec.":   "neutral_male",
-  S:        "neutral_male",
-  Tr:       "casual_male",
-  Treas:    "casual_male",
-  "Treas.": "casual_male",
-  Ch:       "neutral_male",
-  Chap:     "neutral_male",
-  "Chap.":  "neutral_male",
-  Marshal:  "casual_male",
-  T:        "casual_male",
-  Tyler:    "casual_male",
-  Candidate:"casual_male",
-  ALL:      "neutral_male",
-  All:      "neutral_male",
-  BR:       "casual_male",
-  Bro:      "casual_male",
-  "Bro.":   "casual_male",
-  "SW/WM":  "neutral_male",
-  Trs:      "casual_male",
-  "WM/Chaplain":"neutral_male",
-  Voucher:  "casual_male",
-  Vchr:     "casual_male",
-  Narrator: "neutral_male",
-  PRAYER:   "neutral_male",
-  Prayer:   "neutral_male",
-};
 
-const VOXTRAL_DEFAULT_VOICE = "casual_male";
+interface VoxtralVoice {
+  id: string;
+  name: string;
+  gender?: string;
+}
 
-export function getVoxtralVoiceForRole(role: string): string {
-  return VOXTRAL_ROLE_VOICES[role] || VOXTRAL_DEFAULT_VOICE;
+/** Cached voice profiles — fetched once per session. */
+let voxtralVoicesCache: VoxtralVoice[] | null = null;
+let voxtralVoicesFetchPromise: Promise<VoxtralVoice[]> | null = null;
+
+/** Fetch and cache Voxtral voice profiles from the server. */
+async function getVoxtralVoices(): Promise<VoxtralVoice[]> {
+  if (voxtralVoicesCache) return voxtralVoicesCache;
+  if (voxtralVoicesFetchPromise) return voxtralVoicesFetchPromise;
+
+  voxtralVoicesFetchPromise = (async () => {
+    try {
+      const resp = await fetch("/api/tts/voxtral/voices");
+      if (!resp.ok) return [];
+      const data = (await resp.json()) as { voices: VoxtralVoice[] };
+      voxtralVoicesCache = data.voices || [];
+      return voxtralVoicesCache;
+    } catch {
+      return [];
+    } finally {
+      voxtralVoicesFetchPromise = null;
+    }
+  })();
+
+  return voxtralVoicesFetchPromise;
+}
+
+/** Clear the voices cache (e.g. after creating new voices). */
+export function clearVoxtralVoicesCache(): void {
+  voxtralVoicesCache = null;
+  voxtralVoicesFetchPromise = null;
+}
+
+/**
+ * Role groupings for voice assignment. Roles in the same group share a voice.
+ * Groups are ordered by priority — earlier groups get voice assignment first.
+ */
+const VOXTRAL_ROLE_GROUPS: string[][] = [
+  // Group 0: Worshipful Master
+  ["WM", "W.M.", "W. M.", "ALL", "All", "SW/WM", "WM/Chaplain"],
+  // Group 1: Senior Warden
+  ["SW", "S.W.", "S. W."],
+  // Group 2: Junior Warden
+  ["JW", "J.W.", "J. W."],
+  // Group 3: Senior Deacon
+  ["SD", "S.D.", "S. D.", "S(orJ)D", "S/J D"],
+  // Group 4: Junior Deacon
+  ["JD", "J.D.", "J. D."],
+  // Group 5: Secretary
+  ["S/Sec", "Sec", "Sec.", "S"],
+  // Group 6: Chaplain / Prayer
+  ["Ch", "Chap", "Chap.", "PRAYER", "Prayer"],
+  // Group 7: Treasurer
+  ["Tr", "Treas", "Treas.", "Trs"],
+  // Group 8: Marshal / Tyler
+  ["Marshal", "T", "Tyler"],
+  // Group 9: Candidate / Brother / Narrator
+  ["Candidate", "BR", "Bro", "Bro.", "Voucher", "Vchr", "Narrator"],
+];
+
+/** Map a role to a group index (0-9). Returns -1 if not found. */
+function roleToGroup(role: string): number {
+  for (let i = 0; i < VOXTRAL_ROLE_GROUPS.length; i++) {
+    if (VOXTRAL_ROLE_GROUPS[i].includes(role)) return i;
+  }
+  return -1;
+}
+
+/**
+ * Get the voice UUID for a Masonic role.
+ * Distributes available voices across role groups round-robin style.
+ * Returns undefined if no voices are available.
+ */
+async function getVoxtralVoiceForRole(role: string): Promise<string | undefined> {
+  const voices = await getVoxtralVoices();
+  if (voices.length === 0) return undefined;
+
+  const group = roleToGroup(role);
+  const idx = group >= 0 ? group % voices.length : 0;
+  return voices[idx].id;
 }
 
 /** Speak text using Voxtral TTS (with retry for transient errors). */
@@ -717,7 +756,9 @@ export async function speakVoxtral(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text,
-          voiceId: voiceId || VOXTRAL_DEFAULT_VOICE,
+          // Pass voiceId only if we have one — the server will attempt
+          // to find a saved voice if neither voiceId nor refAudio is set
+          ...(voiceId ? { voiceId } : {}),
         }),
         signal,
       });
@@ -759,7 +800,8 @@ export async function speakVoxtralAsRole(
   text: string,
   role: string
 ): Promise<void> {
-  return speakVoxtral(text, getVoxtralVoiceForRole(role));
+  const voiceId = await getVoxtralVoiceForRole(role);
+  return speakVoxtral(text, voiceId);
 }
 
 // ============================================================

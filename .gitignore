@@ -41,3 +41,11 @@ next-env.d.ts
 
 # encrypted ritual files (lodge-specific, should not be committed)
 *.mram
+
+# gstack build artifacts
+.claude/skills/gstack/node_modules/
+.claude/skills/gstack/browse/dist/
+.claude/skills/gstack/design/dist/
+.claude/skills/gstack/bin/gstack-global-discover
+.claude/skills/gstack/.agents/
+.claude/skills/gstack/.factory/
