@@ -6,40 +6,69 @@ import { NextResponse } from "next/server";
  * POST /api/tts/voxtral/setup
  *
  * Bootstraps Voxtral voice profiles by generating short audio clips from
- * ElevenLabs (which has 10 distinct male voices already configured) and
- * uploading them to Mistral's Voices API. This gives Voxtral the same
- * voice differentiation as ElevenLabs at half the cost.
+ * Deepgram Aura-2 (7 distinct male voices) and uploading them to Mistral's
+ * Voices API. This gives Voxtral distinct officer voices at half the cost
+ * of ElevenLabs.
  *
+ * Falls back to ElevenLabs if Deepgram is not configured.
  * Idempotent — skips voices that already exist (by name match).
  */
 
-/** The 10 distinct ElevenLabs voices used for Masonic officers. */
+/** Voice configs using Deepgram Aura-2 models for sample generation. */
 const VOICE_CONFIGS = [
-  { name: "masonic-wm",        elevenLabsId: "pNInz6obpgDQGcFmaJgB", description: "Adam — dominant, firm (Worshipful Master)" },
-  { name: "masonic-sw",        elevenLabsId: "nPczCjzI2devNBz1zQrb", description: "Brian — deep, resonant (Senior Warden)" },
-  { name: "masonic-jw",        elevenLabsId: "JBFqnCBsd6RMkjVDRZzb", description: "George — warm, British (Junior Warden)" },
-  { name: "masonic-sd",        elevenLabsId: "cjVigY5qzO86Huf0OWal", description: "Eric — smooth, trustworthy (Senior Deacon)" },
-  { name: "masonic-jd",        elevenLabsId: "iP95p4xoKVk53GoZ742B", description: "Chris — charming (Junior Deacon)" },
+  { name: "masonic-wm",        deepgramModel: "aura-2-zeus-en",    description: "Zeus — commanding, deep (Worshipful Master)" },
+  { name: "masonic-sw",        deepgramModel: "aura-2-orion-en",   description: "Orion — clear, steady (Senior Warden)" },
+  { name: "masonic-jw",        deepgramModel: "aura-2-arcas-en",   description: "Arcas — measured (Junior Warden)" },
+  { name: "masonic-sd",        deepgramModel: "aura-2-orpheus-en", description: "Orpheus — warm (Senior Deacon)" },
+  { name: "masonic-jd",        deepgramModel: "aura-2-perseus-en", description: "Perseus — distinct (Junior Deacon)" },
+  { name: "masonic-chaplain",  deepgramModel: "aura-2-helios-en",  description: "Helios — resonant (Chaplain)" },
+  { name: "masonic-marshal",   deepgramModel: "aura-2-angus-en",   description: "Angus — distinctive (Marshal/Tyler)" },
+];
+
+/** ElevenLabs fallback configs for additional voices (if available). */
+const ELEVENLABS_EXTRA_CONFIGS = [
   { name: "masonic-secretary",  elevenLabsId: "pqHfZKP75CvOlQylNhV4", description: "Bill — wise, mature (Secretary)" },
-  { name: "masonic-chaplain",   elevenLabsId: "onwK4e9ZLuTAKqWW03F9", description: "Daniel — steady (Chaplain)" },
   { name: "masonic-treasurer",  elevenLabsId: "IKne3meq5aSn9XLyUdCD", description: "Charlie — deep, confident (Treasurer)" },
-  { name: "masonic-marshal",    elevenLabsId: "TX3LPaxmHKxFdv7VOQHJ", description: "Liam — energetic (Marshal/Tyler)" },
   { name: "masonic-candidate",  elevenLabsId: "N2lVS1w4EtoT3dr4eOWO", description: "Callum — husky (Candidate/Brother)" },
 ];
 
-/** Short phrases for each voice sample — keeps it natural and distinct. */
+/** Short phrases for each voice sample — ritual-appropriate and distinct. */
 const SAMPLE_PHRASES = [
   "Brethren, the lodge is now open for the transaction of business.",
   "Worshipful Master, the lodge is tyled.",
   "The Junior Warden's station is in the south.",
   "Worshipful Master, the Senior Deacon attends.",
   "The Junior Deacon's place is at the inner door.",
-  "The minutes of the previous communication are as follows.",
   "Let us offer our prayers to the Most High.",
-  "The funds of the lodge are in good order.",
   "The brethren will please be seated.",
-  "I vouch for this brother, that he is worthy.",
+  "The minutes of the previous communication are as follows.",
+  "The funds of the lodge are in good order.",
+  "I vouch for this brother, that he is worthy and well qualified.",
 ];
+
+async function generateDeepgramSample(
+  model: string,
+  text: string,
+  apiKey: string
+): Promise<Buffer> {
+  const response = await fetch(
+    `https://api.deepgram.com/v1/speak?model=${encodeURIComponent(model)}&encoding=mp3`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Token ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ text }),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Deepgram error for ${model}: ${response.status}`);
+  }
+
+  return Buffer.from(await response.arrayBuffer());
+}
 
 async function generateElevenLabsSample(
   voiceId: string,
@@ -117,6 +146,7 @@ async function listMistralVoices(
 
 export async function POST() {
   const mistralKey = process.env.MISTRAL_API_KEY;
+  const deepgramKey = process.env.DEEPGRAM_API_KEY;
   const elevenLabsKey = process.env.ELEVENLABS_API_KEY;
 
   if (!mistralKey) {
@@ -126,9 +156,12 @@ export async function POST() {
     );
   }
 
-  if (!elevenLabsKey) {
+  if (!deepgramKey && !elevenLabsKey) {
     return NextResponse.json(
-      { error: "ELEVENLABS_API_KEY required for voice bootstrapping" },
+      {
+        error:
+          "DEEPGRAM_API_KEY or ELEVENLABS_API_KEY required to generate voice samples for Voxtral setup",
+      },
       { status: 500 }
     );
   }
@@ -141,49 +174,97 @@ export async function POST() {
     name: string;
     status: "created" | "exists" | "error";
     voiceId?: string;
+    source?: string;
     error?: string;
   }> = [];
 
-  for (let i = 0; i < VOICE_CONFIGS.length; i++) {
-    const config = VOICE_CONFIGS[i];
+  // Phase 1: Create voices from Deepgram (primary)
+  if (deepgramKey) {
+    for (let i = 0; i < VOICE_CONFIGS.length; i++) {
+      const config = VOICE_CONFIGS[i];
 
-    // Skip if voice already exists
-    if (existingNames.has(config.name)) {
-      const existing = existingVoices.find((v) => v.name === config.name);
-      results.push({
-        name: config.name,
-        status: "exists",
-        voiceId: existing?.id,
-      });
-      continue;
+      if (existingNames.has(config.name)) {
+        const existing = existingVoices.find((v) => v.name === config.name);
+        results.push({
+          name: config.name,
+          status: "exists",
+          voiceId: existing?.id,
+        });
+        continue;
+      }
+
+      try {
+        const audioBuffer = await generateDeepgramSample(
+          config.deepgramModel,
+          SAMPLE_PHRASES[i],
+          deepgramKey
+        );
+
+        const voice = await createMistralVoice(
+          config.name,
+          audioBuffer,
+          mistralKey
+        );
+
+        results.push({
+          name: config.name,
+          status: "created",
+          voiceId: voice.id,
+          source: "deepgram",
+        });
+      } catch (err) {
+        results.push({
+          name: config.name,
+          status: "error",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
+  }
 
-    try {
-      // Generate audio sample from ElevenLabs
-      const audioBuffer = await generateElevenLabsSample(
-        config.elevenLabsId,
-        SAMPLE_PHRASES[i],
-        elevenLabsKey
-      );
+  // Phase 2: Create extra voices from ElevenLabs (if available)
+  if (elevenLabsKey) {
+    for (let i = 0; i < ELEVENLABS_EXTRA_CONFIGS.length; i++) {
+      const config = ELEVENLABS_EXTRA_CONFIGS[i];
 
-      // Create Mistral voice profile from the sample
-      const voice = await createMistralVoice(
-        config.name,
-        audioBuffer,
-        mistralKey
-      );
+      if (existingNames.has(config.name)) {
+        const existing = existingVoices.find((v) => v.name === config.name);
+        results.push({
+          name: config.name,
+          status: "exists",
+          voiceId: existing?.id,
+        });
+        continue;
+      }
 
-      results.push({
-        name: config.name,
-        status: "created",
-        voiceId: voice.id,
-      });
-    } catch (err) {
-      results.push({
-        name: config.name,
-        status: "error",
-        error: err instanceof Error ? err.message : String(err),
-      });
+      try {
+        const phraseIdx = VOICE_CONFIGS.length + i;
+        const audioBuffer = await generateElevenLabsSample(
+          config.elevenLabsId,
+          SAMPLE_PHRASES[phraseIdx] || SAMPLE_PHRASES[0],
+          elevenLabsKey
+        );
+
+        const voice = await createMistralVoice(
+          config.name,
+          audioBuffer,
+          mistralKey
+        );
+
+        results.push({
+          name: config.name,
+          status: "created",
+          voiceId: voice.id,
+          source: "elevenlabs",
+        });
+      } catch (err) {
+        results.push({
+          name: config.name,
+          status: "error",
+          source: "elevenlabs",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
   }
 
