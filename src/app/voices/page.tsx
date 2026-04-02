@@ -1,19 +1,18 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import {
+  saveVoice,
+  listVoices,
+  deleteVoice,
+  type LocalVoice,
+} from "@/lib/voice-storage";
 
 // ============================================================
 // Types
 // ============================================================
 
-interface VoiceProfile {
-  id: string;
-  name: string;
-  gender?: string;
-  languages?: string[];
-}
-
-type RecordingState = "idle" | "recording" | "recorded" | "uploading";
+type RecordingState = "idle" | "recording" | "recorded" | "saving";
 
 // ============================================================
 // Suggested phrases for recording samples
@@ -34,15 +33,15 @@ const SAMPLE_PHRASES = [
 // ============================================================
 
 export default function VoicesPage() {
-  // Voice profiles from Mistral
-  const [voices, setVoices] = useState<VoiceProfile[]>([]);
+  // Voice profiles from local storage
+  const [voices, setVoices] = useState<LocalVoice[]>([]);
   const [loadingVoices, setLoadingVoices] = useState(true);
-  const [available, setAvailable] = useState(false);
 
   // Recording state
   const [recordingState, setRecordingState] = useState<RecordingState>("idle");
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [mimeType, setMimeType] = useState<string>("audio/webm");
   const [duration, setDuration] = useState(0);
   const [voiceName, setVoiceName] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -57,21 +56,15 @@ export default function VoicesPage() {
   const startTimeRef = useRef<number>(0);
 
   // ============================================================
-  // Load voices + check availability
+  // Load voices from IndexedDB
   // ============================================================
 
   const fetchVoices = useCallback(async () => {
     try {
-      const resp = await fetch("/api/tts/voxtral/voices");
-      if (!resp.ok) {
-        setAvailable(false);
-        return;
-      }
-      setAvailable(true);
-      const data = (await resp.json()) as { voices: VoiceProfile[] };
-      setVoices(data.voices || []);
+      const localVoices = await listVoices();
+      setVoices(localVoices.sort((a, b) => b.createdAt - a.createdAt));
     } catch {
-      setAvailable(false);
+      // IndexedDB not available
     } finally {
       setLoadingVoices(false);
     }
@@ -79,7 +72,6 @@ export default function VoicesPage() {
 
   useEffect(() => {
     fetchVoices();
-    // Pick a random phrase
     setPhraseIdx(Math.floor(Math.random() * SAMPLE_PHRASES.length));
   }, [fetchVoices]);
 
@@ -105,13 +97,14 @@ export default function VoicesPage() {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
-      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+      const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
         ? "audio/webm;codecs=opus"
         : MediaRecorder.isTypeSupported("audio/webm")
           ? "audio/webm"
           : "audio/mp4";
 
-      const recorder = new MediaRecorder(stream, { mimeType });
+      setMimeType(mime);
+      const recorder = new MediaRecorder(stream, { mimeType: mime });
       mediaRecorderRef.current = recorder;
       chunksRef.current = [];
 
@@ -120,23 +113,21 @@ export default function VoicesPage() {
       };
 
       recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: mimeType });
+        const blob = new Blob(chunksRef.current, { type: mime });
         setAudioBlob(blob);
         const url = URL.createObjectURL(blob);
         setAudioUrl(url);
         setRecordingState("recorded");
 
-        // Stop all tracks
         stream.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
       };
 
-      recorder.start(250); // collect data every 250ms
+      recorder.start(250);
       startTimeRef.current = Date.now();
       setDuration(0);
       setRecordingState("recording");
 
-      // Update duration counter
       timerRef.current = setInterval(() => {
         setDuration(Math.floor((Date.now() - startTimeRef.current) / 1000));
       }, 200);
@@ -164,62 +155,67 @@ export default function VoicesPage() {
     setAudioUrl(null);
     setRecordingState("idle");
     setDuration(0);
-    // Pick a new phrase
     setPhraseIdx(Math.floor(Math.random() * SAMPLE_PHRASES.length));
   };
 
   // ============================================================
-  // Upload to Mistral
+  // Save to IndexedDB
   // ============================================================
 
-  const uploadVoice = async () => {
+  const saveVoiceLocally = async () => {
     if (!audioBlob || !voiceName.trim()) {
       setError("Please enter a name for this voice.");
       return;
     }
 
     setError(null);
-    setRecordingState("uploading");
+    setRecordingState("saving");
 
     try {
-      // Convert blob to base64 (chunk-safe for large recordings)
+      // Convert blob to base64 (chunk-safe)
       const base64 = await new Promise<string>((resolve) => {
         const reader = new FileReader();
         reader.onloadend = () => {
-          // result is "data:<mime>;base64,<data>" — strip the prefix
           const dataUrl = reader.result as string;
           resolve(dataUrl.split(",")[1]);
         };
         reader.readAsDataURL(audioBlob);
       });
 
-      const resp = await fetch("/api/tts/voxtral/voices", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: voiceName.trim(),
-          sampleAudio: base64,
-          sampleFilename: "recording.webm",
-          gender: "male",
-          languages: ["en"],
-        }),
-      });
+      const voice: LocalVoice = {
+        id: `voice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        name: voiceName.trim(),
+        audioBase64: base64,
+        mimeType,
+        duration,
+        createdAt: Date.now(),
+      };
 
-      if (!resp.ok) {
-        const data = (await resp.json()) as { error?: string };
-        throw new Error(data.error || `Upload failed: ${resp.status}`);
-      }
+      await saveVoice(voice);
 
-      const data = (await resp.json()) as { voice: VoiceProfile };
       setSuccess(
-        `Voice "${data.voice.name}" created! It will be used for TTS playback.`
+        `Voice "${voice.name}" saved! It will be used when you select Voxtral for TTS.`
       );
       setVoiceName("");
       discardRecording();
-      fetchVoices(); // refresh list
+      fetchVoices();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed");
+      setError(err instanceof Error ? err.message : "Failed to save voice");
       setRecordingState("recorded");
+    }
+  };
+
+  // ============================================================
+  // Delete a voice
+  // ============================================================
+
+  const handleDelete = async (id: string, name: string) => {
+    if (!confirm(`Delete voice "${name}"?`)) return;
+    try {
+      await deleteVoice(id);
+      fetchVoices();
+    } catch {
+      setError("Failed to delete voice");
     }
   };
 
@@ -235,33 +231,16 @@ export default function VoicesPage() {
     );
   }
 
-  if (!available) {
-    return (
-      <div className="space-y-6 py-8">
-        <h1 className="text-3xl font-bold text-zinc-100">Custom Voices</h1>
-        <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-6">
-          <p className="text-zinc-400">
-            Voxtral (Mistral) is not configured. Add{" "}
-            <code className="text-amber-400 bg-zinc-800 px-1.5 py-0.5 rounded text-sm">
-              MISTRAL_API_KEY
-            </code>{" "}
-            to your environment variables to enable custom voice profiles.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-8 py-8">
       {/* Header */}
       <div>
         <h1 className="text-3xl font-bold text-zinc-100">Custom Voices</h1>
         <p className="text-zinc-400 mt-2">
-          Record your voice (or a brother&apos;s) to create custom Voxtral voice
-          profiles. Each profile needs just 5-10 seconds of audio. The more
-          voices you add, the more distinct each officer will sound during
-          rehearsal.
+          Record your voice (or a brother&apos;s) to create custom voice
+          profiles for Voxtral TTS. Each recording needs just 3-10 seconds.
+          Recordings stay on your device and are sent with each TTS request
+          for real-time voice cloning.
         </p>
       </div>
 
@@ -301,6 +280,14 @@ export default function VoicesPage() {
           </button>
         </div>
 
+        {/* Tips */}
+        <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3">
+          <p className="text-xs text-amber-400/80">
+            <strong>Tips:</strong> 3-5 seconds is ideal (smaller file = faster TTS).
+            Speak in the tone you want for rehearsal. A quiet room helps cloning quality.
+          </p>
+        </div>
+
         {/* Recording UI */}
         <div className="flex flex-col items-center gap-4">
           {/* Duration / Status */}
@@ -312,7 +299,7 @@ export default function VoicesPage() {
                   {duration}s
                 </span>
                 <span className="text-sm text-zinc-500">
-                  (aim for 5-10 seconds)
+                  (aim for 3-10 seconds)
                 </span>
               </div>
             )}
@@ -321,10 +308,10 @@ export default function VoicesPage() {
                 Recorded {duration} seconds
               </p>
             )}
-            {recordingState === "uploading" && (
+            {recordingState === "saving" && (
               <div className="flex items-center gap-2 text-amber-400">
                 <div className="w-4 h-4 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
-                <span>Creating voice profile...</span>
+                <span>Saving voice...</span>
               </div>
             )}
           </div>
@@ -365,14 +352,12 @@ export default function VoicesPage() {
             )}
 
             {recordingState === "recorded" && (
-              <>
-                <button
-                  onClick={discardRecording}
-                  className="px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-sm font-medium transition-colors"
-                >
-                  Re-record
-                </button>
-              </>
+              <button
+                onClick={discardRecording}
+                className="px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-sm font-medium transition-colors"
+              >
+                Re-record
+              </button>
             )}
           </div>
 
@@ -406,7 +391,7 @@ export default function VoicesPage() {
               </p>
             </div>
             <button
-              onClick={uploadVoice}
+              onClick={saveVoiceLocally}
               disabled={!voiceName.trim()}
               className="w-full px-6 py-3 bg-amber-600 hover:bg-amber-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white rounded-xl font-medium transition-colors"
             >
@@ -427,8 +412,8 @@ export default function VoicesPage() {
 
         {voices.length === 0 ? (
           <p className="text-zinc-500 text-sm">
-            No voice profiles yet. Record a sample above, or run the auto-setup
-            to bootstrap voices from Deepgram.
+            No voice profiles yet. Record a sample above to get started.
+            Your recordings are stored locally on this device.
           </p>
         ) : (
           <div className="space-y-2">
@@ -437,17 +422,39 @@ export default function VoicesPage() {
                 key={voice.id}
                 className="flex items-center justify-between px-4 py-3 bg-zinc-800/50 rounded-lg"
               >
-                <div>
-                  <p className="text-zinc-200 font-medium">{voice.name}</p>
+                <div className="min-w-0 flex-1">
+                  <p className="text-zinc-200 font-medium truncate">
+                    {voice.name}
+                  </p>
                   <p className="text-xs text-zinc-500">
-                    {voice.gender || "male"} &middot;{" "}
-                    {voice.languages?.join(", ") || "en"} &middot;{" "}
-                    <span className="font-mono text-zinc-600">
-                      {voice.id.slice(0, 8)}...
-                    </span>
+                    {voice.duration}s &middot;{" "}
+                    {new Date(voice.createdAt).toLocaleDateString()}
+                    {voice.role && (
+                      <span className="ml-1 text-amber-500/70">
+                        &middot; {voice.role}
+                      </span>
+                    )}
                   </p>
                 </div>
-                <div className="w-2 h-2 rounded-full bg-green-500/60" />
+                <button
+                  onClick={() => handleDelete(voice.id, voice.name)}
+                  className="ml-3 p-1.5 text-zinc-600 hover:text-red-400 transition-colors flex-shrink-0"
+                  title="Delete voice"
+                >
+                  <svg
+                    className="w-4 h-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                    />
+                  </svg>
+                </button>
               </div>
             ))}
           </div>
@@ -455,10 +462,42 @@ export default function VoicesPage() {
 
         {voices.length > 0 && (
           <p className="text-xs text-zinc-500 mt-4">
-            These voices are automatically distributed across officer roles
-            during rehearsal. More voices = more distinct officers.
+            Voices are distributed across officer roles during rehearsal when
+            Voxtral is selected as the TTS engine. More voices = more distinct
+            officers. Recordings stay on this device.
           </p>
         )}
+      </div>
+
+      {/* Privacy note */}
+      <div className="bg-zinc-900/50 rounded-xl border border-zinc-800 p-4">
+        <div className="flex items-start gap-3">
+          <div className="w-8 h-8 rounded-lg bg-green-500/10 flex-shrink-0 flex items-center justify-center">
+            <svg
+              className="w-4 h-4 text-green-500"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+              />
+            </svg>
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-zinc-200">
+              Local Storage
+            </h3>
+            <p className="text-xs text-zinc-500 mt-1">
+              Voice recordings are stored in your browser&apos;s IndexedDB. They
+              are only sent to Mistral&apos;s API when generating speech during
+              rehearsal. No voice data is permanently stored on any server.
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error:
-            "No Voxtral voice configured. Create voices at /api/tts/voxtral/voices or provide a voiceId.",
+            "No voice configured. Record a voice sample on the Voices page, or upgrade to Mistral paid plan for saved voice profiles.",
           code: "NO_VOICES",
         },
         { status: 422 }
