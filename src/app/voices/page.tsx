@@ -649,70 +649,78 @@ export default function VoicesPage() {
             {voices.map((voice) => (
               <div
                 key={voice.id}
-                className="flex items-center justify-between px-4 py-3 bg-zinc-800/50 rounded-lg"
+                className="bg-zinc-800/50 rounded-lg p-4 space-y-3"
               >
-                <div className="min-w-0 flex-1">
-                  <p className="text-zinc-200 font-medium truncate">
-                    {voice.name}
-                  </p>
-                  <p className="text-xs text-zinc-500">
-                    {voice.duration}s &middot;{" "}
-                    {new Date(voice.createdAt).toLocaleDateString()}
-                  </p>
-                </div>
-                <select
-                  value={voice.role || ""}
-                  onChange={async (e) => {
-                    const role = e.target.value || undefined;
-                    await assignVoiceRole(voice.id, role);
-                    clearVoxtralVoicesCache();
-                    fetchVoices();
-                  }}
-                  className="px-2 py-1 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-300 text-xs focus:outline-none focus:border-amber-500 cursor-pointer"
-                >
-                  {VOXTRAL_ROLE_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  onClick={() => testVoice(voice)}
-                  disabled={testingVoiceId !== null}
-                  className="ml-2 p-1.5 text-zinc-600 hover:text-amber-400 disabled:text-zinc-700 transition-colors flex-shrink-0"
-                  title="Test voice"
-                >
-                  {testingVoiceId === voice.id ? (
-                    <div className="w-4 h-4 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <svg
-                      className="w-4 h-4"
-                      fill="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path d="M8 5v14l11-7z" />
-                    </svg>
-                  )}
-                </button>
-                <button
-                  onClick={() => handleDelete(voice.id, voice.name)}
-                  className="ml-1 p-1.5 text-zinc-600 hover:text-red-400 transition-colors flex-shrink-0"
-                  title="Delete voice"
-                >
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
+                {/* Top row: name + delete */}
+                <div className="flex items-center justify-between">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-zinc-200 font-medium truncate">
+                      {voice.name}
+                    </p>
+                    <p className="text-xs text-zinc-500">
+                      {voice.duration}s &middot;{" "}
+                      {new Date(voice.createdAt).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => handleDelete(voice.id, voice.name)}
+                    className="ml-3 p-2 text-zinc-600 hover:text-red-400 transition-colors flex-shrink-0"
+                    title="Delete voice"
                   >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                    />
-                  </svg>
-                </button>
+                    <svg
+                      className="w-5 h-5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                      />
+                    </svg>
+                  </button>
+                </div>
+
+                {/* Bottom row: role dropdown + play button */}
+                <div className="flex items-center gap-2">
+                  <select
+                    value={voice.role || ""}
+                    onChange={async (e) => {
+                      const role = e.target.value || undefined;
+                      await assignVoiceRole(voice.id, role);
+                      clearVoxtralVoicesCache();
+                      fetchVoices();
+                    }}
+                    className="flex-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-300 text-sm focus:outline-none focus:border-amber-500 cursor-pointer"
+                  >
+                    {VOXTRAL_ROLE_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => testVoice(voice)}
+                    disabled={testingVoiceId !== null}
+                    className="flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white rounded-lg text-sm font-medium transition-colors flex-shrink-0"
+                    title="Preview this voice"
+                  >
+                    {testingVoiceId === voice.id ? (
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <svg
+                        className="w-4 h-4"
+                        fill="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path d="M8 5v14l11-7z" />
+                      </svg>
+                    )}
+                    {testingVoiceId === voice.id ? "Playing..." : "Test"}
+                  </button>
+                </div>
               </div>
             ))}
           </div>
