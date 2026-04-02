@@ -39,8 +39,7 @@ export default function Navigation() {
                   key={item.href}
                   href={item.href}
                   className={`
-                    flex flex-col md:flex-row items-center gap-1 md:gap-2 px-3 py-3 rounded-lg transition-colors
-                    ${item.desktopOnly ? "hidden md:flex" : ""}
+                    ${item.desktopOnly ? "hidden md:flex" : "flex"} flex-col md:flex-row items-center gap-1 md:gap-2 px-3 py-3 rounded-lg transition-colors
                     ${
                       isActive
                         ? "text-amber-400 bg-amber-500/10"
