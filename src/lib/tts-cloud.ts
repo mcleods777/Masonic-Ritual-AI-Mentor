@@ -723,11 +723,26 @@ function roleToGroup(role: string): number {
  */
 let refAudioByGroup: Record<number, string> = {};
 
+/** Human-readable role labels for the voice assignment UI. */
+export const VOXTRAL_ROLE_OPTIONS = [
+  { value: "", label: "Auto (round-robin)" },
+  { value: "WM", label: "Worshipful Master" },
+  { value: "SW", label: "Senior Warden" },
+  { value: "JW", label: "Junior Warden" },
+  { value: "SD", label: "Senior Deacon" },
+  { value: "JD", label: "Junior Deacon" },
+  { value: "Sec", label: "Secretary" },
+  { value: "Chap", label: "Chaplain" },
+  { value: "Treas", label: "Treasurer" },
+  { value: "Marshal", label: "Marshal / Tyler" },
+  { value: "Candidate", label: "Candidate / Brother" },
+];
+
 /**
  * Get the ref_audio base64 string for a Masonic role.
- * Distributes available local voices across role groups round-robin.
+ * First checks for voices with explicit role assignments, then falls back
+ * to round-robin distribution of unassigned voices.
  * Caches per-group to avoid redundant IndexedDB reads.
- * Returns undefined if no local voices are recorded.
  */
 async function getRefAudioForRole(role: string): Promise<string | undefined> {
   const group = roleToGroup(role);
@@ -739,8 +754,22 @@ async function getRefAudioForRole(role: string): Promise<string | undefined> {
   const voices = await getLocalVoices();
   if (voices.length === 0) return undefined;
 
-  const idx = groupKey % voices.length;
-  const audio = voices[idx].audioBase64;
+  // First: check for a voice explicitly assigned to this role group
+  const rolesInGroup = group >= 0 ? VOXTRAL_ROLE_GROUPS[group] : [];
+  const assigned = voices.find(
+    (v) => v.role && rolesInGroup.includes(v.role)
+  );
+
+  if (assigned) {
+    refAudioByGroup[groupKey] = assigned.audioBase64;
+    return assigned.audioBase64;
+  }
+
+  // Fallback: round-robin from unassigned voices (or all if none unassigned)
+  const unassigned = voices.filter((v) => !v.role);
+  const pool = unassigned.length > 0 ? unassigned : voices;
+  const idx = groupKey % pool.length;
+  const audio = pool[idx].audioBase64;
   refAudioByGroup[groupKey] = audio;
   return audio;
 }

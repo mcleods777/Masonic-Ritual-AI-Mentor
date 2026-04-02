@@ -5,9 +5,10 @@ import {
   saveVoice,
   listVoices,
   deleteVoice,
+  assignVoiceRole,
   type LocalVoice,
 } from "@/lib/voice-storage";
-import { clearVoxtralVoicesCache } from "@/lib/tts-cloud";
+import { clearVoxtralVoicesCache, VOXTRAL_ROLE_OPTIONS } from "@/lib/tts-cloud";
 
 // ============================================================
 // Types
@@ -45,9 +46,11 @@ export default function VoicesPage() {
   const [mimeType, setMimeType] = useState<string>("audio/webm");
   const [duration, setDuration] = useState(0);
   const [voiceName, setVoiceName] = useState("");
+  const [voiceRole, setVoiceRole] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [phraseIdx, setPhraseIdx] = useState(0);
+  const [micLevel, setMicLevel] = useState(0);
 
   // Refs
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -55,6 +58,8 @@ export default function VoicesPage() {
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startTimeRef = useRef<number>(0);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animFrameRef = useRef<number>(0);
 
   // ============================================================
   // Load voices from IndexedDB
@@ -84,8 +89,44 @@ export default function VoicesPage() {
       }
       if (audioUrl) URL.revokeObjectURL(audioUrl);
       if (timerRef.current) clearInterval(timerRef.current);
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
   }, [audioUrl]);
+
+  // Mic level monitoring via AnalyserNode
+  const startMicMonitor = (stream: MediaStream) => {
+    try {
+      const ctx = new AudioContext();
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      const tick = () => {
+        analyser.getByteFrequencyData(dataArray);
+        // RMS level normalized to 0-1
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i] * dataArray[i];
+        const rms = Math.sqrt(sum / dataArray.length) / 255;
+        setMicLevel(rms);
+        animFrameRef.current = requestAnimationFrame(tick);
+      };
+      tick();
+    } catch {
+      // AudioContext not available, skip level monitoring
+    }
+  };
+
+  const stopMicMonitor = () => {
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = 0;
+    }
+    setMicLevel(0);
+    analyserRef.current = null;
+  };
 
   // ============================================================
   // Recording controls
@@ -125,6 +166,7 @@ export default function VoicesPage() {
       };
 
       recorder.start(250);
+      startMicMonitor(stream);
       startTimeRef.current = Date.now();
       setDuration(0);
       setRecordingState("recording");
@@ -153,6 +195,7 @@ export default function VoicesPage() {
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
+    stopMicMonitor();
     setDuration(Math.floor((Date.now() - startTimeRef.current) / 1000));
     mediaRecorderRef.current?.stop();
   };
@@ -180,8 +223,9 @@ export default function VoicesPage() {
       const arrayBuffer = await blob.arrayBuffer();
       const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
 
-      // Get mono channel (first channel)
-      const channelData = audioBuffer.getChannelData(0);
+      // Get mono channel (first channel) and normalize to -3dB peak
+      const rawData = audioBuffer.getChannelData(0);
+      const channelData = normalizeAudio(rawData, -3);
 
       // Build WAV file
       const wavBuffer = encodeWav(channelData, 16000);
@@ -196,6 +240,24 @@ export default function VoicesPage() {
     } finally {
       await audioContext.close();
     }
+  };
+
+  /** Encode raw PCM samples into a WAV file ArrayBuffer. */
+  /** Peak-normalize audio to a target dB level (e.g. -3dB). */
+  const normalizeAudio = (samples: Float32Array, targetDb: number): Float32Array => {
+    let peak = 0;
+    for (let i = 0; i < samples.length; i++) {
+      const abs = Math.abs(samples[i]);
+      if (abs > peak) peak = abs;
+    }
+    if (peak === 0) return samples; // silence
+    const targetPeak = Math.pow(10, targetDb / 20); // -3dB ≈ 0.708
+    const gain = targetPeak / peak;
+    const normalized = new Float32Array(samples.length);
+    for (let i = 0; i < samples.length; i++) {
+      normalized[i] = samples[i] * gain;
+    }
+    return normalized;
   };
 
   /** Encode raw PCM samples into a WAV file ArrayBuffer. */
@@ -262,6 +324,7 @@ export default function VoicesPage() {
         audioBase64: wavBase64,
         mimeType: "audio/wav",
         duration,
+        role: voiceRole || undefined,
         createdAt: Date.now(),
       };
 
@@ -272,6 +335,7 @@ export default function VoicesPage() {
         `Voice "${voice.name}" saved! It will be used when you select Voxtral for TTS.`
       );
       setVoiceName("");
+      setVoiceRole("");
       discardRecording();
       fetchVoices();
     } catch (err) {
@@ -369,14 +433,36 @@ export default function VoicesPage() {
           {/* Duration / Status */}
           <div className="text-center">
             {recordingState === "recording" && (
-              <div className="flex items-center gap-2 text-red-400">
-                <span className="w-3 h-3 bg-red-500 rounded-full animate-pulse" />
-                <span className="text-2xl font-mono tabular-nums">
-                  {duration}s
-                </span>
-                <span className="text-sm text-zinc-500">
-                  (aim for 3-10 seconds)
-                </span>
+              <div className="flex flex-col items-center gap-2">
+                <div className="flex items-center gap-2 text-red-400">
+                  <span className="w-3 h-3 bg-red-500 rounded-full animate-pulse" />
+                  <span className="text-2xl font-mono tabular-nums">
+                    {duration}s
+                  </span>
+                  <span className="text-sm text-zinc-500">
+                    (aim for 3-10 seconds)
+                  </span>
+                </div>
+                {/* Mic level bar */}
+                <div className="w-48 h-2 bg-zinc-700 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-75 ${
+                      micLevel > 0.7
+                        ? "bg-red-500"
+                        : micLevel > 0.3
+                          ? "bg-amber-500"
+                          : "bg-green-500"
+                    }`}
+                    style={{ width: `${Math.min(micLevel * 100, 100)}%` }}
+                  />
+                </div>
+                <p className="text-xs text-zinc-600">
+                  {micLevel > 0.7
+                    ? "Too loud — move back from mic"
+                    : micLevel < 0.05
+                      ? "No audio detected"
+                      : "Level looks good"}
+                </p>
               </div>
             )}
             {recordingState === "recorded" && (
@@ -463,8 +549,27 @@ export default function VoicesPage() {
               />
               <p className="text-xs text-zinc-500 mt-1.5">
                 Tip: include the officer role so you can tell voices apart
-                (e.g. &ldquo;John - Senior Warden&rdquo;)
               </p>
+            </div>
+            <div>
+              <label
+                htmlFor="voice-role"
+                className="block text-sm font-medium text-zinc-300 mb-1.5"
+              >
+                Assign to Officer Role
+              </label>
+              <select
+                id="voice-role"
+                value={voiceRole}
+                onChange={(e) => setVoiceRole(e.target.value)}
+                className="w-full px-4 py-2.5 bg-zinc-800 border border-zinc-700 rounded-xl text-zinc-200 focus:outline-none focus:border-amber-500 cursor-pointer"
+              >
+                {VOXTRAL_ROLE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
             </div>
             <button
               onClick={saveVoiceLocally}
@@ -505,13 +610,24 @@ export default function VoicesPage() {
                   <p className="text-xs text-zinc-500">
                     {voice.duration}s &middot;{" "}
                     {new Date(voice.createdAt).toLocaleDateString()}
-                    {voice.role && (
-                      <span className="ml-1 text-amber-500/70">
-                        &middot; {voice.role}
-                      </span>
-                    )}
                   </p>
                 </div>
+                <select
+                  value={voice.role || ""}
+                  onChange={async (e) => {
+                    const role = e.target.value || undefined;
+                    await assignVoiceRole(voice.id, role);
+                    clearVoxtralVoicesCache();
+                    fetchVoices();
+                  }}
+                  className="px-2 py-1 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-300 text-xs focus:outline-none focus:border-amber-500 cursor-pointer"
+                >
+                  {VOXTRAL_ROLE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
                 <button
                   onClick={() => handleDelete(voice.id, voice.name)}
                   className="ml-3 p-1.5 text-zinc-600 hover:text-red-400 transition-colors flex-shrink-0"
