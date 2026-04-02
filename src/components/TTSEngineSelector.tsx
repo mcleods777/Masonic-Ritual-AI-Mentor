@@ -44,7 +44,7 @@ const ENGINE_OPTIONS: EngineOption[] = [
   {
     value: "voxtral",
     label: "Voxtral (Mistral)",
-    description: "Natural — multilingual voices",
+    description: "Natural — voice cloning, half-cost",
   },
 ];
 

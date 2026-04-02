@@ -3,6 +3,13 @@ import { NextRequest, NextResponse } from "next/server";
 /**
  * Proxy route for Mistral Voxtral text-to-speech API.
  * Keeps the API key server-side while returning audio to the client.
+ *
+ * Accepts either:
+ * - voiceId: UUID of a saved voice profile (from /api/tts/voxtral/voices)
+ * - refAudio: base64-encoded audio for one-off voice cloning
+ *
+ * If neither is provided, uses the first available saved voice profile,
+ * or returns an error asking the user to set up voices.
  */
 export async function POST(request: NextRequest) {
   const apiKey = process.env.MISTRAL_API_KEY;
@@ -16,14 +23,60 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
   const {
     text,
-    voiceId = "casual_male",
+    voiceId,
+    refAudio,
   } = body as {
     text?: string;
     voiceId?: string;
+    refAudio?: string;
   };
 
   if (!text) {
     return NextResponse.json({ error: "text is required" }, { status: 400 });
+  }
+
+  // Build the request body — must have either voice_id or ref_audio
+  const speechBody: Record<string, string> = {
+    model: "voxtral-mini-tts-2603",
+    input: text,
+    response_format: "mp3",
+  };
+
+  if (voiceId) {
+    speechBody.voice_id = voiceId;
+  } else if (refAudio) {
+    speechBody.ref_audio = refAudio;
+  } else {
+    // No voice specified — try to find a saved voice from the user's account
+    try {
+      const voicesResp = await fetch(
+        "https://api.mistral.ai/v1/audio/voices?limit=1",
+        {
+          headers: { Authorization: `Bearer ${apiKey}` },
+        }
+      );
+      if (voicesResp.ok) {
+        const voicesData = (await voicesResp.json()) as {
+          data?: Array<{ id: string }>;
+        };
+        if (voicesData.data && voicesData.data.length > 0) {
+          speechBody.voice_id = voicesData.data[0].id;
+        }
+      }
+    } catch {
+      // Fall through to error below
+    }
+
+    if (!speechBody.voice_id) {
+      return NextResponse.json(
+        {
+          error:
+            "No Voxtral voice configured. Create voices at /api/tts/voxtral/voices or provide a voiceId.",
+          code: "NO_VOICES",
+        },
+        { status: 422 }
+      );
+    }
   }
 
   const response = await fetch("https://api.mistral.ai/v1/audio/speech", {
@@ -32,12 +85,7 @@ export async function POST(request: NextRequest) {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      model: "voxtral-mini-tts-2603",
-      input: text,
-      voice_id: voiceId,
-      response_format: "mp3",
-    }),
+    body: JSON.stringify(speechBody),
   });
 
   if (!response.ok) {
