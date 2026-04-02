@@ -105,10 +105,11 @@ export default function WalkthroughPage() {
         <DownArrow label="connects to" />
 
         {/* External services */}
-        <div className="grid grid-cols-3 gap-3">
-          <ServiceCard label="Browser Speech" desc="Free, on-device" color="green" />
-          <ServiceCard label="Google Cloud TTS" desc="Premium voices" color="blue" />
-          <ServiceCard label="ElevenLabs" desc="Premium voices" color="blue" />
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <ServiceCard label="Voxtral (Mistral)" desc="Voice cloning TTS" color="purple" />
+          <ServiceCard label="Deepgram Aura-2" desc="Fast TTS voices" color="blue" />
+          <ServiceCard label="Groq Whisper" desc="Speech-to-text" color="green" />
+          <ServiceCard label="Claude Haiku" desc="AI feedback" color="amber" />
         </div>
       </Section>
 
@@ -383,7 +384,7 @@ export default function WalkthroughPage() {
       {/* ================================================================ */}
       {/* 7. VOICE AI (TTS)                                                */}
       {/* ================================================================ */}
-      <Section id="tts" title="Voice AI (Text-to-Speech)" subtitle="Three voice engines, each with unique voices per officer">
+      <Section id="tts" title="Voice AI (Text-to-Speech)" subtitle="Six voice engines with custom voice cloning and unique voices per officer">
         <div className="max-w-2xl mx-auto">
           {/* Entry point */}
           <div className="flex justify-center mb-2">
@@ -402,37 +403,51 @@ export default function WalkthroughPage() {
             </div>
           </div>
 
-          {/* Three-way branch */}
-          <div className="flex justify-center my-3">
-            <svg width="240" height="30" className="text-zinc-600">
-              <line x1="120" y1="0" x2="40" y2="28" stroke="currentColor" strokeWidth="1.5" />
-              <line x1="120" y1="0" x2="120" y2="28" stroke="currentColor" strokeWidth="1.5" />
-              <line x1="120" y1="0" x2="200" y2="28" stroke="currentColor" strokeWidth="1.5" />
-            </svg>
-          </div>
+          <DownArrow />
 
-          {/* Three engines */}
+          {/* Six engines in 2 rows */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <EngineCard
-              title="Browser"
-              subtitle="Free, on-device"
-              color="green"
-              icon="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25"
-              points={["Web Speech Synthesis API", "Varies pitch & speed per role", "Works offline", "No API key needed"]}
+              title="Voxtral (Mistral)"
+              subtitle="Voice cloning, half-cost"
+              color="purple"
+              icon="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"
+              points={["Clone any voice from 3-10s audio", "Recordings stored locally", "ref_audio sent with each request", "~$0.016 / 1K characters"]}
             />
             <EngineCard
-              title="Google Cloud"
-              subtitle="Premium Neural2 voices"
+              title="Deepgram Aura-2"
+              subtitle="Fast, natural voices"
               color="blue"
-              icon="M2.25 15a4.5 4.5 0 004.5 4.5H18a3.75 3.75 0 001.332-7.257 3 3 0 00-3.758-3.848 5.25 5.25 0 00-10.233 2.33A4.502 4.502 0 002.25 15z"
-              points={["Different voice per role", "Natural-sounding Neural2", "Auto-retries on errors", "API key stays on server"]}
+              icon="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"
+              points={["7 distinct male voices", "Zeus, Orion, Arcas, etc.", "Low latency streaming", "API key stays on server"]}
             />
             <EngineCard
               title="ElevenLabs"
-              subtitle="Ultra-realistic voices"
+              subtitle="Premium, ultra-realistic"
               color="purple"
               icon="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"
-              points={["Human-like voice quality", "Unique voice per role", "Premium cloud service", "API key stays on server"]}
+              points={["10 distinct male voices", "Human-like quality", "Unique voice per role", "Premium cloud service"]}
+            />
+            <EngineCard
+              title="Google Cloud"
+              subtitle="Neural2 voices"
+              color="blue"
+              icon="M2.25 15a4.5 4.5 0 004.5 4.5H18a3.75 3.75 0 001.332-7.257 3 3 0 00-3.758-3.848 5.25 5.25 0 00-10.233 2.33A4.502 4.502 0 002.25 15z"
+              points={["Pitch + rate control per role", "Natural Neural2 engine", "Auto-retries on errors", "API key stays on server"]}
+            />
+            <EngineCard
+              title="Kokoro"
+              subtitle="Self-hosted, free"
+              color="green"
+              icon="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25"
+              points={["Run locally, no cloud costs", "Multiple voice options", "OpenAI-compatible API", "Speed control per role"]}
+            />
+            <EngineCard
+              title="Browser"
+              subtitle="Built-in, works offline"
+              color="green"
+              icon="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25"
+              points={["Web Speech Synthesis API", "Varies pitch & speed per role", "Works offline", "No API key needed"]}
             />
           </div>
 
@@ -463,10 +478,11 @@ export default function WalkthroughPage() {
               { role: "WM", name: "Worshipful Master", character: "Deep, authoritative", depth: "w-full" },
               { role: "SW", name: "Senior Warden", character: "Clear, measured", depth: "w-4/5" },
               { role: "JW", name: "Junior Warden", character: "Mid-range, steady", depth: "w-3/5" },
-              { role: "SD", name: "Senior Deacon", character: "Slightly brighter", depth: "w-2/5" },
-              { role: "JD", name: "Junior Deacon", character: "Crisp, British accent", depth: "w-1/4" },
-              { role: "Chap", name: "Chaplain", character: "Deepest, slowest", depth: "w-full" },
-              { role: "Tyler", name: "Tyler", character: "Higher, distinct", depth: "w-1/5" },
+              { role: "SD", name: "Senior Deacon", character: "Smooth, warm", depth: "w-2/5" },
+              { role: "JD", name: "Junior Deacon", character: "Crisp, distinct", depth: "w-1/4" },
+              { role: "Chap", name: "Chaplain", character: "Reverent, steady", depth: "w-full" },
+              { role: "Sec", name: "Secretary", character: "Wise, mature", depth: "w-3/5" },
+              { role: "Tyler", name: "Tyler", character: "Laid-back, resonant", depth: "w-1/5" },
             ].map((v) => (
               <div key={v.role} className="bg-zinc-800/40 border border-zinc-700/50 rounded-lg p-3">
                 <div className="flex items-center gap-2 mb-1">
@@ -506,9 +522,9 @@ export default function WalkthroughPage() {
               <PrivacyItem color="green" text="Ritual cipher + plain text (AES-256, separate fields)" />
               <PrivacyItem color="green" text="Encryption key" />
               <PrivacyItem color="green" text="Practice scores & history" />
+              <PrivacyItem color="green" text="Voice recordings for cloning (IndexedDB)" />
               <PrivacyItem color="green" text="Voice engine preference" />
               <PrivacyItem color="green" text="Browser speech recognition" />
-              <PrivacyItem color="green" text="Browser voice playback" />
             </ul>
           </div>
 
@@ -526,8 +542,10 @@ export default function WalkthroughPage() {
               </div>
             </div>
             <ul className="space-y-3">
-              <PrivacyItem color="amber" text="Google TTS: line text for voice synthesis" />
-              <PrivacyItem color="amber" text="ElevenLabs: line text for voice synthesis" />
+              <PrivacyItem color="amber" text="Claude Haiku: plain text for rehearsal feedback" />
+              <PrivacyItem color="amber" text="Groq Whisper: audio for speech-to-text" />
+              <PrivacyItem color="amber" text="Voxtral: line text + voice recording for TTS" />
+              <PrivacyItem color="amber" text="Deepgram / ElevenLabs / Google: line text for TTS" />
             </ul>
             <div className="mt-4 pt-4 border-t border-amber-500/10">
               <ul className="space-y-2">
@@ -658,10 +676,10 @@ function MiniCard({ icon, label, color }: { icon: string; label: string; color: 
   );
 }
 
-function ServiceCard({ label, desc, color }: { label: string; desc: string; color: "green" | "blue" | "purple" }) {
-  const bg = { green: "bg-green-500/5 border-green-500/20", blue: "bg-blue-500/5 border-blue-500/20", purple: "bg-purple-500/5 border-purple-500/20" };
-  const text = { green: "text-green-300", blue: "text-blue-300", purple: "text-purple-300" };
-  const sub = { green: "text-green-400/50", blue: "text-blue-400/50", purple: "text-purple-400/50" };
+function ServiceCard({ label, desc, color }: { label: string; desc: string; color: "green" | "blue" | "purple" | "amber" }) {
+  const bg = { green: "bg-green-500/5 border-green-500/20", blue: "bg-blue-500/5 border-blue-500/20", purple: "bg-purple-500/5 border-purple-500/20", amber: "bg-amber-500/5 border-amber-500/20" };
+  const text = { green: "text-green-300", blue: "text-blue-300", purple: "text-purple-300", amber: "text-amber-300" };
+  const sub = { green: "text-green-400/50", blue: "text-blue-400/50", purple: "text-purple-400/50", amber: "text-amber-400/50" };
   return (
     <div className={`rounded-xl border ${bg[color]} px-4 py-3 text-center`}>
       <p className={`text-sm font-semibold ${text[color]}`}>{label}</p>
