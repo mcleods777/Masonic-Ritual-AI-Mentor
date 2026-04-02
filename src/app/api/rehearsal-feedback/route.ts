@@ -113,11 +113,11 @@ export async function POST(req: Request) {
     });
 
     if (!response.ok) {
-      const errText = await response.text();
-      console.error(`Feedback LLM error (${response.status}):`, errText);
+      const errBody = await response.text();
+      console.error(`Feedback LLM error (${response.status}):`, errBody);
       return Response.json(
-        { error: `LLM API error: ${response.status}` },
-        { status: response.status }
+        { error: `AI feedback unavailable (${response.status})` },
+        { status: 502 }
       );
     }
 
@@ -135,6 +135,7 @@ export async function POST(req: Request) {
         const decoder = new TextDecoder();
         let buffer = "";
 
+        let malformed = 0;
         try {
           while (true) {
             const { done, value } = await reader.read();
@@ -158,9 +159,14 @@ export async function POST(req: Request) {
                 const content = parsed.choices?.[0]?.delta?.content;
                 if (content) {
                   controller.enqueue(new TextEncoder().encode(content));
+                  malformed = 0;
                 }
               } catch {
-                // Skip malformed chunks
+                malformed++;
+                if (malformed > 5) {
+                  console.error("Too many malformed SSE chunks from LLM");
+                  break;
+                }
               }
             }
           }

@@ -60,6 +60,7 @@ export default function VoicesPage() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startTimeRef = useRef<number>(0);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const micAudioCtxRef = useRef<AudioContext | null>(null);
   const animFrameRef = useRef<number>(0);
 
   // ============================================================
@@ -97,7 +98,11 @@ export default function VoicesPage() {
   // Mic level monitoring via AnalyserNode
   const startMicMonitor = (stream: MediaStream) => {
     try {
+      if (micAudioCtxRef.current) {
+        micAudioCtxRef.current.close().catch(() => {});
+      }
       const ctx = new AudioContext();
+      micAudioCtxRef.current = ctx;
       const source = ctx.createMediaStreamSource(stream);
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 256;
@@ -124,6 +129,10 @@ export default function VoicesPage() {
     if (animFrameRef.current) {
       cancelAnimationFrame(animFrameRef.current);
       animFrameRef.current = 0;
+    }
+    if (micAudioCtxRef.current) {
+      micAudioCtxRef.current.close().catch(() => {});
+      micAudioCtxRef.current = null;
     }
     setMicLevel(0);
     analyserRef.current = null;

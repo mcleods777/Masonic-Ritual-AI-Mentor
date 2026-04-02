@@ -662,9 +662,11 @@ async function getLocalVoices(): Promise<LocalVoice[]> {
 
   localVoicesFetchPromise = (async () => {
     try {
-      localVoicesCache = await listVoices();
-      return localVoicesCache;
+      const voices = await listVoices();
+      localVoicesCache = voices;
+      return voices;
     } catch {
+      localVoicesCache = [];
       return [];
     } finally {
       localVoicesFetchPromise = null;

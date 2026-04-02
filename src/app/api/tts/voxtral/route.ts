@@ -93,7 +93,7 @@ export async function POST(request: NextRequest) {
     const errText = await response.text();
     console.error(`Voxtral API error (${response.status}):`, errText);
     return NextResponse.json(
-      { error: `Voxtral API error: ${errText}` },
+      { error: `Voxtral TTS error (${response.status})` },
       { status: response.status }
     );
   }
