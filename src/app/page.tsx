@@ -150,17 +150,17 @@ export default function HomePage() {
         <h2 className="text-2xl font-semibold text-zinc-200 mb-6">
           How It Works
         </h2>
-        <div className="grid md:grid-cols-4 gap-6">
+        <div className="grid md:grid-cols-2 gap-x-8 gap-y-4">
           {[
             {
               step: "1",
               title: "Upload",
-              desc: "Upload your encrypted .mram ritual file and enter your lodge passphrase. Decrypted on your device.",
+              desc: "Upload your encrypted .mram file and enter your lodge passphrase. Decrypted on your device.",
             },
             {
               step: "2",
               title: "Select",
-              desc: "Choose a section to practice. Cipher text is shown by default — toggle to reveal plain text.",
+              desc: "Choose a section to practice. Cipher text is shown by default, toggle to reveal plain text.",
             },
             {
               step: "3",
@@ -170,15 +170,18 @@ export default function HomePage() {
             {
               step: "4",
               title: "Review",
-              desc: "Get word-by-word accuracy scoring, hear the correct version, and track your progress over time.",
+              desc: "Get word-by-word accuracy scoring, hear the correct version, and track your progress.",
             },
           ].map((item) => (
-            <div key={item.step} className="text-center">
-              <div className="w-10 h-10 mx-auto rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-lg mb-3">
-                {item.step}
+            <div key={item.step} className="flex items-baseline gap-3 py-2">
+              <span className="text-amber-500/60 font-mono text-sm shrink-0">
+                {item.step}.
+              </span>
+              <div>
+                <h3 className="font-semibold text-zinc-200 inline">{item.title}</h3>
+                <span className="text-zinc-500 ml-1">&mdash;</span>
+                <p className="text-sm text-zinc-500 mt-0.5">{item.desc}</p>
               </div>
-              <h3 className="font-semibold text-zinc-200">{item.title}</h3>
-              <p className="text-sm text-zinc-500 mt-1">{item.desc}</p>
             </div>
           ))}
         </div>
