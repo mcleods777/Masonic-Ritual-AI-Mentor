@@ -20,49 +20,47 @@ export default function HomePage() {
   return (
     <div className="space-y-8">
       {/* Hero */}
-      <div className="text-center py-12 md:py-20">
-        <div className="w-20 h-20 mx-auto rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mb-6">
+      <div className="text-center py-6 md:py-20">
+        <div className="hidden md:flex w-20 h-20 mx-auto rounded-2xl bg-amber-500/10 border border-amber-500/20 items-center justify-center mb-6">
           <svg className="w-10 h-10 text-amber-500" viewBox="0 0 24 24" fill="currentColor">
             <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
           </svg>
         </div>
-        <h1 className="text-4xl md:text-5xl font-bold text-zinc-100 tracking-tight">
+        <h1 className="text-3xl md:text-5xl font-bold text-zinc-100 tracking-tight">
           Masonic Ritual Mentor
         </h1>
-        <p className="text-lg text-zinc-400 mt-4 max-w-2xl mx-auto">
-          A privacy-first practice tool for memorizing your ritual work.
-          Load your encrypted .mram ritual file, practice from cipher text,
-          and get instant feedback with voice AI.
+        <p className="text-base md:text-lg text-zinc-400 mt-3 md:mt-4 max-w-2xl mx-auto">
+          Practice your ritual work from memory. Upload your encrypted
+          .mram file and get instant voice feedback.
         </p>
       </div>
 
       {/* Primary Action */}
       <Link
         href="/upload"
-        className="group block bg-zinc-900 rounded-xl border border-zinc-800 hover:border-amber-500/50 p-8 transition-all"
+        className="group block bg-zinc-900 rounded-xl border border-zinc-800 hover:border-amber-500/50 p-6 md:p-8 transition-all"
       >
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
-            <h2 className="text-2xl font-semibold text-zinc-200 group-hover:text-amber-400 transition-colors">
+            <h2 className="text-xl md:text-2xl font-semibold text-zinc-200 group-hover:text-amber-400 transition-colors">
               Upload Your Ritual
             </h2>
-            <p className="text-zinc-500 mt-2 max-w-lg">
-              Upload your encrypted .mram ritual file and enter your lodge
-              passphrase. Everything is decrypted on your device and never
-              leaves your browser.
+            <p className="text-sm md:text-base text-zinc-500 mt-1 md:mt-2 max-w-lg">
+              Upload your encrypted .mram file. Decrypted on your device,
+              never leaves your browser.
             </p>
           </div>
-          <span className="shrink-0 px-6 py-3 bg-amber-600 group-hover:bg-amber-500 text-white rounded-lg font-medium transition-colors text-center">
+          <span className="shrink-0 w-full md:w-auto px-6 py-3 bg-amber-600 group-hover:bg-amber-500 text-white rounded-lg font-medium transition-colors text-center">
             Upload .mram File
           </span>
         </div>
       </Link>
 
       {/* Secondary Actions */}
-      <div className="grid md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-2 gap-3 md:gap-4">
         <Link
           href="/practice"
-          className={`group flex items-start gap-4 bg-zinc-900 rounded-xl border border-zinc-800 hover:border-amber-500/50 p-6 transition-all ${
+          className={`group flex flex-col md:flex-row items-start gap-2 md:gap-4 bg-zinc-900 rounded-xl border border-zinc-800 hover:border-amber-500/50 p-4 md:p-6 transition-all ${
             !hasDocuments && !loading ? "opacity-50" : ""
           }`}
         >
@@ -78,7 +76,7 @@ export default function HomePage() {
             <h3 className="text-lg font-semibold text-zinc-200 group-hover:text-amber-400 transition-colors">
               Practice Mode
             </h3>
-            <p className="text-sm text-zinc-500 mt-1">
+            <p className="hidden md:block text-sm text-zinc-500 mt-1">
               Speak or type from memory and get word-by-word accuracy
               feedback with voice corrections.
             </p>
@@ -87,7 +85,7 @@ export default function HomePage() {
 
         <Link
           href="/progress"
-          className="group flex items-start gap-4 bg-zinc-900 rounded-xl border border-zinc-800 hover:border-amber-500/50 p-6 transition-all"
+          className="group flex flex-col md:flex-row items-start gap-2 md:gap-4 bg-zinc-900 rounded-xl border border-zinc-800 hover:border-amber-500/50 p-4 md:p-6 transition-all"
         >
           <svg
             className="w-5 h-5 text-amber-500 mt-0.5 shrink-0"
@@ -106,7 +104,7 @@ export default function HomePage() {
             <h3 className="text-lg font-semibold text-zinc-200 group-hover:text-amber-400 transition-colors">
               Progress
             </h3>
-            <p className="text-sm text-zinc-500 mt-1">
+            <p className="hidden md:block text-sm text-zinc-500 mt-1">
               Track your accuracy over time, see trends, and identify
               persistent trouble spots.
             </p>
