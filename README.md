@@ -2,38 +2,48 @@
 
 A privacy-first, voice-driven practice tool for Masonic ritual memorization. Load your encrypted ritual file (.mram), practice in multiple modes — solo drill, full-ceremony rehearsal, or listen-along — and get instant word-by-word feedback with AI coaching powered by Claude.
 
+**Live:** Deployed on Vercel
+
 ---
 
 ## How It Works
 
 ```mermaid
 flowchart TB
-    subgraph Browser["🖥️ Your Browser — everything stays local"]
-        Upload["🔐 Upload .mram file\nEnter lodge passphrase"]
-        Decrypt["🔓 Decrypt & validate\nCheck magic bytes + checksum"]
-        Split["📝 Separate cipher / plain\nCipher shown · Plain for AI"]
-        Encrypt["🔒 Re-encrypt with AES-256-GCM\nStore in IndexedDB"]
+    subgraph Browser["Your Browser — everything stays local"]
+        Upload["Upload .mram file\nEnter lodge passphrase"]
+        Decrypt["Decrypt & validate\nCheck magic bytes + checksum"]
+        Split["Separate cipher / plain\nCipher shown - Plain for AI"]
+        Encrypt["Re-encrypt with AES-256-GCM\nStore in IndexedDB"]
         Upload --> Decrypt --> Split --> Encrypt
 
-        Solo["🎤 Solo Practice\nDrill one section\n(cipher text shown)"]
-        Listen["🔊 Listen Mode\nHear the full ceremony\n(cipher text shown)"]
-        Rehearsal["👥 Rehearsal Mode\nPractice your role\n(cipher text shown)"]
+        Solo["Solo Practice\nDrill one section\n(cipher text shown)"]
+        Listen["Listen Mode\nHear the full ceremony\n(cipher text shown)"]
+        Rehearsal["Rehearsal Mode\nPractice your role\n(cipher text shown)"]
+        Voices["Custom Voices\nRecord & clone voices\n(stored locally)"]
         Encrypt --> Solo
         Encrypt --> Listen
         Encrypt --> Rehearsal
     end
 
-    subgraph External["☁️ External Services (optional)"]
-        Claude["🤖 Claude API\nAI Coaching\n(plain text only)"]
-        Google["🗣️ Google Cloud TTS\nPremium voices"]
-        Eleven["🗣️ ElevenLabs\nUltra-realistic voices"]
+    subgraph External["External Services (optional)"]
+        Claude["Claude Haiku\nRehearsal feedback\n(plain text only)"]
+        Whisper["Groq Whisper\nSpeech-to-text"]
+        Voxtral["Voxtral (Mistral)\nVoice cloning TTS"]
+        Deepgram["Deepgram Aura-2\nFast TTS voices"]
+        Eleven["ElevenLabs\nPremium TTS voices"]
+        Google["Google Cloud TTS\nNeural2 voices"]
+        Kokoro["Kokoro (self-hosted)\nFree TTS"]
     end
 
-    Solo -->|"AI Coach"| Claude
-    Listen -->|"Premium TTS"| Google
-    Listen -->|"Premium TTS"| Eleven
-    Rehearsal -->|"AI Coach"| Claude
-    Rehearsal -->|"Premium TTS"| Google
+    Solo -->|"AI feedback"| Claude
+    Rehearsal -->|"AI feedback"| Claude
+    Solo -->|"Speech input"| Whisper
+    Rehearsal -->|"Speech input"| Whisper
+    Voices -->|"Voice cloning"| Voxtral
+    Listen -->|"TTS"| Voxtral
+    Listen -->|"TTS"| Deepgram
+    Listen -->|"TTS"| Eleven
 
     style Browser fill:#1a1a2e,stroke:#334155,color:#e2e8f0
     style External fill:#1e1b2e,stroke:#4c1d95,color:#e2e8f0
@@ -41,44 +51,100 @@ flowchart TB
 
 ---
 
+## Features
+
+### Rehearsal Mode
+The main feature. Pick your officer role (WM, SW, JD, etc.), and the AI reads every other officer's lines with distinct voices. When it's your turn, you speak from memory and get instant accuracy feedback.
+
+- AI reads other officers' lines with unique voices per role
+- Auto-detects silence and advances when you finish speaking
+- Line-by-line accuracy scoring with word-by-word diff
+- Retry button to re-practice a line you got wrong
+- Click any line in the script to jump to it
+
+### Custom Voice Cloning
+Record your own voice (or a brother's) on the **Voices** page. The app clones it via Voxtral and uses it for officer lines during rehearsal. Record multiple brothers for different officers.
+
+- Record 3-10 seconds in the browser
+- Converted to wav and stored locally in IndexedDB
+- Sent as `ref_audio` with each Voxtral TTS request (zero-shot cloning)
+- No Mistral paid plan required — works on the free tier
+- Voice tone/speed/emotion matches how you recorded the sample
+
+### Solo Practice Mode
+Drill a single section until you have it perfect. Cipher text is shown by default — toggle to reveal plain text if needed.
+
+**5-Layer Comparison Pipeline:**
+1. **Normalization** — lowercase, expand contractions, strip filler words
+2. **Word-level diff** — jsdiff detects insertions, deletions, substitutions
+3. **Phonetic forgiveness** — Double Metaphone catches STT artifacts (rite/right, tiler/tyler)
+4. **Fuzzy tolerance** — Levenshtein distance for near-matches
+5. **Accuracy scoring** — color-coded visual diff (correct / wrong / phonetic / fuzzy / missing)
+
+### Listen Mode
+Hear the full ceremony read aloud with a unique AI voice for each officer. The script shows cipher text so you can follow along.
+
+### Progress Tracking
+Track your accuracy over time, see trends, identify persistent trouble spots, and celebrate streaks.
+
+### Voice AI (6 TTS Engines)
+
+| Engine | Type | Voices | Cost |
+|--------|------|--------|------|
+| **Voxtral (Mistral)** | Cloud + voice cloning | Clone any voice from 3s audio | ~$0.016/1K chars |
+| **ElevenLabs** | Cloud | 10 distinct male voices | Premium |
+| **Deepgram Aura-2** | Cloud | 7 distinct voices (Zeus, Orion, etc.) | Pay-per-use |
+| **Google Cloud TTS** | Cloud | Neural2 voices with pitch control | Pay-per-use |
+| **Kokoro** | Self-hosted | Multiple voices, free | Free (self-hosted) |
+| **Browser** | Built-in | Pitch/rate differentiation | Free |
+
+Each engine maps distinct voices to Masonic officer roles:
+
+| Role | Officer | Voice Character |
+|------|---------|----------------|
+| WM | Worshipful Master | Deep, authoritative |
+| SW | Senior Warden | Clear, measured |
+| JW | Junior Warden | Mid-range, steady |
+| SD | Senior Deacon | Smooth, warm |
+| JD | Junior Deacon | Crisp, distinct |
+| Chap | Chaplain | Reverent, steady |
+| Sec | Secretary | Wise, mature |
+| Tyler | Tyler | Laid-back, resonant |
+
+### Speech-to-Text
+
+| Engine | Details |
+|--------|---------|
+| **Groq Whisper** | Server-side, high accuracy, auto-silence detection, Masonic vocabulary hints |
+| **Browser** | Built-in Web Speech API, works offline, no API key needed |
+
+### Privacy & Security
+
+- Ritual text is encrypted at rest with AES-256-GCM in IndexedDB
+- Cipher and plain text stored in separate encrypted fields — never cross contexts
+- Voice recordings stored locally in IndexedDB, only sent with TTS requests
+- API keys stay server-side (Next.js API routes)
+- Anthropic does not train on API data
+- No user accounts or tracking
+- .mram file is never stored — only re-encrypted data
+
+---
+
 ## The .mram File Format
 
 Ritual files use the `.mram` (Masonic Ritual AI Mentor) encrypted format. Each file bundles **cipher text** (abbreviated/encoded) and **plain text** (full English) for every line, encrypted with a lodge passphrase.
 
-```mermaid
-flowchart LR
-    subgraph File[".mram Binary File"]
-        Magic["4 bytes: MRAM"]
-        Version["1 byte: version"]
-        Salt["16 bytes: salt"]
-        IV["12 bytes: IV"]
-        Payload["AES-256-GCM\nencrypted JSON"]
-        Magic --> Version --> Salt --> IV --> Payload
-    end
-
-    subgraph JSON["Decrypted JSON Payload"]
-        Meta["metadata\njurisdiction · degree · ceremony"]
-        Roles["roles map\nWM · SW · JD · etc."]
-        Sections["sections\nOrdered ceremony parts"]
-        Lines["lines array\nEach line has:\n• cipher (abbreviated)\n• plain (full text)\n• role · gavels · action"]
-    end
-
-    Payload -.->|"PBKDF2 + passphrase"| JSON
-```
-
 **Key principle: cipher and plain text never cross contexts.**
-- **Cipher text** is shown to the user in all practice modes (what they see on screen)
-- **Plain text** is used only for AI coaching, accuracy comparison, and TTS — never displayed by default
+- **Cipher text** is shown to the user in all practice modes
+- **Plain text** is used only for AI feedback, accuracy comparison, and TTS
 
 ### Building .mram Files
-
-Use the included CLI tool to build .mram files from paired cipher/plain markdown:
 
 ```bash
 npx tsx scripts/build-mram.ts <input.md> <output.mram> [passphrase]
 ```
 
-Input format: a markdown file where each spoken line appears **twice** — cipher first, then plain:
+Input format: a markdown file where each spoken line appears twice — cipher first, then plain:
 
 ```markdown
 ### Section Title
@@ -90,135 +156,6 @@ SW: * Bros. S. & J.D., p. t. s. y. t. a. p. a. M.
 SW: * Brothers Senior & Junior Deacons, proceed to satisfy yourselves that all present are Masons.
 ```
 
-The tool detects sections (`### headings`), speaker roles, gavel marks (`*`), and stage directions `(in parentheses)`.
-
----
-
-## Features
-
-### Encrypted File Upload
-Upload your .mram encrypted ritual file. Enter your lodge passphrase to decrypt it. The decrypted content is split into cipher and plain text, re-encrypted with a browser-generated key, and stored in IndexedDB. The .mram file itself is never stored — only the re-encrypted data.
-
-```mermaid
-flowchart LR
-    A["🔐 Drop .mram file"] --> B["🔑 Enter passphrase\nPBKDF2 key derivation"]
-    B --> C["🔓 Decrypt & validate\nMagic bytes + SHA-256 checksum"]
-    C --> D["📝 Split cipher / plain\nSeparate encrypted fields"]
-    D --> E["🔒 Re-encrypt AES-256-GCM\nStore in IndexedDB"]
-```
-
-### Solo Practice Mode
-Drill a single section until you have it perfect. **Cipher text is shown by default** — toggle to reveal plain text if needed.
-
-```mermaid
-flowchart LR
-    A["📋 Pick a section\n(cipher text shown)"] --> B["🎤 Recite from memory\nSpeak or type"]
-    B --> C["✅ 5-layer comparison\nvs. plain text reference"]
-    C --> D["🔊 Hear corrections\nTTS reads back mistakes"]
-```
-
-**5-Layer Comparison Pipeline:**
-1. **Normalization** — lowercase, expand contractions, strip filler words (um, uh, like)
-2. **Word-level diff** — jsdiff detects insertions, deletions, and substitutions
-3. **Phonetic forgiveness** — Double Metaphone catches STT artifacts (rite → right, tiler → tyler)
-4. **Fuzzy tolerance** — Levenshtein distance for near-matches
-5. **Accuracy scoring** — color-coded visual diff with correct / wrong / phonetic / fuzzy / missing
-
-### Listen Mode
-Sit back and hear the full ceremony read aloud with a unique AI voice for each officer. The script view shows **cipher text** so you can follow along with the abbreviated notation.
-
-```mermaid
-flowchart TB
-    Play["▶️ Press Play"] --> Loop{"For each line"}
-    Loop -->|"⚒️ Gavel marks"| Knock["Synthesized knock sounds\ndeep woody thump"]
-    Loop -->|"🗣️ Officer line"| Voice["Read aloud with\nthat officer's unique voice\n(uses plain text for TTS)"]
-    Loop -->|"📜 Stage direction"| Pause["Brief pause, then next line"]
-    Knock --> Scroll["📜 Script auto-scrolls\nhighlighting current line\n(cipher text displayed)"]
-    Voice --> Scroll
-    Pause --> Scroll
-```
-
-**Officer voice mapping:** The Worshipful Master sounds deep and authoritative, the Senior Warden is clear and measured, the Junior Deacon is crisp and brighter — each role has distinct pitch, rate, and voice characteristics.
-
-### Rehearsal Mode
-Practice your role while the AI reads all other officers' parts. Script view shows **cipher text**.
-
-```mermaid
-flowchart TB
-    Pick["👤 Pick your officer role\nWM · SW · JW · SD · JD · etc."]
-    Pick --> Loop{"Ceremony plays\nline by line"}
-    Loop -->|"Other officer's line"| AI["🔊 AI reads it aloud\nwith that role's voice"]
-    Loop -->|"Your line!"| You["🎤 'Your Turn' prompt\nSpeak or type from memory"]
-    AI --> Loop
-    You --> Score["✅ Line scored instantly\n5-layer comparison vs. plain text"]
-    Score --> Loop
-    Loop -->|"Ceremony complete"| Results["📊 Final results\nOverall accuracy % +\nline-by-line breakdown"]
-```
-
-### AI Ritual Coach
-Chat with Claude about your specific ritual. Ask questions, get hints, or have it quiz you. The AI receives **only plain text** — cipher text is never sent to the API.
-
-```mermaid
-flowchart LR
-    Q["💬 Ask a question"] --> Server["🖥️ Server\nPlain text only as context\n(never cipher)"]
-    Server --> Claude["🤖 Claude AI\nStreaming response"]
-    Claude --> A["📝 Answer appears\n+ optional TTS readback"]
-```
-
-- **Model selection:** Choose between Haiku (fastest), Sonnet (balanced), or Opus (smartest)
-- **Safety built-in:** System prompt enforces Masonic ethics — never reveals grips, passwords, or modes of recognition
-- **Voice output:** AI responses can be read aloud with your selected voice engine
-
-### Voice AI (Text-to-Speech)
-Three voice engines with automatic role-to-voice mapping:
-
-```mermaid
-flowchart TB
-    Need["App needs to speak a line\n(uses plain text for TTS)"] --> Router{"Voice Engine\nRouter"}
-    Router -->|"Free"| Browser["🖥️ Browser TTS\nOn-device, works offline\nVaries pitch/rate per role"]
-    Router -->|"Premium"| Google["☁️ Google Cloud TTS\nNeural2 voices\nDifferent voice per role"]
-    Router -->|"Ultra"| Eleven["⚡ ElevenLabs\nHuman-like quality\nUnique voice per role"]
-    Browser --> Audio["🔊 Audio output"]
-    Google --> Audio
-    Eleven --> Audio
-```
-
-| Role | Officer | Voice Character |
-|------|---------|----------------|
-| WM | Worshipful Master | Deep, authoritative |
-| SW | Senior Warden | Clear, measured |
-| JW | Junior Warden | Mid-range, steady |
-| SD | Senior Deacon | Slightly brighter |
-| JD | Junior Deacon | Crisp, distinct |
-| Chap | Chaplain | Deepest, slowest |
-| Tyler | Tyler | Higher, distinct |
-
-### Privacy & Security
-
-```mermaid
-flowchart LR
-    subgraph Local["✅ Stays on your device"]
-        A["Ritual cipher + plain text\n(AES-256 encrypted, separate fields)"]
-        B["Encryption key"]
-        C["Practice scores"]
-        D["Browser speech recognition"]
-        E["Browser voice playback"]
-    end
-
-    subgraph Cloud["⚠️ Sent externally (only when used)"]
-        F["AI Coach → Claude API\n(plain text only, never cipher)"]
-        G["Google TTS → plain text for speech"]
-        H["ElevenLabs → plain text for speech"]
-    end
-
-    subgraph Safe["✅ Security guarantees"]
-        I["API keys stay on server"]
-        J["Anthropic does not train on API data"]
-        K["No user accounts or tracking"]
-        L[".mram file never stored — only re-encrypted data"]
-    end
-```
-
 ---
 
 ## Tech Stack
@@ -227,13 +164,15 @@ flowchart LR
 |-------|-----------|
 | Frontend | Next.js 16 (App Router), React 19, TypeScript |
 | Styling | Tailwind CSS v4 |
-| AI/LLM | Claude (Haiku / Sonnet / Opus) via Vercel AI SDK |
-| Speech-to-Text | Web Speech API |
-| Text-to-Speech | Browser Web Speech + Google Cloud TTS + ElevenLabs |
+| AI Feedback | Claude Haiku via Vercel AI SDK (streaming) |
+| Speech-to-Text | Groq Whisper (server-side) + Browser Web Speech API |
+| Text-to-Speech | Voxtral, ElevenLabs, Deepgram Aura-2, Google Cloud TTS, Kokoro, Browser |
+| Voice Cloning | Voxtral (Mistral) via ref_audio zero-shot cloning |
 | Text Comparison | jsdiff + Double Metaphone + Levenshtein distance |
 | Ritual Format | .mram encrypted binary (AES-256-GCM + PBKDF2) |
-| Audio Synthesis | Web Audio API (gavel knock sounds) |
+| Audio Synthesis | Web Audio API (gavel knock sounds, wav conversion) |
 | Storage | IndexedDB with Web Crypto API (AES-256-GCM) |
+| Deployment | Vercel |
 
 ---
 
@@ -241,41 +180,50 @@ flowchart LR
 
 ```
 src/
-├── app/                              # Next.js App Router pages
+├── app/
 │   ├── api/
-│   │   ├── chat/route.ts             # AI coaching API — streams Claude responses
+│   │   ├── rehearsal-feedback/route.ts  # Claude Haiku streaming feedback
+│   │   ├── transcribe/route.ts          # Groq Whisper STT proxy
 │   │   └── tts/
-│   │       ├── google/route.ts       # Google Cloud TTS proxy
-│   │       ├── elevenlabs/route.ts   # ElevenLabs TTS proxy
-│   │       └── engines/route.ts      # TTS engine availability check
-│   ├── chat/page.tsx                 # AI Coach chat interface
-│   ├── practice/page.tsx             # Practice mode (solo + rehearsal + listen)
-│   ├── upload/page.tsx               # .mram file upload page
-│   ├── walkthrough/page.tsx          # Visual architecture walkthrough
-│   ├── layout.tsx                    # Root layout with Navigation
-│   ├── page.tsx                      # Home page / dashboard
-│   └── globals.css                   # Global styles
+│   │       ├── voxtral/
+│   │       │   ├── route.ts             # Voxtral TTS proxy (voice_id or ref_audio)
+│   │       │   ├── voices/route.ts      # List/create Mistral voice profiles
+│   │       │   └── setup/route.ts       # Bootstrap voices from Deepgram/ElevenLabs
+│   │       ├── elevenlabs/route.ts      # ElevenLabs TTS proxy
+│   │       ├── deepgram/route.ts        # Deepgram Aura-2 TTS proxy
+│   │       ├── google/route.ts          # Google Cloud TTS proxy
+│   │       ├── kokoro/route.ts          # Kokoro self-hosted TTS proxy
+│   │       └── engines/route.ts         # TTS engine availability check
+│   ├── voices/page.tsx                  # Voice recording & management
+│   ├── practice/page.tsx                # Practice mode (solo + rehearsal + listen)
+│   ├── progress/page.tsx                # Performance tracking dashboard
+│   ├── upload/page.tsx                  # .mram file upload page
+│   ├── walkthrough/page.tsx             # Visual how-it-works guide
+│   ├── layout.tsx                       # Root layout with Navigation
+│   └── page.tsx                         # Home page
 ├── components/
-│   ├── ChatInterface.tsx             # AI chat with voice input/output
-│   ├── DiffDisplay.tsx               # Color-coded word-by-word diff
-│   ├── DocumentUpload.tsx            # .mram file upload + passphrase entry
-│   ├── ListenMode.tsx                # Full ceremony playback with TTS
-│   ├── Navigation.tsx                # Mobile bottom bar + desktop top nav
-│   ├── PracticeMode.tsx              # Solo section practice (cipher text shown)
-│   ├── RehearsalMode.tsx             # Call-and-response with AI voices
-│   └── TTSEngineSelector.tsx         # Voice engine selection UI
+│   ├── DiffDisplay.tsx                  # Color-coded word-by-word diff
+│   ├── DocumentUpload.tsx               # .mram file upload + passphrase entry
+│   ├── ListenMode.tsx                   # Full ceremony playback with TTS
+│   ├── Navigation.tsx                   # Mobile bottom bar + desktop top nav
+│   ├── PerformanceTracker.tsx           # Accuracy trends & streaks
+│   ├── PracticeMode.tsx                 # Solo section practice
+│   ├── RehearsalMode.tsx                # Call-and-response with AI voices
+│   └── TTSEngineSelector.tsx            # Voice engine selection dropdown
 └── lib/
-    ├── mram-format.ts                # .mram file types, encrypt/decrypt, conversion
-    ├── document-parser.ts            # Legacy text parsing + role display names
-    ├── gavel-sound.ts                # Synthesized gavel knock via Web Audio API
-    ├── speech-to-text.ts             # STT engine with provider interface
-    ├── storage.ts                    # Encrypted IndexedDB storage (v2: cipher/plain)
-    ├── text-comparison.ts            # 5-layer comparison pipeline
-    ├── text-to-speech.ts             # TTS engine abstraction + role voice mapping
-    └── tts-cloud.ts                  # Cloud TTS provider integration
+    ├── voice-storage.ts                 # IndexedDB storage for voice recordings
+    ├── tts-cloud.ts                     # Cloud TTS engines + voice role mapping
+    ├── text-to-speech.ts                # TTS engine abstraction + routing
+    ├── speech-to-text.ts                # STT engines (Whisper + Browser)
+    ├── text-comparison.ts               # 5-layer comparison pipeline
+    ├── mram-format.ts                   # .mram encrypt/decrypt/conversion
+    ├── storage.ts                       # Encrypted IndexedDB (v3: + voices store)
+    ├── performance-history.ts           # Practice session history tracking
+    ├── document-parser.ts               # Role display names + text parsing
+    └── gavel-sound.ts                   # Synthesized gavel knock via Web Audio
 
 scripts/
-└── build-mram.ts                     # CLI: build .mram files from paired markdown
+└── build-mram.ts                        # CLI: build .mram files from paired markdown
 ```
 
 ---
@@ -285,49 +233,58 @@ scripts/
 ### Prerequisites
 
 - Node.js 18+
-- An Anthropic API key (for the AI Coach feature)
-- A `.mram` ritual file from your lodge secretary (encrypted with a lodge passphrase)
-- _(Optional)_ Google Cloud TTS API key for premium voices
-- _(Optional)_ ElevenLabs API key for ultra-realistic voices
+- An Anthropic API key (for AI rehearsal feedback)
+- A `.mram` ritual file from your lodge (encrypted with a lodge passphrase)
 
 ### Installation
 
 ```bash
-# Install dependencies
 npm install
-
-# Copy environment variables
 cp .env.example .env
+```
 
-# Add your API keys to .env
-# ANTHROPIC_API_KEY=sk-ant-your-key-here    (required)
-# GOOGLE_CLOUD_TTS_API_KEY=                 (optional)
-# ELEVENLABS_API_KEY=                       (optional)
+Add your API keys to `.env`:
 
-# Run development server
+```bash
+# Required
+ANTHROPIC_API_KEY=sk-ant-your-key-here
+
+# Recommended — speech-to-text
+GROQ_API_KEY=                    # Whisper STT (high accuracy)
+
+# Pick one or more TTS engines
+MISTRAL_API_KEY=                 # Voxtral — voice cloning, half-cost
+DEEPGRAM_API_KEY=                # Aura-2 — fast, natural
+ELEVENLABS_API_KEY=              # Premium — ultra-realistic
+GOOGLE_CLOUD_TTS_API_KEY=        # Neural2 voices
+KOKORO_TTS_URL=                  # Self-hosted, free
+```
+
+```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+Open [http://localhost:3000](http://localhost:3000).
 
-### Building a .mram File
+### Setting Up Custom Voice Cloning
 
-If you need to create a .mram file from source ritual text:
+1. Set `MISTRAL_API_KEY` in your environment
+2. Go to the **Voices** page in the app
+3. Record yourself reading a ritual phrase (3-10 seconds)
+4. Name it (e.g. "Brother McLeod - WM") and save
+5. Select **Voxtral (Mistral)** in the TTS engine dropdown
+6. Start rehearsal — the AI speaks in your cloned voice
 
-```bash
-# Build from paired cipher/plain markdown
-npx tsx scripts/build-mram.ts ritual-input.md output.mram "YourLodgePassphrase"
-```
-
-The input markdown file should have each speaker line appear twice (cipher then plain). See `scripts/build-mram.ts` for the full format specification.
+Record multiple brothers with different tones for different officers. The app distributes voices across roles automatically.
 
 ### Usage
 
-1. **Upload** your .mram encrypted ritual file on the Upload page and enter your lodge passphrase
-2. **Solo Practice** — Select a section (cipher text shown), recite from memory, get word-by-word accuracy feedback
-3. **Listen Mode** — Press play and hear the full ceremony read aloud with unique officer voices (cipher text scrolls along)
-4. **Rehearsal Mode** — Pick your role; the AI reads other officers' lines, then prompts "Your Turn" for yours
-5. **AI Coach** — Chat with Claude about your ritual — ask questions, get hints, or quiz yourself (plain text only sent to AI)
+1. **Upload** your .mram encrypted ritual file and enter your lodge passphrase
+2. **Rehearsal Mode** — Pick your role; the AI reads other officers' lines, then prompts you for yours
+3. **Solo Practice** — Drill a single section with word-by-word accuracy feedback
+4. **Listen Mode** — Hear the full ceremony read aloud with unique officer voices
+5. **Voices** — Record voice samples for Voxtral voice cloning
+6. **Progress** — Track accuracy trends and identify trouble spots
 
 ---
 
@@ -337,7 +294,6 @@ Deploy to Vercel:
 
 ```bash
 npm run build
-# Deploy via Vercel CLI or connect your GitHub repo at vercel.com
 ```
 
-Set your environment variables (`ANTHROPIC_API_KEY`, and optionally `GOOGLE_CLOUD_TTS_API_KEY` and `ELEVENLABS_API_KEY`) in your Vercel project settings.
+Set your environment variables in Vercel project settings. At minimum: `ANTHROPIC_API_KEY`. Add TTS and STT keys as desired.
