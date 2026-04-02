@@ -51,6 +51,7 @@ export default function VoicesPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [phraseIdx, setPhraseIdx] = useState(0);
   const [micLevel, setMicLevel] = useState(0);
+  const [testingVoiceId, setTestingVoiceId] = useState<string | null>(null);
 
   // Refs
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -360,6 +361,53 @@ export default function VoicesPage() {
   };
 
   // ============================================================
+  // Test voice playback
+  // ============================================================
+
+  const PREVIEW_TEXT =
+    "Brother Senior Warden, proceed to satisfy yourself that all present are Masons.";
+
+  const testVoice = async (voice: LocalVoice) => {
+    if (testingVoiceId) return; // already playing
+    setTestingVoiceId(voice.id);
+    setError(null);
+
+    try {
+      const resp = await fetch("/api/tts/voxtral", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: PREVIEW_TEXT,
+          refAudio: voice.audioBase64,
+        }),
+      });
+
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({ error: resp.statusText }));
+        throw new Error((data as { error?: string }).error || "TTS failed");
+      }
+
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        setTestingVoiceId(null);
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(url);
+        setTestingVoiceId(null);
+      };
+      await audio.play();
+    } catch (err) {
+      setError(
+        `Voice test failed: ${err instanceof Error ? err.message : "unknown error"}`
+      );
+      setTestingVoiceId(null);
+    }
+  };
+
+  // ============================================================
   // Render
   // ============================================================
 
@@ -629,8 +677,26 @@ export default function VoicesPage() {
                   ))}
                 </select>
                 <button
+                  onClick={() => testVoice(voice)}
+                  disabled={testingVoiceId !== null}
+                  className="ml-2 p-1.5 text-zinc-600 hover:text-amber-400 disabled:text-zinc-700 transition-colors flex-shrink-0"
+                  title="Test voice"
+                >
+                  {testingVoiceId === voice.id ? (
+                    <div className="w-4 h-4 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <svg
+                      className="w-4 h-4"
+                      fill="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path d="M8 5v14l11-7z" />
+                    </svg>
+                  )}
+                </button>
+                <button
                   onClick={() => handleDelete(voice.id, voice.name)}
-                  className="ml-3 p-1.5 text-zinc-600 hover:text-red-400 transition-colors flex-shrink-0"
+                  className="ml-1 p-1.5 text-zinc-600 hover:text-red-400 transition-colors flex-shrink-0"
                   title="Delete voice"
                 >
                   <svg
