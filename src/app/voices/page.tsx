@@ -129,8 +129,9 @@ export default function VoicesPage() {
       setDuration(0);
       setRecordingState("recording");
 
-      // Auto-stop at 15 seconds to keep file size reasonable for ref_audio
-      const MAX_DURATION_MS = 15000;
+      // Auto-stop at 10 seconds — Voxtral only needs 2-3s for cloning,
+      // but 10s gives room for quality. Longer recordings add latency.
+      const MAX_DURATION_MS = 10000;
       timerRef.current = setInterval(() => {
         const elapsed = Date.now() - startTimeRef.current;
         setDuration(Math.floor(elapsed / 1000));
@@ -358,7 +359,7 @@ export default function VoicesPage() {
         {/* Tips */}
         <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3">
           <p className="text-xs text-amber-400/80">
-            <strong>Tips:</strong> 3-5 seconds is ideal (smaller file = faster TTS).
+            <strong>Tips:</strong> 3-5 seconds is ideal. Shorter recordings = faster TTS response.
             Speak in the tone you want for rehearsal. A quiet room helps cloning quality.
           </p>
         </div>
