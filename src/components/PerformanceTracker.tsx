@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import {
   getPerformanceSummary,
   getAllSessions,
@@ -57,6 +58,12 @@ export default function PerformanceTracker() {
           Complete a practice or rehearsal session to start tracking your progress.
           Your scores, trends, and trouble spots will appear here.
         </p>
+        <Link
+          href="/practice"
+          className="inline-block mt-6 px-6 py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-medium transition-colors"
+        >
+          Start Practicing
+        </Link>
       </div>
     );
   }
