@@ -162,6 +162,79 @@ export default function VoicesPage() {
   // Save to IndexedDB
   // ============================================================
 
+  /**
+   * Convert a webm/opus audio blob to wav using the Web Audio API.
+   * Mistral's ref_audio expects wav or mp3 — browsers record in webm.
+   */
+  const convertBlobToWavBase64 = async (blob: Blob): Promise<string> => {
+    const audioContext = new AudioContext({ sampleRate: 16000 });
+    try {
+      const arrayBuffer = await blob.arrayBuffer();
+      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+      // Get mono channel (first channel)
+      const channelData = audioBuffer.getChannelData(0);
+
+      // Build WAV file
+      const wavBuffer = encodeWav(channelData, 16000);
+
+      // Convert to base64
+      const bytes = new Uint8Array(wavBuffer);
+      let binary = "";
+      for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      return btoa(binary);
+    } finally {
+      await audioContext.close();
+    }
+  };
+
+  /** Encode raw PCM samples into a WAV file ArrayBuffer. */
+  const encodeWav = (samples: Float32Array, sampleRate: number): ArrayBuffer => {
+    const numChannels = 1;
+    const bitsPerSample = 16;
+    const bytesPerSample = bitsPerSample / 8;
+    const dataLength = samples.length * bytesPerSample;
+    const buffer = new ArrayBuffer(44 + dataLength);
+    const view = new DataView(buffer);
+
+    // RIFF header
+    writeString(view, 0, "RIFF");
+    view.setUint32(4, 36 + dataLength, true);
+    writeString(view, 8, "WAVE");
+
+    // fmt chunk
+    writeString(view, 12, "fmt ");
+    view.setUint32(16, 16, true); // chunk size
+    view.setUint16(20, 1, true); // PCM format
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * numChannels * bytesPerSample, true);
+    view.setUint16(32, numChannels * bytesPerSample, true);
+    view.setUint16(34, bitsPerSample, true);
+
+    // data chunk
+    writeString(view, 36, "data");
+    view.setUint32(40, dataLength, true);
+
+    // Write PCM samples (float32 → int16)
+    let offset = 44;
+    for (let i = 0; i < samples.length; i++) {
+      const s = Math.max(-1, Math.min(1, samples[i]));
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+      offset += 2;
+    }
+
+    return buffer;
+  };
+
+  const writeString = (view: DataView, offset: number, str: string) => {
+    for (let i = 0; i < str.length; i++) {
+      view.setUint8(offset + i, str.charCodeAt(i));
+    }
+  };
+
   const saveVoiceLocally = async () => {
     if (!audioBlob || !voiceName.trim()) {
       setError("Please enter a name for this voice.");
@@ -172,21 +245,14 @@ export default function VoicesPage() {
     setRecordingState("saving");
 
     try {
-      // Convert blob to base64 (chunk-safe)
-      const base64 = await new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const dataUrl = reader.result as string;
-          resolve(dataUrl.split(",")[1]);
-        };
-        reader.readAsDataURL(audioBlob);
-      });
+      // Convert webm recording to wav (Mistral expects wav/mp3 for ref_audio)
+      const wavBase64 = await convertBlobToWavBase64(audioBlob);
 
       const voice: LocalVoice = {
         id: `voice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         name: voiceName.trim(),
-        audioBase64: base64,
-        mimeType,
+        audioBase64: wavBase64,
+        mimeType: "audio/wav",
         duration,
         createdAt: Date.now(),
       };

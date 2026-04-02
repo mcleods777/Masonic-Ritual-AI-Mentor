@@ -5,11 +5,11 @@ import { NextRequest, NextResponse } from "next/server";
  * Keeps the API key server-side while returning audio to the client.
  *
  * Accepts either:
- * - voiceId: UUID of a saved voice profile (from /api/tts/voxtral/voices)
- * - refAudio: base64-encoded audio for one-off voice cloning
+ * - voiceId: UUID of a saved voice profile (requires Mistral paid plan)
+ * - refAudio: base64-encoded wav audio for one-off voice cloning (free tier)
  *
- * If neither is provided, uses the first available saved voice profile,
- * or returns an error asking the user to set up voices.
+ * The client converts browser recordings (webm) to wav before sending,
+ * since Mistral's ref_audio expects wav or mp3.
  */
 export async function POST(request: NextRequest) {
   const apiKey = process.env.MISTRAL_API_KEY;
@@ -90,6 +90,7 @@ export async function POST(request: NextRequest) {
 
   if (!response.ok) {
     const errText = await response.text();
+    console.error(`Voxtral API error (${response.status}):`, errText);
     return NextResponse.json(
       { error: `Voxtral API error: ${errText}` },
       { status: response.status }
@@ -100,6 +101,7 @@ export async function POST(request: NextRequest) {
   const result = await response.json();
   const audioData = (result as { audio_data?: string }).audio_data;
   if (!audioData) {
+    console.error("Voxtral response missing audio_data:", JSON.stringify(result).slice(0, 500));
     return NextResponse.json(
       { error: "No audio data in Voxtral response" },
       { status: 500 }
