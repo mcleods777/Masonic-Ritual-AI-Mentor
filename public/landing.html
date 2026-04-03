@@ -6,22 +6,35 @@
   <title>Masonic Ritual Mentor</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Lato:wght@300;400&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; overflow: hidden; background: #080a10; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #1a150e; }
     canvas { display: block; width: 100%; height: 100%; cursor: none; }
     #loader {
       position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
-      background: #080a10; color: #c9962c; font-family: 'Cinzel', serif; font-size: 1.2rem;
+      background: #1a150e; color: #c9962c; font-family: 'Cinzel', serif; font-size: 1.2rem;
       z-index: 10; transition: opacity 0.5s;
     }
     #loader.hide { opacity: 0; pointer-events: none; }
+    #enter-btn {
+      position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
+      z-index: 5; padding: 16px 48px;
+      background: transparent; border: 1px solid #c9962c;
+      color: #c9962c; font-family: 'Cinzel', serif; font-size: 16px;
+      letter-spacing: 0.15em; cursor: pointer;
+      transition: all 0.3s ease;
+    }
+    #enter-btn:hover {
+      background: #c9962c; color: #1a150e;
+      box-shadow: 0 0 30px rgba(201, 150, 44, 0.3);
+    }
   </style>
 </head>
 <body>
   <div id="loader">Loading...</div>
   <canvas id="c"></canvas>
+  <a id="enter-btn" href="/">ENTER THE LODGE</a>
 
   <script type="module">
     let prepareWithSegments, layoutNextLine;
@@ -29,40 +42,42 @@
     prepareWithSegments = m.prepareWithSegments;
     layoutNextLine = m.layoutNextLine;
 
-    // ── Config ──
-    const BG = '#080a10';
+    // ── Config: Ancient scroll aesthetic ──
+    const BG = '#1a150e';           // dark aged parchment
+    const BG2 = '#140f08';          // deeper edges
     const GOLD = '#c9962c';
     const GOLD_DIM = '#8b6914';
-    const TEXT_COLOR = '#d8d4cc';
-    const TEXT_DIM = '#6a655e';
+    const TEXT_COLOR = '#c4b596';    // faded ink on parchment
+    const TEXT_DIM = '#7a6e55';
     const SYMBOL_RADIUS = 80;
-    const LINE_HEIGHT = 28;
-    const FONT_BODY = '17px Lato, sans-serif';
-    const FONT_HEADING = 'bold 38px Cinzel, serif';
+    const LINE_HEIGHT = 30;
+    const FONT_BODY = '18px "Cormorant Garamond", "Palatino Linotype", Palatino, Georgia, serif';
+    const FONT_HEADING = 'bold 40px Cinzel, serif';
 
     // ── Text content ──
     const HEADING = 'MASONIC RITUAL MENTOR';
-    const BODY_TEXT = `Practice your ritual work from memory. Upload your encrypted .mram file, speak your lines aloud, and get instant word-by-word feedback powered by voice AI. Everything stays on your device.
+    const PARAGRAPHS = [
+      `Practice your ritual work from memory. Upload your encrypted .mram file, speak your lines aloud, and get instant word-by-word feedback powered by voice AI. Everything stays on your device.`,
 
-Six distinct AI voices for each officer role. The Worshipful Master speaks with authority. The Senior Warden is steady and clear. The Junior Deacon is bright and articulate. Every brother sounds different because every brother is different.
+      `Six distinct AI voices for each officer role. The Worshipful Master speaks with authority. The Senior Warden is steady and clear. The Junior Deacon is bright and articulate. Every brother sounds different because every brother is different.`,
 
-Record your own voice or a brother's voice in three seconds. The app clones it and uses it for that officer's lines during rehearsal. Practice as if the whole lodge is there with you.
+      `Record your own voice or a brother's voice in three seconds. The app clones it and uses it for that officer's lines during rehearsal. Practice as if the whole lodge is there with you.`,
 
-Cipher text is shown by default so you practice the way you'll perform. Toggle to plain text when you need it. Five layers of comparison catch every word: normalization, word-level diff, phonetic forgiveness for speech-to-text artifacts, fuzzy matching for near-misses, and color-coded accuracy scoring.
+      `Cipher text is shown by default so you practice the way you'll perform. Five layers of comparison catch every word: normalization, word-level diff, phonetic forgiveness, fuzzy matching, and color-coded accuracy scoring.`,
 
-Track your accuracy over time. See which sections give you trouble. Watch your streaks grow. The more you practice, the more confident you become on the night.
+      `Track your accuracy over time. See which sections give you trouble. Watch your streaks grow. The more you practice, the more confident you become on the night.`,
 
-Privacy first. Your ritual file is encrypted with AES-256-GCM and stored only in your browser. Cipher and plain text are kept in separate encrypted fields. Nothing leaves your device unless you choose to speak.
+      `Privacy first. Your ritual file is encrypted with AES-256-GCM and stored only in your browser. Nothing leaves your device unless you choose to speak.`,
 
-Built by a Mason, for Masons. One brother with an idea and AI as his only engineering team. From first commit to production in six weeks. This is what happens when the tools get out of the way and let you build what matters.
-
-Upload your .mram file. Pick your role. Start rehearsing.`;
+      `Built by a Mason, for Masons. One brother with an idea and AI as his only engineering team. From first commit to production in six weeks.`,
+    ];
 
     // ── State ──
     let mouseX = -999, mouseY = -999;
     let symbolX = -999, symbolY = -999;
     let dpr, W, H, ctx;
-    let preparedHeading, preparedBody;
+    let preparedHeading;
+    let preparedParagraphs = [];
     let ready = false;
     let secondarySymbols = [];
     let frameCount = 0;
@@ -118,9 +133,9 @@ Upload your .mram file. Pick your role. Start rehearsing.`;
 
       const s = size / 80;
 
-      // Glow
-      ctx.shadowColor = GOLD;
-      ctx.shadowBlur = 30 * s;
+      // Ancient warm glow
+      ctx.shadowColor = '#d4a030';
+      ctx.shadowBlur = 40 * s;
 
       ctx.strokeStyle = GOLD;
       ctx.lineWidth = 2.5 * s;
@@ -314,7 +329,7 @@ Upload your .mram file. Pick your role. Start rehearsing.`;
       ]).catch(() => {});
 
       preparedHeading = prepareWithSegments(HEADING, FONT_HEADING);
-      preparedBody = prepareWithSegments(BODY_TEXT, FONT_BODY);
+      preparedParagraphs = PARAGRAPHS.map(p => prepareWithSegments(p, FONT_BODY));
       ready = true;
       document.getElementById('loader').classList.add('hide');
     }
@@ -333,8 +348,32 @@ Upload your .mram file. Pick your role. Start rehearsing.`;
 
       updateSecondarySymbols();
 
-      // Clear
-      ctx.fillStyle = BG;
+      // Clear with parchment gradient
+      const grad = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, Math.max(W, H) * 0.7);
+      grad.addColorStop(0, BG);
+      grad.addColorStop(1, BG2);
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
+
+      // Subtle noise/grain texture (aged paper feel)
+      if (frameCount === 1 || frameCount % 120 === 0) {
+        ctx.save();
+        ctx.globalAlpha = 0.03;
+        for (let i = 0; i < 200; i++) {
+          const x = Math.random() * W;
+          const y = Math.random() * H;
+          const s = Math.random() * 2 + 0.5;
+          ctx.fillStyle = Math.random() > 0.5 ? '#d4c4a0' : '#0a0800';
+          ctx.fillRect(x, y, s, s);
+        }
+        ctx.restore();
+      }
+
+      // Vignette (darker edges like an old scroll)
+      const vig = ctx.createRadialGradient(W/2, H/2, Math.min(W, H) * 0.3, W/2, H/2, Math.max(W, H) * 0.7);
+      vig.addColorStop(0, 'rgba(0,0,0,0)');
+      vig.addColorStop(1, 'rgba(0,0,0,0.4)');
+      ctx.fillStyle = vig;
       ctx.fillRect(0, 0, W, H);
 
       // Build obstacle list
@@ -350,22 +389,21 @@ Upload your .mram file. Pick your role. Start rehearsing.`;
 
       // Render heading
       ctx.font = FONT_HEADING;
-      const headingY = renderText(preparedHeading, FONT_HEADING, GOLD, startX, 60, maxW, 50, obstacles);
+      let curY = renderText(preparedHeading, FONT_HEADING, GOLD, startX, 60, maxW, 52, obstacles);
 
-      // Render body
-      renderText(preparedBody, FONT_BODY, TEXT_COLOR, startX, headingY + 20, maxW, LINE_HEIGHT, obstacles);
+      // Render paragraphs with spacing
+      const PARA_GAP = 18;
+      for (const prepared of preparedParagraphs) {
+        curY += PARA_GAP;
+        curY = renderText(prepared, FONT_BODY, TEXT_COLOR, startX, curY, maxW, LINE_HEIGHT, obstacles);
+        if (curY > H) break; // off screen
+      }
 
       // Draw symbols on top
       drawSquareAndCompass(symbolX, symbolY, SYMBOL_RADIUS, 0.9);
       for (const s of secondarySymbols) drawSecondarySymbol(s);
 
-      // CTA hint at bottom
-      ctx.font = '14px Lato, sans-serif';
-      ctx.fillStyle = TEXT_DIM;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'bottom';
-      ctx.fillText('Move your cursor to guide the compass  |  masonic-ritual-ai-mentor.vercel.app', W / 2, H - 20);
-      ctx.textAlign = 'left';
+      // (CTA is an HTML overlay button now)
 
       requestAnimationFrame(render);
       } catch (e) {
