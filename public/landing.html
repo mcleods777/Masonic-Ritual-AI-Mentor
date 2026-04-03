@@ -278,36 +278,23 @@ Upload your .mram file. Pick your role. Start rehearsing.`;
       const endY = H + lineH;
       const leftEdge = startX;
       const rightEdge = startX + maxWidth;
-      const MIN_SLOT = 80; // minimum slot width to avoid Pretext crash on tiny widths
+      const MIN_SLOT = 100;
 
       while (y < endY && !done) {
         const exclusions = getExclusions(y, y + lineH, obstacles);
         const slots = carveSlots(leftEdge, rightEdge, exclusions);
-
-        if (slots.length === 0) {
-          y += lineH;
-          continue;
-        }
-
-        // Find the widest usable slot for this line
         const usableSlots = slots.filter(s => s.w >= MIN_SLOT);
 
         if (usableSlots.length === 0) {
-          // All slots too narrow, skip this line
           y += lineH;
           continue;
         }
 
         for (const slot of usableSlots) {
-          try {
-            const result = layoutNextLine(prepared, state, slot.w, lineH);
-            if (!result) { done = true; break; }
-            state = result.state;
-            ctx.fillText(result.text.trimEnd(), slot.x, y);
-          } catch {
-            // Pretext can crash on edge-case widths, skip this slot
-            continue;
-          }
+          const result = layoutNextLine(prepared, state, slot.w);
+          if (!result) { done = true; break; }
+          state = result.state;
+          ctx.fillText(result.text.trimEnd(), slot.x, y);
         }
 
         y += lineH;
