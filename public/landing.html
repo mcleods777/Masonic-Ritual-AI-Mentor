@@ -24,22 +24,10 @@
   <canvas id="c"></canvas>
 
   <script type="module">
-    const loader = document.getElementById('loader');
-    loader.textContent = 'Loading Pretext...';
-
     let prepareWithSegments, layoutNextLine;
-    try {
-      const m = await import('./pretext.js');
-      prepareWithSegments = m.prepareWithSegments;
-      layoutNextLine = m.layoutNextLine;
-      loader.textContent = 'Pretext loaded, initializing...';
-    } catch (err) {
-      loader.textContent = 'Import failed: ' + err.message;
-      loader.style.fontSize = '14px';
-      loader.style.whiteSpace = 'pre-wrap';
-      loader.style.padding = '40px';
-      throw err;
-    }
+    const m = await import('./pretext.js');
+    prepareWithSegments = m.prepareWithSegments;
+    layoutNextLine = m.layoutNextLine;
 
     // ── Config ──
     const BG = '#080a10';
@@ -329,25 +317,15 @@ Upload your .mram file. Pick your role. Start rehearsing.`;
 
     // ── Init Pretext ──
     async function init() {
-      const loader = document.getElementById('loader');
+      await Promise.race([
+        document.fonts.ready,
+        new Promise(r => setTimeout(r, 2000)),
+      ]).catch(() => {});
 
-      loader.textContent = 'Waiting for fonts...';
-      try {
-        await Promise.race([
-          document.fonts.ready,
-          new Promise(r => setTimeout(r, 2000)),
-        ]);
-      } catch { /* proceed with system fonts */ }
-
-      loader.textContent = 'Preparing heading...';
       preparedHeading = prepareWithSegments(HEADING, FONT_HEADING);
-
-      loader.textContent = 'Preparing body text...';
       preparedBody = prepareWithSegments(BODY_TEXT, FONT_BODY);
-
-      loader.textContent = 'Starting render...';
       ready = true;
-      loader.classList.add('hide');
+      document.getElementById('loader').classList.add('hide');
     }
 
     // ── Main render loop ──
@@ -399,25 +377,13 @@ Upload your .mram file. Pick your role. Start rehearsing.`;
       ctx.textAlign = 'left';
 
       requestAnimationFrame(render);
-      } catch (renderErr) {
-        document.getElementById('loader').classList.remove('hide');
-        document.getElementById('loader').textContent = 'Render error: ' + renderErr.message + '\n' + renderErr.stack;
-        document.getElementById('loader').style.cssText = 'font-size:12px;white-space:pre-wrap;padding:40px;text-align:left;';
+      } catch {
+        // Render error, skip frame
       }
     }
 
-    try {
-      await init();
-      requestAnimationFrame(render);
-    } catch (err) {
-      const loader = document.getElementById('loader');
-      loader.classList.remove('hide');
-      loader.textContent = 'Init failed: ' + err.message + '\n\n' + err.stack;
-      loader.style.fontSize = '12px';
-      loader.style.whiteSpace = 'pre-wrap';
-      loader.style.padding = '40px';
-      loader.style.textAlign = 'left';
-    }
+    await init();
+    requestAnimationFrame(render);
   </script>
 </body>
 </html>
