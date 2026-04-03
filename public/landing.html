@@ -553,17 +553,28 @@
         }
       }
 
-      // Layout — centered vertically
-      const pad = mobile ? 24 : Math.max(60, W * 0.08);
+      // Layout
+      const pad = mobile ? 16 : Math.max(60, W * 0.08);
       const maxW = Math.min(W - pad * 2, 800);
       const startX = (W - maxW) / 2;
 
-      // Start text roughly centered (heading + 3 lines of body ~ 200px)
-      const topY = Math.max(H * 0.25, 60);
+      // On mobile, start near top. On desktop, center vertically.
+      const topY = mobile ? 40 : Math.max(H * 0.25, 80);
 
-      // Render heading
-      const headingLineH = mobile ? 36 : 60;
-      let curY = renderText(preparedHeading, fontHeading, GOLD, startX, topY, maxW, headingLineH, obstacles);
+      // Render heading — centered on mobile via canvas textAlign
+      const headingLineH = mobile ? 34 : 60;
+      if (mobile) {
+        // Draw heading centered, above the Pretext body text
+        ctx.font = fontHeading;
+        ctx.fillStyle = GOLD;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText(HEADING, W / 2, topY);
+        ctx.textAlign = 'left';
+        var curY = topY + headingLineH + 8;
+      } else {
+        var curY = renderText(preparedHeading, fontHeading, GOLD, startX, topY, maxW, headingLineH, obstacles);
+      }
 
       // Render body
       const PARA_GAP = mobile ? 16 : 24;
