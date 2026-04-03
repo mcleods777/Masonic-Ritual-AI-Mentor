@@ -350,7 +350,7 @@ export function clearLastTTSError(): void {
 
 /**
  * Speak the given text aloud using the current engine.
- * Falls back to Deepgram → Browser if the primary engine fails.
+ * Falls back to Google Cloud → Browser if the primary engine fails.
  */
 export async function speak(
   text: string,
@@ -378,22 +378,26 @@ export async function speak(
     console.warn(`${currentEngine} TTS failed, falling back: ${msg}`);
     lastTTSError = `${currentEngine} failed: ${msg}`;
 
-    // Already on browser — nothing to fall back to
-    if (currentEngine === "browser") throw err;
+    // Already on the fallback chain — nothing left to try
+    if (currentEngine === "browser" || currentEngine === "google-cloud") throw err;
 
-    // Try browser TTS as universal fallback
+    // Try Google Cloud as fallback (better quality than browser)
     try {
-      await speakBrowser(text, options);
+      await speakGoogleCloud(text);
     } catch {
-      // Browser also failed — propagate original error
-      throw err;
+      // Google also failed — try browser as last resort
+      try {
+        await speakBrowser(text, options);
+      } catch {
+        throw err;
+      }
     }
   }
 }
 
 /**
  * Speak text as a specific officer role using the current engine.
- * Falls back to Browser TTS if the primary engine fails.
+ * Falls back to Google Cloud → Browser if the primary engine fails.
  */
 export async function speakAsRole(
   text: string,
@@ -428,17 +432,23 @@ export async function speakAsRole(
     console.warn(`${currentEngine} TTS (role: ${role}) failed, falling back: ${msg}`);
     lastTTSError = `${currentEngine} failed for ${role}: ${msg}`;
 
-    if (currentEngine === "browser") throw err;
+    if (currentEngine === "browser" || currentEngine === "google-cloud") throw err;
 
+    // Try Google Cloud as fallback (better quality than browser)
     try {
-      const profile = voiceMap?.get(role) || getVoiceForRole(role);
-      await speakBrowser(text, {
-        pitch: profile.pitch,
-        rate: profile.rate,
-        voiceName: profile.voiceName,
-      });
+      await speakGoogleCloudAsRole(text, role);
     } catch {
-      throw err;
+      // Google also failed — try browser as last resort
+      try {
+        const profile = voiceMap?.get(role) || getVoiceForRole(role);
+        await speakBrowser(text, {
+          pitch: profile.pitch,
+          rate: profile.rate,
+          voiceName: profile.voiceName,
+        });
+      } catch {
+        throw err;
+      }
     }
   }
 }
