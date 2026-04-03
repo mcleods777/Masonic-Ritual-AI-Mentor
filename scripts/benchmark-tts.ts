@@ -88,7 +88,7 @@ async function main() {
 
   // Deepgram Aura-2
   if (engines.deepgram) {
-    const voices = ["aura-2-zeus-en", "aura-2-orion-en", "aura-2-arcas-en", "aura-2-orpheus-en", "aura-2-theia-en", "aura-2-andromeda-en", "aura-2-atlas-en"];
+    const voices = ["aura-2-zeus-en", "aura-2-orion-en", "aura-2-arcas-en", "aura-2-orpheus-en", "aura-2-apollo-en", "aura-2-hermes-en", "aura-2-atlas-en"];
     for (const voice of voices) {
       process.stdout.write(`  Deepgram ${voice}...`);
       const r = await benchmarkEndpoint("deepgram", voice, `${BASE_URL}/api/tts/deepgram`, { text: TEST_TEXT, model: voice });

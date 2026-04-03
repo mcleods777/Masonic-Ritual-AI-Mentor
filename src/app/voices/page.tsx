@@ -13,6 +13,7 @@ import {
 } from "@/lib/voice-storage";
 import { clearVoxtralVoicesCache, VOXTRAL_ROLE_OPTIONS } from "@/lib/tts-cloud";
 import { normalizeAudio, encodeWav } from "@/lib/audio-utils";
+import { ensureDefaultVoices, getDefaultVoiceNames } from "@/lib/default-voices";
 
 // ============================================================
 // Types
@@ -57,7 +58,6 @@ export default function VoicesPage() {
   const [micLevel, setMicLevel] = useState(0);
   const [testingVoiceId, setTestingVoiceId] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
-  const [cloning, setCloning] = useState(false);
 
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -76,8 +76,15 @@ export default function VoicesPage() {
 
   const fetchVoices = useCallback(async () => {
     try {
+      // Auto-load default voices on first visit
+      await ensureDefaultVoices();
       const localVoices = await listVoices();
-      setVoices(localVoices.sort((a, b) => b.createdAt - a.createdAt));
+      // Sort: user voices (createdAt > 0) first, then defaults (createdAt === 0)
+      setVoices(localVoices.sort((a, b) => {
+        if (a.createdAt === 0 && b.createdAt !== 0) return 1;
+        if (a.createdAt !== 0 && b.createdAt === 0) return -1;
+        return b.createdAt - a.createdAt;
+      }));
     } catch {
       // IndexedDB not available
     } finally {
@@ -423,73 +430,6 @@ export default function VoicesPage() {
     }
   };
 
-  // ============================================================
-  // Clone Aura voices handler
-  // ============================================================
-
-  const handleCloneAura = async () => {
-    setCloning(true);
-    setError(null);
-    setSuccess(null);
-
-    try {
-      const resp = await fetch("/api/tts/voxtral/clone-aura", { method: "POST" });
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({ error: "Clone request failed" }));
-        setError((err as { error?: string }).error || "Failed to clone voices");
-        return;
-      }
-
-      const data = await resp.json() as {
-        voices: Array<{
-          name: string;
-          role: string;
-          description: string;
-          audioBase64: string;
-          mimeType: string;
-          status: string;
-        }>;
-      };
-
-      const existing = await listVoices();
-      const existingKeys = new Set(existing.map((v) => `${v.name}::${v.role ?? ""}`));
-
-      let imported = 0;
-      let skipped = 0;
-
-      for (const v of data.voices) {
-        if (v.status !== "ok") continue;
-        const key = `${v.name}::${v.role}`;
-        if (existingKeys.has(key)) {
-          skipped++;
-          continue;
-        }
-
-        await saveVoice({
-          id: `voice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          name: v.name,
-          audioBase64: v.audioBase64,
-          mimeType: v.mimeType,
-          duration: 5,
-          role: v.role,
-          createdAt: Date.now(),
-        });
-        existingKeys.add(key);
-        imported++;
-      }
-
-      clearVoxtralVoicesCache();
-      await fetchVoices();
-      setSuccess(
-        `Cloned ${imported} Deepgram Aura voice(s)${skipped > 0 ? `, skipped ${skipped} existing` : ""}.`
-      );
-    } catch {
-      setError("Failed to clone Aura voices. Check that DEEPGRAM_API_KEY is configured.");
-    } finally {
-      setCloning(false);
-    }
-  };
-
   return (
     <div className="space-y-8 py-8">
       {/* Header */}
@@ -712,13 +652,6 @@ export default function VoicesPage() {
           </h2>
           <div className="flex items-center gap-2">
             <button
-              onClick={handleCloneAura}
-              disabled={cloning}
-              className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
-            >
-              {cloning ? "Cloning..." : "Clone Aura"}
-            </button>
-            <button
               onClick={() => fileInputRef.current?.click()}
               disabled={importing}
               className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
@@ -745,17 +678,10 @@ export default function VoicesPage() {
 
         {voices.length === 0 ? (
           <div className="text-center py-6">
-            <p className="text-zinc-500 text-sm mb-4">
-              No voice profiles yet. Record a sample above, or clone 7 distinct
-              voices from Deepgram Aura to get started instantly.
+            <p className="text-zinc-500 text-sm">
+              Loading default voices... If this persists, try refreshing the page.
+              You can also record your own samples above.
             </p>
-            <button
-              onClick={handleCloneAura}
-              disabled={cloning}
-              className="px-5 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
-            >
-              {cloning ? "Cloning voices..." : "Clone Aura Voices (7 officers)"}
-            </button>
           </div>
         ) : (
           <div className="space-y-2">
