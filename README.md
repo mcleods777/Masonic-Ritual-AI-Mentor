@@ -298,3 +298,57 @@ npm run build
 ```
 
 Set your environment variables in Vercel project settings. At minimum: `GROQ_API_KEY`. Add TTS keys as desired.
+
+---
+
+## How This App Was Built
+
+This app was built almost entirely with AI. One human (a Freemason who wanted a better way to practice ritual) plus AI coding assistants, from first commit to production in about 6 weeks.
+
+### The Human
+
+Shannon McLeod, a Freemason who got tired of practicing ritual by reading from a book. The idea: what if you could rehearse the way actors do, with someone reading the other parts back to you in distinct voices, and getting instant feedback on what you got wrong?
+
+### The AI Stack (Development)
+
+| Tool | Role |
+|------|------|
+| **Claude Code (Anthropic)** | Primary development environment. Wrote ~80% of the code, designed the architecture, ran the test suite, created PRs, and did code review. Used Claude Opus 4.6 (1M context). |
+| **Claude Sonnet 4.6** | Used within Claude Code for faster subagent tasks: exploring the codebase, pre-landing code review, adversarial review passes. |
+| **gstack** | Open source AI builder framework (by Garry Tan). Provided structured workflows for shipping: `/design-review` for visual audits, `/ship` for automated PR creation with tests, `/document-release` for keeping docs current. |
+
+### The AI Stack (Runtime)
+
+| Service | What It Does | Model |
+|---------|-------------|-------|
+| **Groq** | AI rehearsal feedback (tells you what you got right/wrong) | Llama 3.3 70B |
+| **Groq** | Speech-to-text (transcribes your spoken ritual) | Whisper Large v3 |
+| **Mistral** | Voice cloning TTS (clones a brother's voice from 3s of audio) | Voxtral Mini TTS |
+| **Deepgram** | Fast TTS voices for officer roles | Aura-2 (Zeus, Orion, Arcas, etc.) |
+| **Google Cloud** | Neural TTS with pitch/rate control per officer | Neural2 voices |
+
+### The Human Stack (Runtime)
+
+| Technology | What It Does |
+|-----------|-------------|
+| **Next.js 16** | App Router, React 19, TypeScript |
+| **Tailwind CSS v4** | Styling (dark Masonic theme with Cinzel + Lato fonts) |
+| **IndexedDB** | Client-side encrypted storage for ritual text and voice profiles |
+| **Web Crypto API** | AES-256-GCM encryption for ritual data at rest |
+| **Web Audio API** | Gavel knock synthesis, audio normalization, WAV encoding |
+| **Vercel** | Hosting and deployment |
+
+### Build Timeline
+
+- **Feb 17, 2026** — First commit. MVP: upload a ritual file, practice speaking, get basic accuracy feedback.
+- **Feb-Mar 2026** — Added 6 TTS engines, rehearsal mode with multi-officer voices, voice cloning, listen mode, performance tracking.
+- **Mar 2026** — Switched AI feedback from Claude Haiku to Llama 3.3 on Groq (faster, free tier). Added Voxtral voice cloning. Reduced TTS latency with streaming.
+- **Apr 2026** — Design review (C+ → B+ design score), mobile-first redesign, voice export/import, TTS benchmark tooling, dead voice model cleanup.
+
+### By the Numbers
+
+- **~169 commits** across the project
+- **67 automated tests** (Vitest)
+- **6 TTS engines** supported (Voxtral, Deepgram, ElevenLabs, Google, Kokoro, Browser)
+- **5-layer text comparison** (normalization, word diff, phonetic, fuzzy, scoring)
+- **0 user accounts required** — everything stays in your browser
