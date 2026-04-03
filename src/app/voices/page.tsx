@@ -6,6 +6,9 @@ import {
   listVoices,
   deleteVoice,
   assignVoiceRole,
+  exportVoices,
+  validateVoiceImport,
+  importVoices,
   type LocalVoice,
 } from "@/lib/voice-storage";
 import { clearVoxtralVoicesCache, VOXTRAL_ROLE_OPTIONS } from "@/lib/tts-cloud";
@@ -53,8 +56,10 @@ export default function VoicesPage() {
   const [phraseIdx, setPhraseIdx] = useState(0);
   const [micLevel, setMicLevel] = useState(0);
   const [testingVoiceId, setTestingVoiceId] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
 
   // Refs
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
@@ -366,6 +371,57 @@ export default function VoicesPage() {
     );
   }
 
+  // ============================================================
+  // Export / Import handlers
+  // ============================================================
+
+  const handleExport = async () => {
+    try {
+      const json = await exportVoices();
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const date = new Date().toISOString().slice(0, 10);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `masonic-voices-${date}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setSuccess(`Exported ${voices.length} voice(s).`);
+    } catch {
+      setError("Failed to export voices.");
+    }
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImporting(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const text = await file.text();
+      const result = validateVoiceImport(text);
+      if (!result.valid) {
+        setError(result.error);
+        return;
+      }
+
+      const { imported, skipped } = await importVoices(result.voices, voices);
+      clearVoxtralVoicesCache();
+      await fetchVoices();
+      setSuccess(
+        `Imported ${imported} voice(s)${skipped > 0 ? `, skipped ${skipped} duplicate(s)` : ""}.`
+      );
+    } catch {
+      setError("Failed to import voices.");
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
   return (
     <div className="space-y-8 py-8">
       {/* Header */}
@@ -579,12 +635,38 @@ export default function VoicesPage() {
 
       {/* Existing voices */}
       <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-6">
-        <h2 className="text-lg font-semibold text-zinc-200 mb-4">
-          Your Voice Profiles
-          <span className="text-sm font-normal text-zinc-500 ml-2">
-            ({voices.length} voice{voices.length !== 1 ? "s" : ""})
-          </span>
-        </h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-zinc-200">
+            Your Voice Profiles
+            <span className="text-sm font-normal text-zinc-500 ml-2">
+              ({voices.length} voice{voices.length !== 1 ? "s" : ""})
+            </span>
+          </h2>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={importing}
+              className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+            >
+              {importing ? "Importing..." : "Import Voices"}
+            </button>
+            {voices.length > 0 && (
+              <button
+                onClick={handleExport}
+                className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-sm font-medium transition-colors"
+              >
+                Export All
+              </button>
+            )}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json"
+              className="hidden"
+              onChange={handleImportFile}
+            />
+          </div>
+        </div>
 
         {voices.length === 0 ? (
           <p className="text-zinc-500 text-sm">
