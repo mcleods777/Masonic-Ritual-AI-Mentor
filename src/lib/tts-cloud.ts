@@ -650,18 +650,25 @@ export async function speakKokoroAsRole(
  */
 
 import { listVoices, type LocalVoice } from "./voice-storage";
+import { ensureDefaultVoices } from "./default-voices";
 
 /** Cached local voice profiles — loaded once per session from IndexedDB. */
 let localVoicesCache: LocalVoice[] | null = null;
 let localVoicesFetchPromise: Promise<LocalVoice[]> | null = null;
+let defaultsEnsured = false;
 
-/** Load and cache local voices from IndexedDB. */
+/** Load and cache local voices from IndexedDB. Ensures defaults are loaded first. */
 async function getLocalVoices(): Promise<LocalVoice[]> {
   if (localVoicesCache) return localVoicesCache;
   if (localVoicesFetchPromise) return localVoicesFetchPromise;
 
   localVoicesFetchPromise = (async () => {
     try {
+      // Ensure default voices are in IndexedDB before reading
+      if (!defaultsEnsured) {
+        await ensureDefaultVoices();
+        defaultsEnsured = true;
+      }
       const voices = await listVoices();
       localVoicesCache = voices;
       return voices;
