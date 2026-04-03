@@ -32,8 +32,8 @@ describe("TTS engine selection", () => {
     });
   });
 
-  it("defaults to elevenlabs", () => {
-    expect(getTTSEngine()).toBe("elevenlabs");
+  it("defaults to voxtral", () => {
+    expect(getTTSEngine()).toBe("voxtral");
   });
 
   it("persists engine selection", () => {

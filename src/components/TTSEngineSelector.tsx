@@ -17,14 +17,9 @@ interface EngineOption {
 
 const ENGINE_OPTIONS: EngineOption[] = [
   {
-    value: "browser",
-    label: "Browser",
-    description: "Built-in — free, works offline",
-  },
-  {
-    value: "kokoro",
-    label: "Kokoro",
-    description: "Free — self-hosted, high-quality",
+    value: "voxtral",
+    label: "Voxtral (Mistral)",
+    description: "Voice cloning — default",
   },
   {
     value: "deepgram",
@@ -32,20 +27,26 @@ const ENGINE_OPTIONS: EngineOption[] = [
     description: "Fast, natural voices",
   },
   {
-    value: "elevenlabs",
-    label: "ElevenLabs",
-    description: "Premium — natural, human-like",
-  },
-  {
     value: "google-cloud",
     label: "Google Cloud",
-    description: "Premium — Neural2 voices",
+    description: "Neural2 voices",
   },
   {
-    value: "voxtral",
-    label: "Voxtral (Mistral)",
-    description: "Natural — voice cloning, half-cost",
+    value: "kokoro",
+    label: "Kokoro",
+    description: "Free — self-hosted",
   },
+  {
+    value: "browser",
+    label: "Browser",
+    description: "Built-in — free, works offline",
+  },
+  // ElevenLabs kept in codebase but hidden from dropdown until subscription renews
+  // {
+  //   value: "elevenlabs",
+  //   label: "ElevenLabs",
+  //   description: "Premium — natural, human-like",
+  // },
 ];
 
 /**
@@ -55,7 +56,7 @@ const ENGINE_OPTIONS: EngineOption[] = [
  * marked as unavailable.
  */
 export default function TTSEngineSelector() {
-  const [selected, setSelected] = useState<TTSEngineName>("browser");
+  const [selected, setSelected] = useState<TTSEngineName>("voxtral");
   const [availability, setAvailability] = useState<{
     elevenlabs: boolean;
     google: boolean;
