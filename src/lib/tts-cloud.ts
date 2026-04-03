@@ -683,12 +683,10 @@ async function getLocalVoices(): Promise<LocalVoice[]> {
   return localVoicesFetchPromise;
 }
 
-/** Clear the local voices cache (call after recording a new voice). */
+/** Clear the local voices cache (call after recording a new voice or changing roles). */
 export function clearVoxtralVoicesCache(): void {
   localVoicesCache = null;
   localVoicesFetchPromise = null;
-  // Also clear the per-role audio cache
-  refAudioByGroup = {};
 }
 
 /**
@@ -726,11 +724,9 @@ export function roleToGroup(role: string): number {
   return -1;
 }
 
-/**
- * Per-role audio cache. Avoids re-reading from IndexedDB on every TTS call.
- * Keyed by role group index. Cleared when voices change.
- */
-let refAudioByGroup: Record<number, string> = {};
+// Note: per-role audio caching was removed because the stale cache caused
+// voice role assignments to be silently ignored. The overhead of checking
+// voices.filter() per TTS call is negligible vs the ~1s API call itself.
 
 /** Human-readable role labels for the voice assignment UI. */
 export const VOXTRAL_ROLE_OPTIONS = [
@@ -758,30 +754,25 @@ async function getRefAudioForRole(role: string): Promise<string | undefined> {
   const group = roleToGroup(role);
   const groupKey = group >= 0 ? group : 0;
 
-  // Return cached audio if available
-  if (refAudioByGroup[groupKey]) return refAudioByGroup[groupKey];
-
   const voices = await getLocalVoices();
   if (voices.length === 0) return undefined;
 
-  // First: check for a voice explicitly assigned to this role group
+  // Check for a voice explicitly assigned to this role group.
+  // Prefer user-recorded voices (createdAt > 0) over defaults (createdAt === 0).
   const rolesInGroup = group >= 0 ? VOXTRAL_ROLE_GROUPS[group] : [];
-  const assigned = voices.find(
+  const matchingVoices = voices.filter(
     (v) => v.role && rolesInGroup.includes(v.role)
   );
+  const assigned =
+    matchingVoices.find((v) => v.createdAt > 0) || matchingVoices[0];
 
-  if (assigned) {
-    refAudioByGroup[groupKey] = assigned.audioBase64;
-    return assigned.audioBase64;
-  }
+  if (assigned) return assigned.audioBase64;
 
   // Fallback: round-robin from unassigned voices (or all if none unassigned)
   const unassigned = voices.filter((v) => !v.role);
   const pool = unassigned.length > 0 ? unassigned : voices;
   const idx = groupKey % pool.length;
-  const audio = pool[idx].audioBase64;
-  refAudioByGroup[groupKey] = audio;
-  return audio;
+  return pool[idx].audioBase64;
 }
 
 /** Check if any local voices exist (for pre-flight UI checks). */
