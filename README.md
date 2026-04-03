@@ -2,7 +2,7 @@
 
 A privacy-first, voice-driven practice tool for Masonic ritual memorization. Load your encrypted ritual file (.mram), practice in multiple modes — solo drill, full-ceremony rehearsal, or listen-along — and get instant word-by-word feedback with AI coaching powered by Llama 3.3 on Groq.
 
-**Live:** Deployed on Vercel
+**Live:** [masonic-ritual-ai-mentor.vercel.app](https://masonic-ritual-ai-mentor.vercel.app)
 
 ---
 
@@ -202,7 +202,8 @@ src/
 │   ├── upload/page.tsx                  # .mram file upload page
 │   ├── walkthrough/page.tsx             # Visual how-it-works guide
 │   ├── layout.tsx                       # Root layout with Navigation
-│   └── page.tsx                         # Home page
+│   ├── page.tsx                         # Home page
+│   └── middleware.ts                    # Redirects / to landing page
 ├── components/
 │   ├── DiffDisplay.tsx                  # Color-coded word-by-word diff
 │   ├── DocumentUpload.tsx               # .mram file upload + passphrase entry
@@ -212,7 +213,9 @@ src/
 │   ├── PracticeMode.tsx                 # Solo section practice
 │   ├── RehearsalMode.tsx                # Call-and-response with AI voices
 │   └── TTSEngineSelector.tsx            # Voice engine selection dropdown
+├── middleware.ts                         # Root redirect to Pretext landing page
 └── lib/
+    ├── default-voices.ts                # Pre-baked Aura-2 voice loader (7 male voices)
     ├── voice-storage.ts                 # IndexedDB storage + export/import for voice recordings
     ├── audio-utils.ts                   # WAV encoding + audio normalization
     ├── tts-cloud.ts                     # Cloud TTS engines + voice role mapping
@@ -224,6 +227,11 @@ src/
     ├── performance-history.ts           # Practice session history tracking
     ├── document-parser.ts               # Role display names + text parsing
     └── gavel-sound.ts                   # Synthesized gavel knock via Web Audio
+
+public/
+├── landing.html                         # Pretext-powered interactive landing page
+├── pretext.js                           # Vendored Pretext library (30KB)
+└── voices/                              # Pre-baked default voice samples (7 male Aura-2)
 
 scripts/
 ├── build-mram.ts                        # CLI: build .mram files from paired markdown
@@ -336,6 +344,7 @@ Shannon McLeod, a Freemason who got tired of practicing ritual by reading from a
 | **IndexedDB** | Client-side encrypted storage for ritual text and voice profiles |
 | **Web Crypto API** | AES-256-GCM encryption for ritual data at rest |
 | **Web Audio API** | Gavel knock synthesis, audio normalization, WAV encoding |
+| **Pretext** | Interactive landing page with real-time text reflow (chenglou/pretext) |
 | **Vercel** | Hosting and deployment |
 
 ### Build Timeline
@@ -343,7 +352,7 @@ Shannon McLeod, a Freemason who got tired of practicing ritual by reading from a
 - **Feb 17, 2026** — First commit. MVP: upload a ritual file, practice speaking, get basic accuracy feedback.
 - **Feb-Mar 2026** — Added 6 TTS engines, rehearsal mode with multi-officer voices, voice cloning, listen mode, performance tracking.
 - **Mar 2026** — Switched AI feedback from Claude Haiku to Llama 3.3 on Groq (faster, free tier). Added Voxtral voice cloning. Reduced TTS latency with streaming.
-- **Apr 2026** — Design review (C+ → B+ design score), mobile-first redesign, voice export/import, TTS benchmark tooling, dead voice model cleanup.
+- **Apr 2026** — Design review (C+ → B+ design score), mobile-first redesign, voice export/import, TTS benchmark tooling, dead voice model cleanup. Pretext-powered interactive landing page with Masonic symbols and real-time text reflow. Pre-baked default voices (7 male Aura-2). Feedback voice selector in rehearsal mode.
 
 ### By the Numbers
 
