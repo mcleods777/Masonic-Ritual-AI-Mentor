@@ -127,10 +127,11 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
     const handleScroll = () => {
       userScrollingRef.current = true;
       if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
-      // Re-enable auto-scroll after 5 seconds of no manual scrolling
+      // Re-enable auto-scroll after 30 seconds of no manual scrolling
+      // (long enough that users can browse the script freely)
       scrollTimeoutRef.current = setTimeout(() => {
         userScrollingRef.current = false;
-      }, 5000);
+      }, 30000);
     };
 
     container.addEventListener("scroll", handleScroll, { passive: true });
