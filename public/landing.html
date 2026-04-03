@@ -319,27 +319,30 @@ Upload your .mram file. Pick your role. Start rehearsing.`;
 
     // ── Init Pretext ──
     async function init() {
+      const loader = document.getElementById('loader');
+
+      loader.textContent = 'Waiting for fonts...';
       try {
-        // Wait for fonts, but timeout after 3s
         await Promise.race([
           document.fonts.ready,
-          new Promise(r => setTimeout(r, 3000)),
+          new Promise(r => setTimeout(r, 2000)),
         ]);
       } catch { /* proceed with system fonts */ }
 
-      try {
-        preparedHeading = prepareWithSegments(HEADING, FONT_HEADING);
-        preparedBody = prepareWithSegments(BODY_TEXT, FONT_BODY);
-        ready = true;
-        document.getElementById('loader').classList.add('hide');
-      } catch (err) {
-        document.getElementById('loader').textContent = 'Error: ' + err.message;
-        console.error('Pretext init failed:', err);
-      }
+      loader.textContent = 'Preparing heading...';
+      preparedHeading = prepareWithSegments(HEADING, FONT_HEADING);
+
+      loader.textContent = 'Preparing body text...';
+      preparedBody = prepareWithSegments(BODY_TEXT, FONT_BODY);
+
+      loader.textContent = 'Starting render...';
+      ready = true;
+      loader.classList.add('hide');
     }
 
     // ── Main render loop ──
     function render() {
+      try {
       frameCount++;
       if (!ready) { requestAnimationFrame(render); return; }
 
@@ -386,6 +389,11 @@ Upload your .mram file. Pick your role. Start rehearsing.`;
       ctx.textAlign = 'left';
 
       requestAnimationFrame(render);
+      } catch (renderErr) {
+        document.getElementById('loader').classList.remove('hide');
+        document.getElementById('loader').textContent = 'Render error: ' + renderErr.message + '\n' + renderErr.stack;
+        document.getElementById('loader').style.cssText = 'font-size:12px;white-space:pre-wrap;padding:40px;text-align:left;';
+      }
     }
 
     try {
