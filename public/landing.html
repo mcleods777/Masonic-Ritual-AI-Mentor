@@ -9,11 +9,11 @@
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; overflow: hidden; background: #1a150e; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0f19; }
     canvas { display: block; width: 100%; height: 100%; cursor: default; }
     #loader {
       position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
-      background: #1a150e; color: #c9962c; font-family: 'Cinzel', serif; font-size: 1.2rem;
+      background: #0b0f19; color: #c9962c; font-family: 'Cinzel', serif; font-size: 1.2rem;
       z-index: 10; transition: opacity 0.5s;
     }
     #loader.hide { opacity: 0; pointer-events: none; }
@@ -63,43 +63,33 @@
     const prepareWithSegments = m.prepareWithSegments;
     const layoutNextLine = m.layoutNextLine;
 
-    // ── Config: Ancient scroll aesthetic ──
-    const BG = '#1a150e';
-    const BG2 = '#140f08';
-    const GOLD = '#c9962c';
+    // ── Config: matches app theme ──
+    const BG = '#0b0f19';
+    const BG2 = '#070a12';
+    const GOLD = '#d4a740';
     const GOLD_DIM = '#8b6914';
-    const TEXT_COLOR = '#c4b596';
-    const TEXT_DIM = '#7a6e55';
+    const TEXT_COLOR = '#d8d4cc';
+    const TEXT_DIM = '#6a655e';
 
-    // Responsive values (recalculated on resize)
+    // Responsive values
     function isMobile() { return W < 600; }
     function getSymbolRadius() { return isMobile() ? 50 : 80; }
-    function getLineHeight() { return isMobile() ? 24 : 30; }
+    function getLineHeight() { return isMobile() ? 28 : 36; }
     function getFontBody() {
-      const size = isMobile() ? 15 : 18;
+      const size = isMobile() ? 18 : 24;
       return `${size}px "Cormorant Garamond", "Palatino Linotype", Palatino, Georgia, serif`;
     }
     function getFontHeading() {
-      const size = isMobile() ? 24 : 40;
+      const size = isMobile() ? 28 : 48;
       return `bold ${size}px Cinzel, serif`;
     }
 
     // ── Text content ──
     const HEADING = 'MASONIC RITUAL MENTOR';
     const PARAGRAPHS = [
-      `Practice your ritual work from memory. Upload your encrypted .mram file, speak your lines aloud, and get instant word-by-word feedback powered by voice AI. Everything stays on your device.`,
+      `Practice your ritual work from memory. Speak your lines, hear every officer in a distinct voice, and get instant word-by-word feedback. Everything stays on your device.`,
 
-      `Six distinct AI voices for each officer role. The Worshipful Master speaks with authority. The Senior Warden is steady and clear. The Junior Deacon is bright and articulate. Every brother sounds different because every brother is different.`,
-
-      `Record your own voice or a brother's voice in three seconds. The app clones it and uses it for that officer's lines during rehearsal. Practice as if the whole lodge is there with you.`,
-
-      `Cipher text is shown by default so you practice the way you'll perform. Five layers of comparison catch every word: normalization, word-level diff, phonetic forgiveness, fuzzy matching, and color-coded accuracy scoring.`,
-
-      `Track your accuracy over time. See which sections give you trouble. Watch your streaks grow. The more you practice, the more confident you become on the night.`,
-
-      `Privacy first. Your ritual file is encrypted with AES-256-GCM and stored only in your browser. Nothing leaves your device unless you choose to speak.`,
-
-      `Built by a Mason, for Masons. One brother with an idea and AI as his only engineering team. From first commit to production in six weeks.`,
+      `Built by a Mason, for Masons.`,
     ];
 
     // ── State ──
@@ -551,22 +541,24 @@
         }
       }
 
-      // Layout params — more padding on desktop, tighter on mobile
-      const pad = mobile ? 20 : Math.max(40, W * 0.06);
-      const maxW = Math.min(W - pad * 2, 900);
+      // Layout — centered vertically
+      const pad = mobile ? 24 : Math.max(60, W * 0.08);
+      const maxW = Math.min(W - pad * 2, 800);
       const startX = (W - maxW) / 2;
-      const topY = mobile ? 30 : 60;
+
+      // Start text roughly centered (heading + 3 lines of body ~ 200px)
+      const topY = Math.max(H * 0.25, 60);
 
       // Render heading
-      const headingLineH = mobile ? 32 : 52;
+      const headingLineH = mobile ? 36 : 60;
       let curY = renderText(preparedHeading, fontHeading, GOLD, startX, topY, maxW, headingLineH, obstacles);
 
-      // Render paragraphs with spacing
-      const PARA_GAP = mobile ? 12 : 18;
+      // Render body
+      const PARA_GAP = mobile ? 16 : 24;
       for (const prepared of preparedParagraphs) {
         curY += PARA_GAP;
         curY = renderText(prepared, fontBody, TEXT_COLOR, startX, curY, maxW, lineH, obstacles);
-        if (curY > H - 80) break; // leave room for Enter button
+        if (curY > H - 100) break;
       }
 
       // Draw symbols on top
