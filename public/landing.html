@@ -291,10 +291,14 @@ Upload your .mram file. Pick your role. Start rehearsing.`;
         }
 
         for (const slot of usableSlots) {
-          const result = layoutNextLine(prepared, state, slot.w);
-          if (!result) { done = true; break; }
-          state = result.state;
-          ctx.fillText(result.text.trimEnd(), slot.x, y);
+          try {
+            const result = layoutNextLine(prepared, state, slot.w);
+            if (!result) { done = true; break; }
+            state = result.state;
+            ctx.fillText(result.text.trimEnd(), slot.x, y);
+          } catch {
+            // Skip this slot, try the next one
+          }
         }
 
         y += lineH;
@@ -364,8 +368,10 @@ Upload your .mram file. Pick your role. Start rehearsing.`;
       ctx.textAlign = 'left';
 
       requestAnimationFrame(render);
-      } catch {
-        // Render error, skip frame
+      } catch (e) {
+        // Render error, skip this frame but keep the loop alive
+        console.warn('render error:', e.message);
+        requestAnimationFrame(render);
       }
     }
 
