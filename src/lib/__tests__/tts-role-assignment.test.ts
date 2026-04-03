@@ -70,8 +70,8 @@ describe("VOXTRAL_ROLE_OPTIONS", () => {
     expect(VOXTRAL_ROLE_OPTIONS[0].label).toContain("Auto");
   });
 
-  it("has 11 options total (auto + 10 roles)", () => {
-    expect(VOXTRAL_ROLE_OPTIONS.length).toBe(11);
+  it("has 12 options total (auto + 11 roles)", () => {
+    expect(VOXTRAL_ROLE_OPTIONS.length).toBe(12);
   });
 
   it("includes all major officer roles", () => {
