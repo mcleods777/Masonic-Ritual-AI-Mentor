@@ -120,3 +120,103 @@ export async function assignVoiceRole(
   voice.role = role;
   await saveVoice(voice);
 }
+
+// ============================================================
+// Export / Import
+// ============================================================
+
+const EXPORT_FORMAT = "masonic-ritual-mentor-voices";
+const EXPORT_VERSION = 1;
+
+/** Export all voices as a versioned JSON string. */
+export async function exportVoices(): Promise<string> {
+  const voices = await listVoices();
+  return JSON.stringify(
+    {
+      format: EXPORT_FORMAT,
+      version: EXPORT_VERSION,
+      exportedAt: new Date().toISOString(),
+      voices,
+    },
+    null,
+    2
+  );
+}
+
+type ValidationResult =
+  | { valid: true; voices: LocalVoice[] }
+  | { valid: false; error: string };
+
+/** Validate a JSON string as a voice export file. */
+export function validateVoiceImport(jsonString: string): ValidationResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonString);
+  } catch {
+    return { valid: false, error: "The selected file is not valid JSON." };
+  }
+
+  const data = parsed as Record<string, unknown>;
+
+  if (data.format !== EXPORT_FORMAT) {
+    return {
+      valid: false,
+      error:
+        "This is not a voice profiles file. Expected a .json file exported from this app.",
+    };
+  }
+
+  if (typeof data.version !== "number" || data.version > EXPORT_VERSION) {
+    return {
+      valid: false,
+      error: `This file uses format version ${data.version}, which is not supported. Please update the app.`,
+    };
+  }
+
+  if (!Array.isArray(data.voices) || data.voices.length === 0) {
+    return { valid: false, error: "The file contains no voice profiles." };
+  }
+
+  const required = ["name", "audioBase64", "mimeType", "duration", "createdAt"];
+  for (let i = 0; i < data.voices.length; i++) {
+    const v = data.voices[i] as Record<string, unknown>;
+    for (const field of required) {
+      if (v[field] === undefined || v[field] === null) {
+        return {
+          valid: false,
+          error: `Voice entry ${i + 1} is missing required field '${field}'.`,
+        };
+      }
+    }
+  }
+
+  return { valid: true, voices: data.voices as LocalVoice[] };
+}
+
+/** Import voices, skipping duplicates by name+role. Returns counts. */
+export async function importVoices(
+  voices: LocalVoice[],
+  existingVoices: LocalVoice[]
+): Promise<{ imported: number; skipped: number }> {
+  const existingKeys = new Set(
+    existingVoices.map((v) => `${v.name}::${v.role ?? ""}`)
+  );
+
+  let imported = 0;
+  let skipped = 0;
+
+  for (const voice of voices) {
+    const key = `${voice.name}::${voice.role ?? ""}`;
+    if (existingKeys.has(key)) {
+      skipped++;
+      continue;
+    }
+
+    const freshId = `voice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    await saveVoice({ ...voice, id: freshId });
+    existingKeys.add(key);
+    imported++;
+  }
+
+  return { imported, skipped };
+}
