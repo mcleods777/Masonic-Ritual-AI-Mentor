@@ -14,15 +14,17 @@ import { NextResponse } from "next/server";
  * Idempotent — skips voices that already exist (by name match).
  */
 
-/** Voice configs using Deepgram Aura-2 models for sample generation. */
+/** Voice configs using Deepgram Aura-2 models for sample generation.
+ *  Names match the Aura voice names so they're recognizable in both engines.
+ *  Only models verified available as of 2026-04-02. */
 const VOICE_CONFIGS = [
-  { name: "masonic-wm",        deepgramModel: "aura-2-zeus-en",    description: "Zeus — commanding, deep (Worshipful Master)" },
-  { name: "masonic-sw",        deepgramModel: "aura-2-orion-en",   description: "Orion — clear, steady (Senior Warden)" },
-  { name: "masonic-jw",        deepgramModel: "aura-2-arcas-en",   description: "Arcas — measured (Junior Warden)" },
-  { name: "masonic-sd",        deepgramModel: "aura-2-orpheus-en", description: "Orpheus — warm (Senior Deacon)" },
-  { name: "masonic-jd",        deepgramModel: "aura-2-perseus-en", description: "Perseus — distinct (Junior Deacon)" },
-  { name: "masonic-chaplain",  deepgramModel: "aura-2-helios-en",  description: "Helios — resonant (Chaplain)" },
-  { name: "masonic-marshal",   deepgramModel: "aura-2-angus-en",   description: "Angus — distinctive (Marshal/Tyler)" },
+  { name: "zeus",      deepgramModel: "aura-2-zeus-en",      description: "Zeus — commanding, deep (Worshipful Master)" },
+  { name: "orion",     deepgramModel: "aura-2-orion-en",     description: "Orion — clear, steady (Senior Warden)" },
+  { name: "arcas",     deepgramModel: "aura-2-arcas-en",     description: "Arcas — measured (Junior Warden)" },
+  { name: "orpheus",   deepgramModel: "aura-2-orpheus-en",   description: "Orpheus — warm (Senior Deacon)" },
+  { name: "theia",     deepgramModel: "aura-2-theia-en",     description: "Theia — bright (Junior Deacon)" },
+  { name: "andromeda", deepgramModel: "aura-2-andromeda-en", description: "Andromeda — resonant (Chaplain)" },
+  { name: "atlas",     deepgramModel: "aura-2-atlas-en",     description: "Atlas — steady (Marshal/Tyler)" },
 ];
 
 /** ElevenLabs fallback configs for additional voices (if available). */
