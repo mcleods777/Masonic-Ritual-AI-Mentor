@@ -24,14 +24,20 @@
   <canvas id="c"></canvas>
 
   <script type="module">
+    const loader = document.getElementById('loader');
+    loader.textContent = 'Loading Pretext...';
+
     let prepareWithSegments, layoutNextLine;
     try {
-      const m = await import('/pretext.js');
+      const m = await import('./pretext.js');
       prepareWithSegments = m.prepareWithSegments;
       layoutNextLine = m.layoutNextLine;
+      loader.textContent = 'Pretext loaded, initializing...';
     } catch (err) {
-      document.getElementById('loader').textContent = 'Import error: ' + err.message;
-      console.error('Failed to import pretext:', err);
+      loader.textContent = 'Import failed: ' + err.message;
+      loader.style.fontSize = '14px';
+      loader.style.whiteSpace = 'pre-wrap';
+      loader.style.padding = '40px';
       throw err;
     }
 
@@ -382,8 +388,18 @@ Upload your .mram file. Pick your role. Start rehearsing.`;
       requestAnimationFrame(render);
     }
 
-    init();
-    requestAnimationFrame(render);
+    try {
+      await init();
+      requestAnimationFrame(render);
+    } catch (err) {
+      const loader = document.getElementById('loader');
+      loader.classList.remove('hide');
+      loader.textContent = 'Init failed: ' + err.message + '\n\n' + err.stack;
+      loader.style.fontSize = '12px';
+      loader.style.whiteSpace = 'pre-wrap';
+      loader.style.padding = '40px';
+      loader.style.textAlign = 'left';
+    }
   </script>
 </body>
 </html>
