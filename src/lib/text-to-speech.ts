@@ -37,7 +37,7 @@ export type TTSEngineName = "browser" | "elevenlabs" | "google-cloud" | "deepgra
 
 const TTS_ENGINE_STORAGE_KEY = "tts-engine";
 
-let currentEngine: TTSEngineName = "elevenlabs";
+let currentEngine: TTSEngineName = "voxtral";
 
 // Restore persisted engine on module load (client only)
 if (typeof window !== "undefined") {
