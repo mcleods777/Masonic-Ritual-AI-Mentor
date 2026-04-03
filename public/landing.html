@@ -286,11 +286,13 @@ Upload your .mram file. Pick your role. Start rehearsing.`;
 
       let state = null;
       let y = startY;
+      let done = false;
       const endY = H + lineH;
       const leftEdge = startX;
       const rightEdge = startX + maxWidth;
+      const MIN_SLOT = 80; // minimum slot width to avoid Pretext crash on tiny widths
 
-      while (y < endY) {
+      while (y < endY && !done) {
         const exclusions = getExclusions(y, y + lineH, obstacles);
         const slots = carveSlots(leftEdge, rightEdge, exclusions);
 
@@ -299,19 +301,27 @@ Upload your .mram file. Pick your role. Start rehearsing.`;
           continue;
         }
 
-        let advanced = false;
-        for (const slot of slots) {
-          if (slot.w < 40) continue; // skip tiny slots
-          const result = layoutNextLine(prepared, state, slot.w, lineH);
-          if (!result) return y; // text exhausted
-          state = result.state;
-          ctx.fillText(result.text.trimEnd(), slot.x, y);
-          advanced = true;
+        // Find the widest usable slot for this line
+        const usableSlots = slots.filter(s => s.w >= MIN_SLOT);
+
+        if (usableSlots.length === 0) {
+          // All slots too narrow, skip this line
+          y += lineH;
+          continue;
         }
 
-        if (!advanced) {
-          // No usable slots, skip this line
+        for (const slot of usableSlots) {
+          try {
+            const result = layoutNextLine(prepared, state, slot.w, lineH);
+            if (!result) { done = true; break; }
+            state = result.state;
+            ctx.fillText(result.text.trimEnd(), slot.x, y);
+          } catch {
+            // Pretext can crash on edge-case widths, skip this slot
+            continue;
+          }
         }
+
         y += lineH;
       }
       return y;
