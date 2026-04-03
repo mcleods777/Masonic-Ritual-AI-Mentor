@@ -1,6 +1,6 @@
 # Masonic Ritual Mentor
 
-A privacy-first, voice-driven practice tool for Masonic ritual memorization. Load your encrypted ritual file (.mram), practice in multiple modes — solo drill, full-ceremony rehearsal, or listen-along — and get instant word-by-word feedback with AI coaching powered by Claude.
+A privacy-first, voice-driven practice tool for Masonic ritual memorization. Load your encrypted ritual file (.mram), practice in multiple modes — solo drill, full-ceremony rehearsal, or listen-along — and get instant word-by-word feedback with AI coaching powered by Llama 3.3 on Groq.
 
 **Live:** Deployed on Vercel
 
@@ -65,10 +65,11 @@ The main feature. Pick your officer role (WM, SW, JD, etc.), and the AI reads ev
 ### Custom Voice Cloning
 Record your own voice (or a brother's) on the **Voices** page. The app clones it via Voxtral and uses it for officer lines during rehearsal. Record multiple brothers for different officers.
 
-- Record 3-10 seconds in the browser
+- Record 3-10 seconds in the browser, or clone 7 Deepgram Aura voices instantly
 - Converted to wav and stored locally in IndexedDB
 - Sent as `ref_audio` with each Voxtral TTS request (zero-shot cloning)
 - No Mistral paid plan required — works on the free tier
+- Export/import voice profiles as JSON for backup and cross-device transfer
 - Voice tone/speed/emotion matches how you recorded the sample
 
 ### Solo Practice Mode
@@ -164,7 +165,7 @@ SW: * Brothers Senior & Junior Deacons, proceed to satisfy yourselves that all p
 |-------|-----------|
 | Frontend | Next.js 16 (App Router), React 19, TypeScript |
 | Styling | Tailwind CSS v4 |
-| AI Feedback | Claude Haiku via Vercel AI SDK (streaming) |
+| AI Feedback | Llama 3.3 on Groq (streaming) |
 | Speech-to-Text | Groq Whisper (server-side) + Browser Web Speech API |
 | Text-to-Speech | Voxtral, ElevenLabs, Deepgram Aura-2, Google Cloud TTS, Kokoro, Browser |
 | Voice Cloning | Voxtral (Mistral) via ref_audio zero-shot cloning |
@@ -182,12 +183,13 @@ SW: * Brothers Senior & Junior Deacons, proceed to satisfy yourselves that all p
 src/
 ├── app/
 │   ├── api/
-│   │   ├── rehearsal-feedback/route.ts  # Claude Haiku streaming feedback
+│   │   ├── rehearsal-feedback/route.ts  # Llama 3.3 streaming feedback
 │   │   ├── transcribe/route.ts          # Groq Whisper STT proxy
 │   │   └── tts/
 │   │       ├── voxtral/
 │   │       │   ├── route.ts             # Voxtral TTS proxy (voice_id or ref_audio)
 │   │       │   ├── voices/route.ts      # List/create Mistral voice profiles
+│   │       │   ├── clone-aura/route.ts  # Generate Deepgram samples for local cloning
 │   │       │   └── setup/route.ts       # Bootstrap voices from Deepgram/ElevenLabs
 │   │       ├── elevenlabs/route.ts      # ElevenLabs TTS proxy
 │   │       ├── deepgram/route.ts        # Deepgram Aura-2 TTS proxy
@@ -211,7 +213,8 @@ src/
 │   ├── RehearsalMode.tsx                # Call-and-response with AI voices
 │   └── TTSEngineSelector.tsx            # Voice engine selection dropdown
 └── lib/
-    ├── voice-storage.ts                 # IndexedDB storage for voice recordings
+    ├── voice-storage.ts                 # IndexedDB storage + export/import for voice recordings
+    ├── audio-utils.ts                   # WAV encoding + audio normalization
     ├── tts-cloud.ts                     # Cloud TTS engines + voice role mapping
     ├── text-to-speech.ts                # TTS engine abstraction + routing
     ├── speech-to-text.ts                # STT engines (Whisper + Browser)
@@ -223,7 +226,8 @@ src/
     └── gavel-sound.ts                   # Synthesized gavel knock via Web Audio
 
 scripts/
-└── build-mram.ts                        # CLI: build .mram files from paired markdown
+├── build-mram.ts                        # CLI: build .mram files from paired markdown
+└── benchmark-tts.ts                     # TTS engine benchmark (TTFB + total response time)
 ```
 
 ---
@@ -233,7 +237,7 @@ scripts/
 ### Prerequisites
 
 - Node.js 18+
-- An Anthropic API key (for AI rehearsal feedback)
+- A Groq API key (for AI rehearsal feedback and speech-to-text)
 - A `.mram` ritual file from your lodge (encrypted with a lodge passphrase)
 
 ### Installation
@@ -246,11 +250,8 @@ cp .env.example .env
 Add your API keys to `.env`:
 
 ```bash
-# Required
-ANTHROPIC_API_KEY=sk-ant-your-key-here
-
-# Recommended — speech-to-text
-GROQ_API_KEY=                    # Whisper STT (high accuracy)
+# Required — AI feedback + speech-to-text
+GROQ_API_KEY=                    # Llama 3.3 feedback + Whisper STT
 
 # Pick one or more TTS engines
 MISTRAL_API_KEY=                 # Voxtral — voice cloning, half-cost
@@ -296,4 +297,58 @@ Deploy to Vercel:
 npm run build
 ```
 
-Set your environment variables in Vercel project settings. At minimum: `ANTHROPIC_API_KEY`. Add TTS and STT keys as desired.
+Set your environment variables in Vercel project settings. At minimum: `GROQ_API_KEY`. Add TTS keys as desired.
+
+---
+
+## How This App Was Built
+
+This app was built almost entirely with AI. One human (a Freemason who wanted a better way to practice ritual) plus AI coding assistants, from first commit to production in about 6 weeks.
+
+### The Human
+
+Shannon McLeod, a Freemason who got tired of practicing ritual by reading from a book. The idea: what if you could rehearse the way actors do, with someone reading the other parts back to you in distinct voices, and getting instant feedback on what you got wrong?
+
+### The AI Stack (Development)
+
+| Tool | Role |
+|------|------|
+| **Claude Code (Anthropic)** | Primary development environment. Wrote ~80% of the code, designed the architecture, ran the test suite, created PRs, and did code review. Used Claude Opus 4.6 (1M context). |
+| **Claude Sonnet 4.6** | Used within Claude Code for faster subagent tasks: exploring the codebase, pre-landing code review, adversarial review passes. |
+| **gstack** | Open source AI builder framework (by Garry Tan). Provided structured workflows for shipping: `/design-review` for visual audits, `/ship` for automated PR creation with tests, `/document-release` for keeping docs current. |
+
+### The AI Stack (Runtime)
+
+| Service | What It Does | Model |
+|---------|-------------|-------|
+| **Groq** | AI rehearsal feedback (tells you what you got right/wrong) | Llama 3.3 70B |
+| **Groq** | Speech-to-text (transcribes your spoken ritual) | Whisper Large v3 |
+| **Mistral** | Voice cloning TTS (clones a brother's voice from 3s of audio) | Voxtral Mini TTS |
+| **Deepgram** | Fast TTS voices for officer roles | Aura-2 (Zeus, Orion, Arcas, etc.) |
+| **Google Cloud** | Neural TTS with pitch/rate control per officer | Neural2 voices |
+
+### The Human Stack (Runtime)
+
+| Technology | What It Does |
+|-----------|-------------|
+| **Next.js 16** | App Router, React 19, TypeScript |
+| **Tailwind CSS v4** | Styling (dark Masonic theme with Cinzel + Lato fonts) |
+| **IndexedDB** | Client-side encrypted storage for ritual text and voice profiles |
+| **Web Crypto API** | AES-256-GCM encryption for ritual data at rest |
+| **Web Audio API** | Gavel knock synthesis, audio normalization, WAV encoding |
+| **Vercel** | Hosting and deployment |
+
+### Build Timeline
+
+- **Feb 17, 2026** — First commit. MVP: upload a ritual file, practice speaking, get basic accuracy feedback.
+- **Feb-Mar 2026** — Added 6 TTS engines, rehearsal mode with multi-officer voices, voice cloning, listen mode, performance tracking.
+- **Mar 2026** — Switched AI feedback from Claude Haiku to Llama 3.3 on Groq (faster, free tier). Added Voxtral voice cloning. Reduced TTS latency with streaming.
+- **Apr 2026** — Design review (C+ → B+ design score), mobile-first redesign, voice export/import, TTS benchmark tooling, dead voice model cleanup.
+
+### By the Numbers
+
+- **~169 commits** across the project
+- **67 automated tests** (Vitest)
+- **6 TTS engines** supported (Voxtral, Deepgram, ElevenLabs, Google, Kokoro, Browser)
+- **5-layer text comparison** (normalization, word diff, phonetic, fuzzy, scoring)
+- **0 user accounts required** — everything stays in your browser
