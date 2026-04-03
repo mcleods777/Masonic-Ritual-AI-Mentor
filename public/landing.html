@@ -133,6 +133,36 @@
       if (ready && wasMobile !== isMobile()) prepareAll();
     });
 
+    // ── Tilt / device orientation tracking ──
+    let tiltX = 0, tiltY = 0; // normalised –1…+1 tilt offsets
+
+    function enableTilt() {
+      window.addEventListener('deviceorientation', (e) => {
+        // gamma = left/right tilt (–90…90), beta = front/back (–180…180)
+        const gamma = e.gamma || 0;
+        const beta  = e.beta  || 0;
+        tiltX = Math.max(-1, Math.min(1, gamma / 30)); // ±30° → full range
+        tiltY = Math.max(-1, Math.min(1, (beta - 45) / 30)); // 45° = neutral hold
+      });
+    }
+
+    // iOS 13+ requires permission request; others fire automatically
+    if (typeof DeviceOrientationEvent !== 'undefined' &&
+        typeof DeviceOrientationEvent.requestPermission === 'function') {
+      // We'll request on first user interaction (required by Safari)
+      const requestTilt = () => {
+        DeviceOrientationEvent.requestPermission()
+          .then(state => { if (state === 'granted') enableTilt(); })
+          .catch(() => {});
+        window.removeEventListener('touchstart', requestTilt);
+        window.removeEventListener('click', requestTilt);
+      };
+      window.addEventListener('touchstart', requestTilt, { once: true });
+      window.addEventListener('click', requestTilt, { once: true });
+    } else {
+      enableTilt();
+    }
+
     // ── Mouse / touch tracking ──
     let grabbed = false;
 
@@ -502,6 +532,11 @@
         const orbitY = mobile ? H * 0.12 : H * 0.18;
         targetX = W / 2 + Math.sin(frameCount * 0.008) * orbitX;
         targetY = H * 0.35 + Math.cos(frameCount * 0.006) * orbitY;
+
+        // Layer phone tilt on top of the drift orbit
+        const tiltRange = mobile ? W * 0.18 : W * 0.12;
+        targetX += tiltX * tiltRange;
+        targetY += tiltY * tiltRange;
       }
       const ease = grabbed ? 0.12 : 0.02;
       symbolX += (targetX - symbolX) * ease;
