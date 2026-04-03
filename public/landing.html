@@ -40,10 +40,17 @@
   <a id="enter-btn" href="/upload">ENTER THE LODGE</a>
 
   <script type="module">
-    let prepareWithSegments, layoutNextLine;
+    const fallback = () => {
+      const loader = document.getElementById('loader');
+      loader.textContent = '';
+      loader.innerHTML = '<div style="text-align:center;padding:40px"><h1 style="font-family:Cinzel,serif;color:#c9962c;margin-bottom:20px;font-size:clamp(1.5rem,4vw,2.5rem)">MASONIC RITUAL MENTOR</h1><p style="color:#c4b596;margin-bottom:30px;max-width:400px;margin-left:auto;margin-right:auto">Practice your ritual work from memory. Upload your encrypted .mram file and get instant voice feedback.</p><a href="/upload" style="color:#c9962c;border:1px solid #c9962c;padding:14px 36px;text-decoration:none;font-family:Cinzel,serif;letter-spacing:0.12em;font-size:14px">ENTER THE LODGE</a></div>';
+    };
+
+    try { // ── Master try/catch for entire page ──
+
     const m = await import('./pretext.js');
-    prepareWithSegments = m.prepareWithSegments;
-    layoutNextLine = m.layoutNextLine;
+    const prepareWithSegments = m.prepareWithSegments;
+    const layoutNextLine = m.layoutNextLine;
 
     // ── Config: Ancient scroll aesthetic ──
     const BG = '#1a150e';
@@ -455,10 +462,8 @@
         ready = true;
         loader.classList.add('hide');
       } catch (err) {
-        // Show error and fall back to a simple page
-        loader.textContent = '';
-        loader.innerHTML = '<div style="text-align:center"><h1 style="font-family:Cinzel,serif;color:#c9962c;margin-bottom:20px">MASONIC RITUAL MENTOR</h1><p style="color:#c4b596;margin-bottom:30px">Practice your ritual work from memory.</p><a href="/upload" style="color:#c9962c;border:1px solid #c9962c;padding:14px 36px;text-decoration:none;font-family:Cinzel,serif;letter-spacing:0.12em">ENTER THE LODGE</a></div>';
         console.error('Landing page init failed:', err);
+        fallback();
       }
     }
 
@@ -570,14 +575,12 @@
       }
     }
 
-    try {
-      await init();
-      requestAnimationFrame(render);
-    } catch (err) {
-      console.error('Landing page fatal error:', err);
-      const loader = document.getElementById('loader');
-      loader.textContent = '';
-      loader.innerHTML = '<div style="text-align:center"><h1 style="font-family:Cinzel,serif;color:#c9962c;margin-bottom:20px">MASONIC RITUAL MENTOR</h1><p style="color:#c4b596;margin-bottom:30px">Practice your ritual work from memory.</p><a href="/upload" style="color:#c9962c;border:1px solid #c9962c;padding:14px 36px;text-decoration:none;font-family:Cinzel,serif;letter-spacing:0.12em">ENTER THE LODGE</a></div>';
+    await init();
+    requestAnimationFrame(render);
+
+    } catch (err) { // ── Master catch ──
+      console.error('Landing page error:', err);
+      fallback();
     }
   </script>
 </body>
