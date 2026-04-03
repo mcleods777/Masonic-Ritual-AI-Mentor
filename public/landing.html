@@ -244,6 +244,76 @@
       else if (s.type === 'pillar') drawPillar(s.x, s.y, s.r, 1);
     }
 
+    // ── Pillars: Jachin (right) & Boaz (left) ──
+    function drawPillars() {
+      const pillarW = Math.max(28, W * 0.025);
+      const capH = pillarW * 1.2;
+      const baseH = pillarW * 0.8;
+      const flute = pillarW * 0.15;
+      const leftX = pillarW * 0.8;
+      const rightX = W - pillarW * 0.8;
+      const topY = 0;
+      const botY = H;
+
+      ctx.save();
+
+      for (const cx of [leftX, rightX]) {
+        const isLeft = cx < W / 2;
+
+        // Column shaft with fluting
+        ctx.globalAlpha = 0.12;
+        ctx.fillStyle = GOLD_DIM;
+        ctx.fillRect(cx - pillarW / 2, topY + capH, pillarW, botY - capH - baseH);
+
+        // Fluting lines (vertical grooves)
+        ctx.globalAlpha = 0.06;
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 1;
+        for (let i = 0; i < 4; i++) {
+          const fx = cx - pillarW / 2 + flute + i * (pillarW - flute * 2) / 3;
+          ctx.beginPath();
+          ctx.moveTo(fx, topY + capH + 10);
+          ctx.lineTo(fx, botY - baseH - 10);
+          ctx.stroke();
+        }
+
+        // Capital (top ornament)
+        ctx.globalAlpha = 0.18;
+        ctx.fillStyle = GOLD;
+        // Main capital block
+        ctx.fillRect(cx - pillarW * 0.7, topY, pillarW * 1.4, capH * 0.3);
+        // Echinus (curved part)
+        ctx.fillRect(cx - pillarW * 0.6, topY + capH * 0.3, pillarW * 1.2, capH * 0.35);
+        // Necking
+        ctx.fillRect(cx - pillarW * 0.5, topY + capH * 0.65, pillarW, capH * 0.35);
+
+        // Base
+        ctx.globalAlpha = 0.15;
+        ctx.fillStyle = GOLD;
+        ctx.fillRect(cx - pillarW * 0.7, botY - baseH, pillarW * 1.4, baseH * 0.3);
+        ctx.fillRect(cx - pillarW * 0.6, botY - baseH * 0.7, pillarW * 1.2, baseH * 0.7);
+
+        // Pillar letter: B (left/Boaz) and J (right/Jachin)
+        ctx.globalAlpha = 0.2;
+        ctx.font = `bold ${pillarW * 0.8}px Cinzel, serif`;
+        ctx.fillStyle = GOLD;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(isLeft ? 'B' : 'J', cx, topY + capH + 40);
+
+        // Subtle glow line along edge
+        ctx.globalAlpha = 0.05;
+        ctx.strokeStyle = GOLD;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(cx + (isLeft ? pillarW / 2 : -pillarW / 2), topY + capH);
+        ctx.lineTo(cx + (isLeft ? pillarW / 2 : -pillarW / 2), botY - baseH);
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    }
+
     // ── Collision: compute exclusion intervals for a line band ──
     function getExclusions(lineTop, lineBottom, obstacles) {
       const intervals = [];
@@ -375,6 +445,9 @@
       vig.addColorStop(1, 'rgba(0,0,0,0.4)');
       ctx.fillStyle = vig;
       ctx.fillRect(0, 0, W, H);
+
+      // ── Pillars (Jachin & Boaz) ──
+      drawPillars();
 
       // Build obstacle list
       const obstacles = [
