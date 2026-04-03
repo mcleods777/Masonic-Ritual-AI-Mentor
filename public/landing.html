@@ -442,14 +442,24 @@
 
     // ── Init Pretext ──
     async function init() {
-      await Promise.race([
-        document.fonts.ready,
-        new Promise(r => setTimeout(r, 2000)),
-      ]).catch(() => {});
+      const loader = document.getElementById('loader');
+      try {
+        await Promise.race([
+          document.fonts.ready,
+          new Promise(r => setTimeout(r, 3000)),
+        ]);
+      } catch { /* proceed with system fonts */ }
 
-      prepareAll();
-      ready = true;
-      document.getElementById('loader').classList.add('hide');
+      try {
+        prepareAll();
+        ready = true;
+        loader.classList.add('hide');
+      } catch (err) {
+        // Show error and fall back to a simple page
+        loader.textContent = '';
+        loader.innerHTML = '<div style="text-align:center"><h1 style="font-family:Cinzel,serif;color:#c9962c;margin-bottom:20px">MASONIC RITUAL MENTOR</h1><p style="color:#c4b596;margin-bottom:30px">Practice your ritual work from memory.</p><a href="/upload" style="color:#c9962c;border:1px solid #c9962c;padding:14px 36px;text-decoration:none;font-family:Cinzel,serif;letter-spacing:0.12em">ENTER THE LODGE</a></div>';
+        console.error('Landing page init failed:', err);
+      }
     }
 
     // ── Main render loop ──
@@ -560,8 +570,15 @@
       }
     }
 
-    await init();
-    requestAnimationFrame(render);
+    try {
+      await init();
+      requestAnimationFrame(render);
+    } catch (err) {
+      console.error('Landing page fatal error:', err);
+      const loader = document.getElementById('loader');
+      loader.textContent = '';
+      loader.innerHTML = '<div style="text-align:center"><h1 style="font-family:Cinzel,serif;color:#c9962c;margin-bottom:20px">MASONIC RITUAL MENTOR</h1><p style="color:#c4b596;margin-bottom:30px">Practice your ritual work from memory.</p><a href="/upload" style="color:#c9962c;border:1px solid #c9962c;padding:14px 36px;text-decoration:none;font-family:Cinzel,serif;letter-spacing:0.12em">ENTER THE LODGE</a></div>';
+    }
   </script>
 </body>
 </html>
