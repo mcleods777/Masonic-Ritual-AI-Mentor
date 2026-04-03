@@ -396,9 +396,9 @@ const DEEPGRAM_ROLE_VOICES: Record<string, string> = {
   SD:       "aura-2-orpheus-en",  // Orpheus — warm
   "S.D.":   "aura-2-orpheus-en",
   "S. D.":  "aura-2-orpheus-en",
-  JD:       "aura-2-theia-en",  // Perseus — distinct
-  "J.D.":   "aura-2-theia-en",
-  "J. D.":  "aura-2-theia-en",
+  JD:       "aura-2-apollo-en",  // Perseus — distinct
+  "J.D.":   "aura-2-apollo-en",
+  "J. D.":  "aura-2-apollo-en",
   "S(orJ)D":"aura-2-orpheus-en",
   "S/J D":  "aura-2-orpheus-en",
   // Other officers
@@ -409,9 +409,9 @@ const DEEPGRAM_ROLE_VOICES: Record<string, string> = {
   Tr:       "aura-2-arcas-en",
   Treas:    "aura-2-arcas-en",
   "Treas.": "aura-2-arcas-en",
-  Ch:       "aura-2-andromeda-en",   // Helios — resonant
-  Chap:     "aura-2-andromeda-en",
-  "Chap.":  "aura-2-andromeda-en",
+  Ch:       "aura-2-hermes-en",   // Helios — resonant
+  Chap:     "aura-2-hermes-en",
+  "Chap.":  "aura-2-hermes-en",
   Marshal:  "aura-2-orpheus-en",
   T:        "aura-2-atlas-en",    // Angus — distinctive accent
   Tyler:    "aura-2-atlas-en",
@@ -424,12 +424,12 @@ const DEEPGRAM_ROLE_VOICES: Record<string, string> = {
   "SW/WM":      "aura-2-zeus-en",
   // Additional role aliases from ritual files
   Trs:          "aura-2-arcas-en",
-  "WM/Chaplain":"aura-2-andromeda-en",
+  "WM/Chaplain":"aura-2-hermes-en",
   Voucher:      "aura-2-orpheus-en",
   Vchr:         "aura-2-orpheus-en",
   Narrator:     "aura-2-orion-en",
-  PRAYER:       "aura-2-andromeda-en",
-  Prayer:       "aura-2-andromeda-en",
+  PRAYER:       "aura-2-hermes-en",
+  Prayer:       "aura-2-hermes-en",
 };
 
 const DEEPGRAM_DEFAULT_VOICE = "aura-2-orion-en";

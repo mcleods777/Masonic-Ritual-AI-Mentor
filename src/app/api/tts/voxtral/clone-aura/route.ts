@@ -15,8 +15,8 @@ const VOICE_CONFIGS = [
   { name: "orion",     model: "aura-2-orion-en",     role: "SW",      description: "Orion — clear, steady" },
   { name: "arcas",     model: "aura-2-arcas-en",     role: "JW",      description: "Arcas — measured" },
   { name: "orpheus",   model: "aura-2-orpheus-en",   role: "SD",      description: "Orpheus — warm" },
-  { name: "theia",     model: "aura-2-theia-en",     role: "JD",      description: "Theia — bright" },
-  { name: "andromeda", model: "aura-2-andromeda-en", role: "Ch",      description: "Andromeda — resonant" },
+  { name: "apollo",    model: "aura-2-apollo-en",    role: "JD",      description: "Apollo — bright, articulate" },
+  { name: "hermes",   model: "aura-2-hermes-en",   role: "Ch",      description: "Hermes — smooth, resonant" },
   { name: "atlas",     model: "aura-2-atlas-en",     role: "T",       description: "Atlas — steady" },
 ];
 

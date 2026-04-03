@@ -22,8 +22,8 @@ const VOICE_CONFIGS = [
   { name: "orion",     deepgramModel: "aura-2-orion-en",     description: "Orion — clear, steady (Senior Warden)" },
   { name: "arcas",     deepgramModel: "aura-2-arcas-en",     description: "Arcas — measured (Junior Warden)" },
   { name: "orpheus",   deepgramModel: "aura-2-orpheus-en",   description: "Orpheus — warm (Senior Deacon)" },
-  { name: "theia",     deepgramModel: "aura-2-theia-en",     description: "Theia — bright (Junior Deacon)" },
-  { name: "andromeda", deepgramModel: "aura-2-andromeda-en", description: "Andromeda — resonant (Chaplain)" },
+  { name: "apollo",    deepgramModel: "aura-2-apollo-en",    description: "Apollo — bright, articulate (Junior Deacon)" },
+  { name: "hermes",   deepgramModel: "aura-2-hermes-en",   description: "Hermes — smooth, resonant (Chaplain)" },
   { name: "atlas",     deepgramModel: "aura-2-atlas-en",     description: "Atlas — steady (Marshal/Tyler)" },
 ];
 
