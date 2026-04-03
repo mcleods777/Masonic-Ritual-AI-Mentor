@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Masonic Ritual Mentor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Lato:wght@300;400&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #080a10; }
+    canvas { display: block; width: 100%; height: 100%; cursor: none; }
+    #loader {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      background: #080a10; color: #c9962c; font-family: 'Cinzel', serif; font-size: 1.2rem;
+      z-index: 10; transition: opacity 0.5s;
+    }
+    #loader.hide { opacity: 0; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <div id="loader">Loading...</div>
+  <canvas id="c"></canvas>
+
+  <script type="module">
+    let prepareWithSegments, layoutNextLine;
+    try {
+      const m = await import('/pretext.js');
+      prepareWithSegments = m.prepareWithSegments;
+      layoutNextLine = m.layoutNextLine;
+    } catch (err) {
+      document.getElementById('loader').textContent = 'Import error: ' + err.message;
+      console.error('Failed to import pretext:', err);
+      throw err;
+    }
+
+    // ── Config ──
+    const BG = '#080a10';
+    const GOLD = '#c9962c';
+    const GOLD_DIM = '#8b6914';
+    const TEXT_COLOR = '#d8d4cc';
+    const TEXT_DIM = '#6a655e';
+    const SYMBOL_RADIUS = 80;
+    const LINE_HEIGHT = 28;
+    const FONT_BODY = '17px Lato, sans-serif';
+    const FONT_HEADING = 'bold 38px Cinzel, serif';
+
+    // ── Text content ──
+    const HEADING = 'MASONIC RITUAL MENTOR';
+    const BODY_TEXT = `Practice your ritual work from memory. Upload your encrypted .mram file, speak your lines aloud, and get instant word-by-word feedback powered by voice AI. Everything stays on your device.
+
+Six distinct AI voices for each officer role. The Worshipful Master speaks with authority. The Senior Warden is steady and clear. The Junior Deacon is bright and articulate. Every brother sounds different because every brother is different.
+
+Record your own voice or a brother's voice in three seconds. The app clones it and uses it for that officer's lines during rehearsal. Practice as if the whole lodge is there with you.
+
+Cipher text is shown by default so you practice the way you'll perform. Toggle to plain text when you need it. Five layers of comparison catch every word: normalization, word-level diff, phonetic forgiveness for speech-to-text artifacts, fuzzy matching for near-misses, and color-coded accuracy scoring.
+
+Track your accuracy over time. See which sections give you trouble. Watch your streaks grow. The more you practice, the more confident you become on the night.
+
+Privacy first. Your ritual file is encrypted with AES-256-GCM and stored only in your browser. Cipher and plain text are kept in separate encrypted fields. Nothing leaves your device unless you choose to speak.
+
+Built by a Mason, for Masons. One brother with an idea and AI as his only engineering team. From first commit to production in six weeks. This is what happens when the tools get out of the way and let you build what matters.
+
+Upload your .mram file. Pick your role. Start rehearsing.`;
+
+    // ── State ──
+    let mouseX = -999, mouseY = -999;
+    let symbolX = -999, symbolY = -999;
+    let dpr, W, H, ctx;
+    let preparedHeading, preparedBody;
+    let ready = false;
+    let secondarySymbols = [];
+    let frameCount = 0;
+
+    // ── Canvas setup ──
+    const canvas = document.getElementById('c');
+    ctx = canvas.getContext('2d');
+
+    function resize() {
+      dpr = window.devicePixelRatio || 1;
+      W = window.innerWidth;
+      H = window.innerHeight;
+      canvas.width = W * dpr;
+      canvas.height = H * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    // ── Mouse / touch tracking ──
+    canvas.addEventListener('mousemove', (e) => { mouseX = e.clientX; mouseY = e.clientY; });
+    canvas.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      mouseX = e.touches[0].clientX;
+      mouseY = e.touches[0].clientY;
+    }, { passive: false });
+    canvas.addEventListener('mouseleave', () => { mouseX = -999; mouseY = -999; });
+
+    // ── Secondary floating symbols ──
+    function initSecondarySymbols() {
+      secondarySymbols = [
+        { x: W * 0.2, y: H * 0.3, vx: 0.3, vy: 0.2, r: 35, type: 'eye' },
+        { x: W * 0.8, y: H * 0.7, vx: -0.25, vy: 0.3, r: 30, type: 'trowel' },
+        { x: W * 0.5, y: H * 0.8, vx: 0.2, vy: -0.35, r: 28, type: 'pillar' },
+      ];
+    }
+    initSecondarySymbols();
+
+    function updateSecondarySymbols() {
+      for (const s of secondarySymbols) {
+        s.x += s.vx;
+        s.y += s.vy;
+        if (s.x < s.r || s.x > W - s.r) s.vx *= -1;
+        if (s.y < s.r || s.y > H - s.r) s.vy *= -1;
+      }
+    }
+
+    // ── Draw square & compass symbol ──
+    function drawSquareAndCompass(cx, cy, size, alpha) {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.globalAlpha = alpha;
+
+      const s = size / 80;
+
+      // Glow
+      ctx.shadowColor = GOLD;
+      ctx.shadowBlur = 30 * s;
+
+      ctx.strokeStyle = GOLD;
+      ctx.lineWidth = 2.5 * s;
+      ctx.lineCap = 'round';
+
+      // Compass (V shape opening upward)
+      ctx.beginPath();
+      ctx.moveTo(-30 * s, 35 * s);
+      ctx.lineTo(0, -40 * s);
+      ctx.lineTo(30 * s, 35 * s);
+      ctx.stroke();
+
+      // Square (inverted V below)
+      ctx.beginPath();
+      ctx.moveTo(-35 * s, -15 * s);
+      ctx.lineTo(0, 30 * s);
+      ctx.lineTo(35 * s, -15 * s);
+      ctx.stroke();
+
+      // G in center
+      ctx.shadowBlur = 0;
+      ctx.font = `bold ${22 * s}px Cinzel, serif`;
+      ctx.fillStyle = GOLD;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('G', 0, 2 * s);
+
+      // Circle around
+      ctx.beginPath();
+      ctx.arc(0, 0, 50 * s, 0, Math.PI * 2);
+      ctx.strokeStyle = GOLD_DIM;
+      ctx.lineWidth = 1 * s;
+      ctx.globalAlpha = alpha * 0.4;
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    // ── Draw secondary symbols ──
+    function drawEye(cx, cy, size, alpha) {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.globalAlpha = alpha * 0.5;
+      ctx.strokeStyle = GOLD_DIM;
+      ctx.lineWidth = 1.5;
+
+      // Eye shape
+      ctx.beginPath();
+      ctx.moveTo(-size, 0);
+      ctx.quadraticCurveTo(0, -size * 0.8, size, 0);
+      ctx.quadraticCurveTo(0, size * 0.8, -size, 0);
+      ctx.stroke();
+
+      // Pupil
+      ctx.beginPath();
+      ctx.arc(0, 0, size * 0.3, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    function drawTrowel(cx, cy, size, alpha) {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.globalAlpha = alpha * 0.4;
+      ctx.strokeStyle = GOLD_DIM;
+      ctx.lineWidth = 1.5;
+
+      // Triangle blade
+      ctx.beginPath();
+      ctx.moveTo(0, -size);
+      ctx.lineTo(-size * 0.5, size * 0.3);
+      ctx.lineTo(size * 0.5, size * 0.3);
+      ctx.closePath();
+      ctx.stroke();
+
+      // Handle
+      ctx.beginPath();
+      ctx.moveTo(0, size * 0.3);
+      ctx.lineTo(0, size);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    function drawPillar(cx, cy, size, alpha) {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.globalAlpha = alpha * 0.4;
+      ctx.strokeStyle = GOLD_DIM;
+      ctx.lineWidth = 1.5;
+
+      // Column
+      ctx.strokeRect(-size * 0.25, -size, size * 0.5, size * 2);
+      // Capital
+      ctx.strokeRect(-size * 0.35, -size, size * 0.7, size * 0.2);
+      // Base
+      ctx.strokeRect(-size * 0.35, size * 0.8, size * 0.7, size * 0.2);
+
+      ctx.restore();
+    }
+
+    function drawSecondarySymbol(s) {
+      if (s.type === 'eye') drawEye(s.x, s.y, s.r, 1);
+      else if (s.type === 'trowel') drawTrowel(s.x, s.y, s.r, 1);
+      else if (s.type === 'pillar') drawPillar(s.x, s.y, s.r, 1);
+    }
+
+    // ── Collision: compute exclusion intervals for a line band ──
+    function getExclusions(lineTop, lineBottom, obstacles) {
+      const intervals = [];
+      for (const ob of obstacles) {
+        const dy1 = Math.abs(ob.y - lineTop);
+        const dy2 = Math.abs(ob.y - lineBottom);
+        const dy = Math.min(dy1, dy2, Math.abs(ob.y - (lineTop + lineBottom) / 2));
+        if (dy < ob.r) {
+          const half = Math.sqrt(ob.r * ob.r - dy * dy);
+          intervals.push([ob.x - half, ob.x + half]);
+        }
+      }
+      // Merge overlapping
+      intervals.sort((a, b) => a[0] - b[0]);
+      const merged = [];
+      for (const iv of intervals) {
+        if (merged.length && iv[0] <= merged[merged.length - 1][1]) {
+          merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], iv[1]);
+        } else {
+          merged.push([...iv]);
+        }
+      }
+      return merged;
+    }
+
+    // ── Carve slots from a line, given exclusions ──
+    function carveSlots(lineLeft, lineRight, exclusions) {
+      const slots = [];
+      let left = lineLeft;
+      for (const [exL, exR] of exclusions) {
+        if (exL > left) slots.push({ x: left, w: exL - left });
+        left = Math.max(left, exR);
+      }
+      if (left < lineRight) slots.push({ x: left, w: lineRight - left });
+      return slots;
+    }
+
+    // ── Render text with reflow ──
+    function renderText(prepared, font, color, startX, startY, maxWidth, lineH, obstacles) {
+      ctx.font = font;
+      ctx.fillStyle = color;
+      ctx.textBaseline = 'top';
+
+      let state = null;
+      let y = startY;
+      const endY = H + lineH;
+      const leftEdge = startX;
+      const rightEdge = startX + maxWidth;
+
+      while (y < endY) {
+        const exclusions = getExclusions(y, y + lineH, obstacles);
+        const slots = carveSlots(leftEdge, rightEdge, exclusions);
+
+        if (slots.length === 0) {
+          y += lineH;
+          continue;
+        }
+
+        let advanced = false;
+        for (const slot of slots) {
+          if (slot.w < 40) continue; // skip tiny slots
+          const result = layoutNextLine(prepared, state, slot.w, lineH);
+          if (!result) return y; // text exhausted
+          state = result.state;
+          ctx.fillText(result.text.trimEnd(), slot.x, y);
+          advanced = true;
+        }
+
+        if (!advanced) {
+          // No usable slots, skip this line
+        }
+        y += lineH;
+      }
+      return y;
+    }
+
+    // ── Init Pretext ──
+    async function init() {
+      try {
+        // Wait for fonts, but timeout after 3s
+        await Promise.race([
+          document.fonts.ready,
+          new Promise(r => setTimeout(r, 3000)),
+        ]);
+      } catch { /* proceed with system fonts */ }
+
+      try {
+        preparedHeading = prepareWithSegments(HEADING, FONT_HEADING);
+        preparedBody = prepareWithSegments(BODY_TEXT, FONT_BODY);
+        ready = true;
+        document.getElementById('loader').classList.add('hide');
+      } catch (err) {
+        document.getElementById('loader').textContent = 'Error: ' + err.message;
+        console.error('Pretext init failed:', err);
+      }
+    }
+
+    // ── Main render loop ──
+    function render() {
+      frameCount++;
+      if (!ready) { requestAnimationFrame(render); return; }
+
+      // Smooth symbol follow
+      const targetX = mouseX > 0 ? mouseX : W / 2 + Math.sin(frameCount * 0.008) * (W * 0.25);
+      const targetY = mouseY > 0 ? mouseY : H / 2 + Math.cos(frameCount * 0.006) * (H * 0.2);
+      symbolX += (targetX - symbolX) * 0.06;
+      symbolY += (targetY - symbolY) * 0.06;
+
+      updateSecondarySymbols();
+
+      // Clear
+      ctx.fillStyle = BG;
+      ctx.fillRect(0, 0, W, H);
+
+      // Build obstacle list
+      const obstacles = [
+        { x: symbolX, y: symbolY, r: SYMBOL_RADIUS },
+        ...secondarySymbols.map(s => ({ x: s.x, y: s.y, r: s.r + 10 })),
+      ];
+
+      // Layout params
+      const pad = Math.max(40, W * 0.06);
+      const maxW = Math.min(W - pad * 2, 900);
+      const startX = (W - maxW) / 2;
+
+      // Render heading
+      ctx.font = FONT_HEADING;
+      const headingY = renderText(preparedHeading, FONT_HEADING, GOLD, startX, 60, maxW, 50, obstacles);
+
+      // Render body
+      renderText(preparedBody, FONT_BODY, TEXT_COLOR, startX, headingY + 20, maxW, LINE_HEIGHT, obstacles);
+
+      // Draw symbols on top
+      drawSquareAndCompass(symbolX, symbolY, SYMBOL_RADIUS, 0.9);
+      for (const s of secondarySymbols) drawSecondarySymbol(s);
+
+      // CTA hint at bottom
+      ctx.font = '14px Lato, sans-serif';
+      ctx.fillStyle = TEXT_DIM;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText('Move your cursor to guide the compass  |  masonic-ritual-ai-mentor.vercel.app', W / 2, H - 20);
+      ctx.textAlign = 'left';
+
+      requestAnimationFrame(render);
+    }
+
+    init();
+    requestAnimationFrame(render);
+  </script>
+</body>
+</html>
