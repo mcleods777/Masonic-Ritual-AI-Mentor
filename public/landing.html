@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Masonic Ritual Mentor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #1a150e; }
+    canvas { display: block; width: 100%; height: 100%; cursor: default; }
+    #loader {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      background: #1a150e; color: #c9962c; font-family: 'Cinzel', serif; font-size: 1.2rem;
+      z-index: 10; transition: opacity 0.5s;
+    }
+    #loader.hide { opacity: 0; pointer-events: none; }
+    #enter-btn {
+      position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
+      z-index: 5; padding: 16px 48px;
+      background: transparent; border: 1px solid #c9962c;
+      color: #c9962c; font-family: 'Cinzel', serif; font-size: 16px;
+      letter-spacing: 0.15em; cursor: pointer;
+      transition: all 0.3s ease;
+    }
+    #enter-btn:hover {
+      background: #c9962c; color: #1a150e;
+      box-shadow: 0 0 30px rgba(201, 150, 44, 0.3);
+    }
+  </style>
+</head>
+<body>
+  <div id="loader">Loading...</div>
+  <canvas id="c"></canvas>
+  <a id="enter-btn" href="/upload">ENTER THE LODGE</a>
+
+  <script type="module">
+    let prepareWithSegments, layoutNextLine;
+    const m = await import('./pretext.js');
+    prepareWithSegments = m.prepareWithSegments;
+    layoutNextLine = m.layoutNextLine;
+
+    // ── Config: Ancient scroll aesthetic ──
+    const BG = '#1a150e';           // dark aged parchment
+    const BG2 = '#140f08';          // deeper edges
+    const GOLD = '#c9962c';
+    const GOLD_DIM = '#8b6914';
+    const TEXT_COLOR = '#c4b596';    // faded ink on parchment
+    const TEXT_DIM = '#7a6e55';
+    const SYMBOL_RADIUS = 80;
+    const LINE_HEIGHT = 30;
+    const FONT_BODY = '18px "Cormorant Garamond", "Palatino Linotype", Palatino, Georgia, serif';
+    const FONT_HEADING = 'bold 40px Cinzel, serif';
+
+    // ── Text content ──
+    const HEADING = 'MASONIC RITUAL MENTOR';
+    const PARAGRAPHS = [
+      `Practice your ritual work from memory. Upload your encrypted .mram file, speak your lines aloud, and get instant word-by-word feedback powered by voice AI. Everything stays on your device.`,
+
+      `Six distinct AI voices for each officer role. The Worshipful Master speaks with authority. The Senior Warden is steady and clear. The Junior Deacon is bright and articulate. Every brother sounds different because every brother is different.`,
+
+      `Record your own voice or a brother's voice in three seconds. The app clones it and uses it for that officer's lines during rehearsal. Practice as if the whole lodge is there with you.`,
+
+      `Cipher text is shown by default so you practice the way you'll perform. Five layers of comparison catch every word: normalization, word-level diff, phonetic forgiveness, fuzzy matching, and color-coded accuracy scoring.`,
+
+      `Track your accuracy over time. See which sections give you trouble. Watch your streaks grow. The more you practice, the more confident you become on the night.`,
+
+      `Privacy first. Your ritual file is encrypted with AES-256-GCM and stored only in your browser. Nothing leaves your device unless you choose to speak.`,
+
+      `Built by a Mason, for Masons. One brother with an idea and AI as his only engineering team. From first commit to production in six weeks.`,
+    ];
+
+    // ── State ──
+    let mouseX = -999, mouseY = -999;
+    let symbolX = -999, symbolY = -999;
+    let dpr, W, H, ctx;
+    let preparedHeading;
+    let preparedParagraphs = [];
+    let ready = false;
+    let secondarySymbols = [];
+    let frameCount = 0;
+
+    // ── Canvas setup ──
+    const canvas = document.getElementById('c');
+    ctx = canvas.getContext('2d');
+
+    function resize() {
+      dpr = window.devicePixelRatio || 1;
+      W = window.innerWidth;
+      H = window.innerHeight;
+      canvas.width = W * dpr;
+      canvas.height = H * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    // ── Mouse / touch tracking ──
+    let grabbed = false;
+    canvas.addEventListener('mousemove', (e) => { mouseX = e.clientX; mouseY = e.clientY; });
+    canvas.addEventListener('touchmove', (e) => {
+      if (!grabbed) return;
+      e.preventDefault();
+      mouseX = e.touches[0].clientX;
+      mouseY = e.touches[0].clientY;
+    }, { passive: false });
+
+    // Click to grab/release the compass
+    canvas.addEventListener('click', (e) => {
+      const dx = e.clientX - symbolX;
+      const dy = e.clientY - symbolY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (grabbed) {
+        // Release
+        grabbed = false;
+        canvas.style.cursor = 'default';
+      } else if (dist < SYMBOL_RADIUS * 1.3) {
+        // Grab (clicked near the symbol)
+        grabbed = true;
+        canvas.style.cursor = 'grabbing';
+      }
+    });
+    canvas.addEventListener('touchstart', (e) => {
+      const dx = e.touches[0].clientX - symbolX;
+      const dy = e.touches[0].clientY - symbolY;
+      if (Math.sqrt(dx * dx + dy * dy) < SYMBOL_RADIUS * 1.5) {
+        grabbed = true;
+      }
+    });
+    canvas.addEventListener('touchend', () => { grabbed = false; });
+
+    // ── Secondary floating symbols ──
+    function initSecondarySymbols() {
+      secondarySymbols = [
+        { x: W * 0.2, y: H * 0.3, vx: 0.3, vy: 0.2, r: 35, type: 'eye' },
+        { x: W * 0.8, y: H * 0.7, vx: -0.25, vy: 0.3, r: 30, type: 'trowel' },
+        { x: W * 0.5, y: H * 0.8, vx: 0.2, vy: -0.35, r: 28, type: 'pillar' },
+      ];
+    }
+    initSecondarySymbols();
+
+    function updateSecondarySymbols() {
+      for (const s of secondarySymbols) {
+        s.x += s.vx;
+        s.y += s.vy;
+        if (s.x < s.r || s.x > W - s.r) s.vx *= -1;
+        if (s.y < s.r || s.y > H - s.r) s.vy *= -1;
+      }
+    }
+
+    // ── Draw square & compass symbol ──
+    function drawSquareAndCompass(cx, cy, size, alpha) {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.globalAlpha = alpha;
+
+      const s = size / 80;
+
+      // Ancient warm glow
+      ctx.shadowColor = '#d4a030';
+      ctx.shadowBlur = 40 * s;
+
+      ctx.strokeStyle = GOLD;
+      ctx.lineWidth = 2.5 * s;
+      ctx.lineCap = 'round';
+
+      // Compass (V shape opening upward)
+      ctx.beginPath();
+      ctx.moveTo(-30 * s, 35 * s);
+      ctx.lineTo(0, -40 * s);
+      ctx.lineTo(30 * s, 35 * s);
+      ctx.stroke();
+
+      // Square (inverted V below)
+      ctx.beginPath();
+      ctx.moveTo(-35 * s, -15 * s);
+      ctx.lineTo(0, 30 * s);
+      ctx.lineTo(35 * s, -15 * s);
+      ctx.stroke();
+
+      // G in center
+      ctx.shadowBlur = 0;
+      ctx.font = `bold ${22 * s}px Cinzel, serif`;
+      ctx.fillStyle = GOLD;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('G', 0, 2 * s);
+
+      // Circle around
+      ctx.beginPath();
+      ctx.arc(0, 0, 50 * s, 0, Math.PI * 2);
+      ctx.strokeStyle = GOLD_DIM;
+      ctx.lineWidth = 1 * s;
+      ctx.globalAlpha = alpha * 0.4;
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    // ── Draw secondary symbols ──
+    function drawEye(cx, cy, size, alpha) {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.globalAlpha = alpha * 0.5;
+      ctx.strokeStyle = GOLD_DIM;
+      ctx.lineWidth = 1.5;
+
+      // Eye shape
+      ctx.beginPath();
+      ctx.moveTo(-size, 0);
+      ctx.quadraticCurveTo(0, -size * 0.8, size, 0);
+      ctx.quadraticCurveTo(0, size * 0.8, -size, 0);
+      ctx.stroke();
+
+      // Pupil
+      ctx.beginPath();
+      ctx.arc(0, 0, size * 0.3, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    function drawTrowel(cx, cy, size, alpha) {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.globalAlpha = alpha * 0.4;
+      ctx.strokeStyle = GOLD_DIM;
+      ctx.lineWidth = 1.5;
+
+      // Triangle blade
+      ctx.beginPath();
+      ctx.moveTo(0, -size);
+      ctx.lineTo(-size * 0.5, size * 0.3);
+      ctx.lineTo(size * 0.5, size * 0.3);
+      ctx.closePath();
+      ctx.stroke();
+
+      // Handle
+      ctx.beginPath();
+      ctx.moveTo(0, size * 0.3);
+      ctx.lineTo(0, size);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    function drawPillar(cx, cy, size, alpha) {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.globalAlpha = alpha * 0.4;
+      ctx.strokeStyle = GOLD_DIM;
+      ctx.lineWidth = 1.5;
+
+      // Column
+      ctx.strokeRect(-size * 0.25, -size, size * 0.5, size * 2);
+      // Capital
+      ctx.strokeRect(-size * 0.35, -size, size * 0.7, size * 0.2);
+      // Base
+      ctx.strokeRect(-size * 0.35, size * 0.8, size * 0.7, size * 0.2);
+
+      ctx.restore();
+    }
+
+    function drawSecondarySymbol(s) {
+      if (s.type === 'eye') drawEye(s.x, s.y, s.r, 1);
+      else if (s.type === 'trowel') drawTrowel(s.x, s.y, s.r, 1);
+      else if (s.type === 'pillar') drawPillar(s.x, s.y, s.r, 1);
+    }
+
+    // ── Pillars: Jachin (right) & Boaz (left) ──
+    function drawPillars() {
+      const pillarW = Math.max(28, W * 0.025);
+      const capH = pillarW * 1.2;
+      const baseH = pillarW * 0.8;
+      const flute = pillarW * 0.15;
+      const leftX = pillarW * 0.8;
+      const rightX = W - pillarW * 0.8;
+      const topY = 0;
+      const botY = H;
+
+      ctx.save();
+
+      for (const cx of [leftX, rightX]) {
+        const isLeft = cx < W / 2;
+
+        // Column shaft with fluting
+        ctx.globalAlpha = 0.12;
+        ctx.fillStyle = GOLD_DIM;
+        ctx.fillRect(cx - pillarW / 2, topY + capH, pillarW, botY - capH - baseH);
+
+        // Fluting lines (vertical grooves)
+        ctx.globalAlpha = 0.06;
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 1;
+        for (let i = 0; i < 4; i++) {
+          const fx = cx - pillarW / 2 + flute + i * (pillarW - flute * 2) / 3;
+          ctx.beginPath();
+          ctx.moveTo(fx, topY + capH + 10);
+          ctx.lineTo(fx, botY - baseH - 10);
+          ctx.stroke();
+        }
+
+        // Capital (top ornament)
+        ctx.globalAlpha = 0.18;
+        ctx.fillStyle = GOLD;
+        // Main capital block
+        ctx.fillRect(cx - pillarW * 0.7, topY, pillarW * 1.4, capH * 0.3);
+        // Echinus (curved part)
+        ctx.fillRect(cx - pillarW * 0.6, topY + capH * 0.3, pillarW * 1.2, capH * 0.35);
+        // Necking
+        ctx.fillRect(cx - pillarW * 0.5, topY + capH * 0.65, pillarW, capH * 0.35);
+
+        // Base
+        ctx.globalAlpha = 0.15;
+        ctx.fillStyle = GOLD;
+        ctx.fillRect(cx - pillarW * 0.7, botY - baseH, pillarW * 1.4, baseH * 0.3);
+        ctx.fillRect(cx - pillarW * 0.6, botY - baseH * 0.7, pillarW * 1.2, baseH * 0.7);
+
+        // Pillar letter: B (left/Boaz) and J (right/Jachin)
+        ctx.globalAlpha = 0.2;
+        ctx.font = `bold ${pillarW * 0.8}px Cinzel, serif`;
+        ctx.fillStyle = GOLD;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(isLeft ? 'B' : 'J', cx, topY + capH + 40);
+
+        // Subtle glow line along edge
+        ctx.globalAlpha = 0.05;
+        ctx.strokeStyle = GOLD;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(cx + (isLeft ? pillarW / 2 : -pillarW / 2), topY + capH);
+        ctx.lineTo(cx + (isLeft ? pillarW / 2 : -pillarW / 2), botY - baseH);
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    }
+
+    // ── Collision: compute exclusion intervals for a line band ──
+    function getExclusions(lineTop, lineBottom, obstacles) {
+      const intervals = [];
+      for (const ob of obstacles) {
+        const dy1 = Math.abs(ob.y - lineTop);
+        const dy2 = Math.abs(ob.y - lineBottom);
+        const dy = Math.min(dy1, dy2, Math.abs(ob.y - (lineTop + lineBottom) / 2));
+        if (dy < ob.r) {
+          const half = Math.sqrt(ob.r * ob.r - dy * dy);
+          intervals.push([ob.x - half, ob.x + half]);
+        }
+      }
+      // Merge overlapping
+      intervals.sort((a, b) => a[0] - b[0]);
+      const merged = [];
+      for (const iv of intervals) {
+        if (merged.length && iv[0] <= merged[merged.length - 1][1]) {
+          merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], iv[1]);
+        } else {
+          merged.push([...iv]);
+        }
+      }
+      return merged;
+    }
+
+    // ── Carve slots from a line, given exclusions ──
+    function carveSlots(lineLeft, lineRight, exclusions) {
+      const slots = [];
+      let left = lineLeft;
+      for (const [exL, exR] of exclusions) {
+        if (exL > left) slots.push({ x: left, w: exL - left });
+        left = Math.max(left, exR);
+      }
+      if (left < lineRight) slots.push({ x: left, w: lineRight - left });
+      return slots;
+    }
+
+    // ── Render text with reflow ──
+    function renderText(prepared, font, color, startX, startY, maxWidth, lineH, obstacles) {
+      ctx.font = font;
+      ctx.fillStyle = color;
+      ctx.textBaseline = 'top';
+
+      let state = { segmentIndex: 0, graphemeIndex: 0 };
+      let y = startY;
+      let done = false;
+      const endY = H + lineH;
+      const leftEdge = startX;
+      const rightEdge = startX + maxWidth;
+      const MIN_SLOT = 100;
+
+      while (y < endY && !done) {
+        const exclusions = getExclusions(y, y + lineH, obstacles);
+        const slots = carveSlots(leftEdge, rightEdge, exclusions);
+        const usableSlots = slots.filter(s => s.w >= MIN_SLOT);
+
+        if (usableSlots.length === 0) {
+          y += lineH;
+          continue;
+        }
+
+        for (const slot of usableSlots) {
+          try {
+            const result = layoutNextLine(prepared, state, slot.w);
+            if (!result) { done = true; break; }
+            state = result.end;
+            ctx.fillText(result.text.trimEnd(), slot.x, y);
+          } catch {
+            // Skip this slot, try the next one
+          }
+        }
+
+        y += lineH;
+      }
+      return y;
+    }
+
+    // ── Init Pretext ──
+    async function init() {
+      await Promise.race([
+        document.fonts.ready,
+        new Promise(r => setTimeout(r, 2000)),
+      ]).catch(() => {});
+
+      preparedHeading = prepareWithSegments(HEADING, FONT_HEADING);
+      preparedParagraphs = PARAGRAPHS.map(p => prepareWithSegments(p, FONT_BODY));
+      ready = true;
+      document.getElementById('loader').classList.add('hide');
+    }
+
+    // ── Main render loop ──
+    function render() {
+      try {
+      frameCount++;
+      if (!ready) { requestAnimationFrame(render); return; }
+
+      // Symbol movement: drift by default, follow cursor only when grabbed
+      let targetX, targetY;
+      if (grabbed && mouseX > 0) {
+        targetX = mouseX;
+        targetY = mouseY;
+      } else {
+        // Gentle drift path
+        targetX = W / 2 + Math.sin(frameCount * 0.008) * (W * 0.22);
+        targetY = H / 2 + Math.cos(frameCount * 0.006) * (H * 0.18);
+      }
+      const ease = grabbed ? 0.12 : 0.02;
+      symbolX += (targetX - symbolX) * ease;
+      symbolY += (targetY - symbolY) * ease;
+
+      updateSecondarySymbols();
+
+      // Clear with parchment gradient
+      const grad = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, Math.max(W, H) * 0.7);
+      grad.addColorStop(0, BG);
+      grad.addColorStop(1, BG2);
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
+
+      // Subtle noise/grain texture (aged paper feel)
+      if (frameCount === 1 || frameCount % 120 === 0) {
+        ctx.save();
+        ctx.globalAlpha = 0.03;
+        for (let i = 0; i < 200; i++) {
+          const x = Math.random() * W;
+          const y = Math.random() * H;
+          const s = Math.random() * 2 + 0.5;
+          ctx.fillStyle = Math.random() > 0.5 ? '#d4c4a0' : '#0a0800';
+          ctx.fillRect(x, y, s, s);
+        }
+        ctx.restore();
+      }
+
+      // Vignette (darker edges like an old scroll)
+      const vig = ctx.createRadialGradient(W/2, H/2, Math.min(W, H) * 0.3, W/2, H/2, Math.max(W, H) * 0.7);
+      vig.addColorStop(0, 'rgba(0,0,0,0)');
+      vig.addColorStop(1, 'rgba(0,0,0,0.4)');
+      ctx.fillStyle = vig;
+      ctx.fillRect(0, 0, W, H);
+
+      // ── Pillars (Jachin & Boaz) ──
+      drawPillars();
+
+      // Build obstacle list
+      const obstacles = [
+        { x: symbolX, y: symbolY, r: SYMBOL_RADIUS },
+        ...secondarySymbols.map(s => ({ x: s.x, y: s.y, r: s.r + 10 })),
+      ];
+
+      // Layout params
+      const pad = Math.max(40, W * 0.06);
+      const maxW = Math.min(W - pad * 2, 900);
+      const startX = (W - maxW) / 2;
+
+      // Render heading
+      ctx.font = FONT_HEADING;
+      let curY = renderText(preparedHeading, FONT_HEADING, GOLD, startX, 60, maxW, 52, obstacles);
+
+      // Render paragraphs with spacing
+      const PARA_GAP = 18;
+      for (const prepared of preparedParagraphs) {
+        curY += PARA_GAP;
+        curY = renderText(prepared, FONT_BODY, TEXT_COLOR, startX, curY, maxW, LINE_HEIGHT, obstacles);
+        if (curY > H) break; // off screen
+      }
+
+      // Draw symbols on top
+      drawSquareAndCompass(symbolX, symbolY, SYMBOL_RADIUS, 0.9);
+      for (const s of secondarySymbols) drawSecondarySymbol(s);
+
+      // (CTA is an HTML overlay button now)
+
+      requestAnimationFrame(render);
+      } catch (e) {
+        // Render error, skip this frame but keep the loop alive
+        console.warn('render error:', e.message);
+        requestAnimationFrame(render);
+      }
+    }
+
+    await init();
+    requestAnimationFrame(render);
+  </script>
+</body>
+</html>
