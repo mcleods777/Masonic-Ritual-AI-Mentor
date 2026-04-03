@@ -18,12 +18,15 @@
     }
     #loader.hide { opacity: 0; pointer-events: none; }
     #enter-btn {
-      position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
-      z-index: 5; padding: 16px 48px;
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      z-index: 5; padding: 14px 36px;
       background: transparent; border: 1px solid #c9962c;
-      color: #c9962c; font-family: 'Cinzel', serif; font-size: 16px;
-      letter-spacing: 0.15em; cursor: pointer;
-      transition: all 0.3s ease;
+      color: #c9962c; font-family: 'Cinzel', serif; font-size: 14px;
+      letter-spacing: 0.12em; cursor: pointer;
+      transition: all 0.3s ease; white-space: nowrap;
+    }
+    @media (min-width: 600px) {
+      #enter-btn { padding: 16px 48px; font-size: 16px; bottom: 40px; }
     }
     #enter-btn:hover {
       background: #c9962c; color: #1a150e;
@@ -43,16 +46,25 @@
     layoutNextLine = m.layoutNextLine;
 
     // ── Config: Ancient scroll aesthetic ──
-    const BG = '#1a150e';           // dark aged parchment
-    const BG2 = '#140f08';          // deeper edges
+    const BG = '#1a150e';
+    const BG2 = '#140f08';
     const GOLD = '#c9962c';
     const GOLD_DIM = '#8b6914';
-    const TEXT_COLOR = '#c4b596';    // faded ink on parchment
+    const TEXT_COLOR = '#c4b596';
     const TEXT_DIM = '#7a6e55';
-    const SYMBOL_RADIUS = 80;
-    const LINE_HEIGHT = 30;
-    const FONT_BODY = '18px "Cormorant Garamond", "Palatino Linotype", Palatino, Georgia, serif';
-    const FONT_HEADING = 'bold 40px Cinzel, serif';
+
+    // Responsive values (recalculated on resize)
+    function isMobile() { return W < 600; }
+    function getSymbolRadius() { return isMobile() ? 50 : 80; }
+    function getLineHeight() { return isMobile() ? 24 : 30; }
+    function getFontBody() {
+      const size = isMobile() ? 15 : 18;
+      return `${size}px "Cormorant Garamond", "Palatino Linotype", Palatino, Georgia, serif`;
+    }
+    function getFontHeading() {
+      const size = isMobile() ? 24 : 40;
+      return `bold ${size}px Cinzel, serif`;
+    }
 
     // ── Text content ──
     const HEADING = 'MASONIC RITUAL MENTOR';
@@ -78,6 +90,13 @@
     let dpr, W, H, ctx;
     let preparedHeading;
     let preparedParagraphs = [];
+    let lastPrepareWidth = 0;
+
+    function prepareAll() {
+      preparedHeading = prepareWithSegments(HEADING, getFontHeading());
+      preparedParagraphs = PARAGRAPHS.map(p => prepareWithSegments(p, getFontBody()));
+      lastPrepareWidth = W;
+    }
     let ready = false;
     let secondarySymbols = [];
     let frameCount = 0;
@@ -95,7 +114,12 @@
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
     resize();
-    window.addEventListener('resize', resize);
+    window.addEventListener('resize', () => {
+      const wasMobile = isMobile();
+      resize();
+      // Re-prepare text if crossing mobile/desktop threshold
+      if (ready && wasMobile !== isMobile()) prepareAll();
+    });
 
     // ── Mouse / touch tracking ──
     let grabbed = false;
@@ -388,7 +412,7 @@
       const endY = H + lineH;
       const leftEdge = startX;
       const rightEdge = startX + maxWidth;
-      const MIN_SLOT = 100;
+      const MIN_SLOT = W < 600 ? 60 : 100;
 
       while (y < endY && !done) {
         const exclusions = getExclusions(y, y + lineH, obstacles);
@@ -423,8 +447,7 @@
         new Promise(r => setTimeout(r, 2000)),
       ]).catch(() => {});
 
-      preparedHeading = prepareWithSegments(HEADING, FONT_HEADING);
-      preparedParagraphs = PARAGRAPHS.map(p => prepareWithSegments(p, FONT_BODY));
+      prepareAll();
       ready = true;
       document.getElementById('loader').classList.add('hide');
     }
@@ -436,14 +459,17 @@
       if (!ready) { requestAnimationFrame(render); return; }
 
       // Symbol movement: drift by default, follow cursor only when grabbed
+      const mobile = isMobile();
       let targetX, targetY;
       if (grabbed && mouseX > 0) {
         targetX = mouseX;
         targetY = mouseY;
       } else {
-        // Gentle drift path
-        targetX = W / 2 + Math.sin(frameCount * 0.008) * (W * 0.22);
-        targetY = H / 2 + Math.cos(frameCount * 0.006) * (H * 0.18);
+        // Gentle drift path (smaller orbit on mobile)
+        const orbitX = mobile ? W * 0.15 : W * 0.22;
+        const orbitY = mobile ? H * 0.12 : H * 0.18;
+        targetX = W / 2 + Math.sin(frameCount * 0.008) * orbitX;
+        targetY = H * 0.35 + Math.cos(frameCount * 0.006) * orbitY;
       }
       const ease = grabbed ? 0.12 : 0.02;
       symbolX += (targetX - symbolX) * ease;
@@ -482,32 +508,47 @@
       // ── Pillars (Jachin & Boaz) ──
       drawPillars();
 
-      // Build obstacle list
-      const obstacles = [
-        { x: symbolX, y: symbolY, r: SYMBOL_RADIUS },
-        ...secondarySymbols.map(s => ({ x: s.x, y: s.y, r: s.r + 10 })),
-      ];
+      // Responsive values
+      const mobile = isMobile();
+      const symR = getSymbolRadius();
+      const lineH = getLineHeight();
+      const fontBody = getFontBody();
+      const fontHeading = getFontHeading();
 
-      // Layout params
-      const pad = Math.max(40, W * 0.06);
+      // Build obstacle list (smaller symbols on mobile)
+      const obstacles = [
+        { x: symbolX, y: symbolY, r: symR },
+      ];
+      // Only add secondary symbols on desktop
+      if (!mobile) {
+        for (const s of secondarySymbols) {
+          obstacles.push({ x: s.x, y: s.y, r: s.r + 10 });
+        }
+      }
+
+      // Layout params — more padding on desktop, tighter on mobile
+      const pad = mobile ? 20 : Math.max(40, W * 0.06);
       const maxW = Math.min(W - pad * 2, 900);
       const startX = (W - maxW) / 2;
+      const topY = mobile ? 30 : 60;
 
       // Render heading
-      ctx.font = FONT_HEADING;
-      let curY = renderText(preparedHeading, FONT_HEADING, GOLD, startX, 60, maxW, 52, obstacles);
+      const headingLineH = mobile ? 32 : 52;
+      let curY = renderText(preparedHeading, fontHeading, GOLD, startX, topY, maxW, headingLineH, obstacles);
 
       // Render paragraphs with spacing
-      const PARA_GAP = 18;
+      const PARA_GAP = mobile ? 12 : 18;
       for (const prepared of preparedParagraphs) {
         curY += PARA_GAP;
-        curY = renderText(prepared, FONT_BODY, TEXT_COLOR, startX, curY, maxW, LINE_HEIGHT, obstacles);
-        if (curY > H) break; // off screen
+        curY = renderText(prepared, fontBody, TEXT_COLOR, startX, curY, maxW, lineH, obstacles);
+        if (curY > H - 80) break; // leave room for Enter button
       }
 
       // Draw symbols on top
-      drawSquareAndCompass(symbolX, symbolY, SYMBOL_RADIUS, 0.9);
-      for (const s of secondarySymbols) drawSecondarySymbol(s);
+      drawSquareAndCompass(symbolX, symbolY, symR, 0.9);
+      if (!mobile) {
+        for (const s of secondarySymbols) drawSecondarySymbol(s);
+      }
 
       // (CTA is an HTML overlay button now)
 
