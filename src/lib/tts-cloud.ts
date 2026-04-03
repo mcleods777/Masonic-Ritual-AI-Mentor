@@ -738,6 +738,7 @@ export const VOXTRAL_ROLE_OPTIONS = [
   { value: "Treas", label: "Treasurer" },
   { value: "Marshal", label: "Marshal / Tyler" },
   { value: "Candidate", label: "Candidate / Brother" },
+  { value: "Narrator", label: "Narrator" },
 ];
 
 /**
