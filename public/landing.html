@@ -39,6 +39,17 @@
   <canvas id="c"></canvas>
   <a id="enter-btn" href="/upload">ENTER THE LODGE</a>
 
+  <!-- Fallback: if module script fails entirely, show static page after 5s -->
+  <script>
+    setTimeout(function() {
+      var loader = document.getElementById('loader');
+      if (loader && !loader.classList.contains('hide')) {
+        loader.textContent = '';
+        loader.innerHTML = '<div style="text-align:center;padding:40px"><h1 style="font-family:Cinzel,serif;color:#c9962c;margin-bottom:20px;font-size:clamp(1.5rem,4vw,2.5rem)">MASONIC RITUAL MENTOR</h1><p style="color:#c4b596;margin-bottom:30px;max-width:400px;margin-left:auto;margin-right:auto">Practice your ritual work from memory.</p><a href="/upload" style="color:#c9962c;border:1px solid #c9962c;padding:14px 36px;text-decoration:none;font-family:Cinzel,serif;letter-spacing:0.12em;font-size:14px">ENTER THE LODGE</a></div>';
+      }
+    }, 5000);
+  </script>
+
   <script type="module">
     const fallback = () => {
       const loader = document.getElementById('loader');
