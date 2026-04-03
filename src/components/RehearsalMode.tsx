@@ -25,6 +25,7 @@ import {
   type RoleVoiceProfile,
 } from "@/lib/text-to-speech";
 import { playGavelKnocks, countGavelMarks } from "@/lib/gavel-sound";
+import { VOXTRAL_ROLE_OPTIONS } from "@/lib/tts-cloud";
 import DiffDisplay from "./DiffDisplay";
 import {
   saveSession,
@@ -70,6 +71,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   const [aiCoaching, setAiCoaching] = useState(true);
   const [aiFeedback, setAiFeedback] = useState<string | null>(null);
   const [isSpeakingFeedback, setIsSpeakingFeedback] = useState(false);
+  const [feedbackVoice, setFeedbackVoice] = useState<string>("Narrator");
   const [ttsToast, setTtsToast] = useState<string | null>(null);
   const [autoStop, setAutoStop] = useState(true);
 
@@ -470,14 +472,14 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
         if (!feedback.trim()) return;
 
         setIsSpeakingFeedback(true);
-        await speak(feedback, { rate: 0.95 });
+        await speakAsRole(feedback, feedbackVoice, voiceMapRef.current);
       } catch {
         // Non-critical — silently skip if feedback fails
       } finally {
         setIsSpeakingFeedback(false);
       }
     },
-    [aiCoaching, lineResults.length, userLineCount]
+    [aiCoaching, feedbackVoice, lineResults.length, userLineCount]
   );
 
   // Trigger AI coaching feedback when a line is checked
@@ -808,6 +810,24 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
                     : "No AI feedback between lines"}
                 </span>
               </div>
+
+              {/* Feedback voice selector */}
+              {aiCoaching && (
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-zinc-500 uppercase tracking-wide">Feedback Voice:</span>
+                  <select
+                    value={feedbackVoice}
+                    onChange={(e) => setFeedbackVoice(e.target.value)}
+                    className="px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-300 text-xs focus:outline-none focus:border-amber-500 cursor-pointer"
+                  >
+                    {VOXTRAL_ROLE_OPTIONS.filter((o) => o.value).map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               {/* Auto-stop toggle */}
               <div className="flex items-center gap-3">
