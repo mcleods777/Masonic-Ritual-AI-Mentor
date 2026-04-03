@@ -272,7 +272,7 @@ Upload your .mram file. Pick your role. Start rehearsing.`;
       ctx.fillStyle = color;
       ctx.textBaseline = 'top';
 
-      let state = null;
+      let state = { segmentIndex: 0, graphemeIndex: 0 };
       let y = startY;
       let done = false;
       const endY = H + lineH;
@@ -294,7 +294,7 @@ Upload your .mram file. Pick your role. Start rehearsing.`;
           try {
             const result = layoutNextLine(prepared, state, slot.w);
             if (!result) { done = true; break; }
-            state = result.state;
+            state = result.end;
             ctx.fillText(result.text.trimEnd(), slot.x, y);
           } catch {
             // Skip this slot, try the next one

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="background:#000;color:#fff;font-family:sans-serif;padding:40px">
+<pre id="out">Testing Pretext...</pre>
+<canvas id="c" width="800" height="600" style="border:1px solid #333"></canvas>
+<script type="module">
+import { prepare, layout, prepareWithSegments, layoutNextLine, layoutWithLines } from '/pretext.js';
+
+const out = document.getElementById('out');
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const font = '16px sans-serif';
+const text = 'Hello world, this is a test of the Pretext library for text layout. It should wrap across multiple lines when the width is constrained. Each line should be positioned correctly.';
+
+let log = '';
+
+try {
+  const p = prepare(text, font);
+  const result = layout(p, 400, 24);
+  log += 'prepare+layout: height=' + result.height + ', lines=' + result.lineCount + '\n';
+
+  const segs = prepareWithSegments(text, font);
+  log += 'prepareWithSegments keys: ' + Object.keys(segs).join(',') + '\n';
+  log += 'segs sample: ' + JSON.stringify(segs).slice(0, 300) + '\n\n';
+
+  // Test layoutWithLines
+  try {
+    const lwl = layoutWithLines(segs, 400, 24);
+    log += 'layoutWithLines type: ' + typeof lwl + '\n';
+    log += 'layoutWithLines: ' + JSON.stringify(lwl).slice(0, 500) + '\n\n';
+
+    if (lwl && lwl.lines) {
+      ctx.font = font;
+      ctx.fillStyle = '#c9962c';
+      ctx.textBaseline = 'top';
+      for (const line of lwl.lines) {
+        ctx.fillText(line.text, 10 + (line.x || 0), 10 + (line.y || 0));
+      }
+      log += 'Rendered ' + lwl.lines.length + ' lines on canvas\n';
+    }
+  } catch (e) { log += 'layoutWithLines ERROR: ' + e.message + '\n'; }
+
+  // Test layoutNextLine with various initial states
+  var tests = [
+    ['null', null],
+    ['{segmentIndex:0}', {segmentIndex:0}],
+    ['{segmentIndex:0,offset:0}', {segmentIndex:0,offset:0}],
+    ['0', 0],
+    ['segs itself', segs],
+  ];
+  for (const [label, st] of tests) {
+    try {
+      const r = layoutNextLine(segs, st, 400);
+      log += 'layoutNextLine(segs, ' + label + ', 400) = ' + JSON.stringify(r).slice(0,150) + '\n';
+    } catch (e) {
+      log += 'layoutNextLine(segs, ' + label + ', 400) ERROR: ' + e.message + '\n';
+    }
+  }
+
+} catch (err) {
+  log += 'ERROR: ' + err.message + '\n' + err.stack + '\n';
+}
+
+out.textContent = log;
+</script>
+</body></html>
