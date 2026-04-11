@@ -26,6 +26,7 @@ import {
 } from "@/lib/text-to-speech";
 import { playGavelKnocks, countGavelMarks } from "@/lib/gavel-sound";
 import { VOXTRAL_ROLE_OPTIONS } from "@/lib/tts-cloud";
+import { decideLineAction } from "@/lib/rehearsal-decision";
 import DiffDisplay from "./DiffDisplay";
 import {
   saveSession,
@@ -100,13 +101,17 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
 
   // Extract unique roles from sections (only those with speaker lines)
   const availableRoles = useMemo(() => {
-    const roles = new Set<string>();
+    // Only list roles that have at least one line with recitable text. This
+    // excludes synthetic roles like CUE (structural branch markers with empty
+    // text) and any speaker whose lines are 100% silent stage actions, so the
+    // user can't pick a role with nothing to rehearse.
+    const rolesWithSpokenText = new Set<string>();
     for (const section of sections) {
-      if (section.speaker) {
-        roles.add(section.speaker);
+      if (section.speaker && cleanRitualText(section.text).length > 0) {
+        rolesWithSpokenText.add(section.speaker);
       }
     }
-    return Array.from(roles);
+    return Array.from(rolesWithSpokenText);
   }, [sections]);
 
   // Build voice map when roles are known
@@ -207,7 +212,9 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
 
     if (stale()) return;
 
-    if (section.speaker === selectedRole) {
+    const action = decideLineAction(section, selectedRole);
+
+    if (action === "user-turn") {
       // It's the user's turn — auto-start listening (hands-free)
       setRehearsalState("listening");
       // Small delay so the UI updates before mic activates
@@ -215,7 +222,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
         if (!cancelledRef.current) startListeningRef.current();
       }, 400);
       return;
-    } else if (section.speaker) {
+    } else if (action === "ai-speaks" && section.speaker) {
       // AI reads this line
       setRehearsalState("ai-speaking");
 
@@ -257,7 +264,9 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
         advanceInternal(index + 1, gen);
       }
     } else {
-      // No speaker (stage direction, etc.) — brief pause then skip
+      // silent-advance: stage direction, structural cue, or speaker-performed
+      // action with no spoken text. Brief pause then skip to the next line so
+      // the user isn't stuck waiting for a recitation that doesn't exist.
       await new Promise((r) => setTimeout(r, 150));
       if (!stale()) {
         advanceInternal(index + 1, gen);
