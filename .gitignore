@@ -39,8 +39,20 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# encrypted ritual files (lodge-specific, should not be committed)
+# ritual files (lodge-specific, should not be committed)
+# only encrypted .mram may exist in the rituals dir; plaintext is local-only
 *.mram
+rituals/*.md
+rituals/*.txt
+rituals/*.json
+rituals/*.jsonl
+rituals/*.yaml
+rituals/*.yml
+
+# credentials — never commit
+gitkey
+*.credentials
+credentials.json
 
 # gstack build artifacts
 .claude/skills/gstack/node_modules/
@@ -49,3 +61,4 @@ next-env.d.ts
 .claude/skills/gstack/bin/gstack-global-discover
 .claude/skills/gstack/.agents/
 .claude/skills/gstack/.factory/
+.gstack/
