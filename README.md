@@ -17,11 +17,9 @@ flowchart TB
         Encrypt["Re-encrypt with AES-256-GCM\nStore in IndexedDB"]
         Upload --> Decrypt --> Split --> Encrypt
 
-        Solo["Solo Practice\nDrill one section\n(cipher text shown)"]
         Listen["Listen Mode\nHear the full ceremony\n(cipher text shown)"]
         Rehearsal["Rehearsal Mode\nPractice your role\n(cipher text shown)"]
         Voices["Custom Voices\nRecord & clone voices\n(stored locally)"]
-        Encrypt --> Solo
         Encrypt --> Listen
         Encrypt --> Rehearsal
     end
@@ -36,9 +34,7 @@ flowchart TB
         Kokoro["Kokoro (self-hosted)\nFree TTS"]
     end
 
-    Solo -->|"AI feedback"| Claude
     Rehearsal -->|"AI feedback"| Claude
-    Solo -->|"Speech input"| Whisper
     Rehearsal -->|"Speech input"| Whisper
     Voices -->|"Voice cloning"| Voxtral
     Listen -->|"TTS"| Voxtral
@@ -71,16 +67,6 @@ Record your own voice (or a brother's) on the **Voices** page. The app clones it
 - No Mistral paid plan required — works on the free tier
 - Export/import voice profiles as JSON for backup and cross-device transfer
 - Voice tone/speed/emotion matches how you recorded the sample
-
-### Solo Practice Mode
-Drill a single section until you have it perfect. Cipher text is shown by default — toggle to reveal plain text if needed.
-
-**5-Layer Comparison Pipeline:**
-1. **Normalization** — lowercase, expand contractions, strip filler words
-2. **Word-level diff** — jsdiff detects insertions, deletions, substitutions
-3. **Phonetic forgiveness** — Double Metaphone catches STT artifacts (rite/right, tiler/tyler)
-4. **Fuzzy tolerance** — Levenshtein distance for near-matches
-5. **Accuracy scoring** — color-coded visual diff (correct / wrong / phonetic / fuzzy / missing)
 
 ### Listen Mode
 Hear the full ceremony read aloud with a unique AI voice for each officer. The script shows cipher text so you can follow along.
@@ -290,10 +276,9 @@ Record multiple brothers with different tones for different officers. The app di
 
 1. **Upload** your .mram encrypted ritual file and enter your lodge passphrase
 2. **Rehearsal Mode** — Pick your role; the AI reads other officers' lines, then prompts you for yours
-3. **Solo Practice** — Drill a single section with word-by-word accuracy feedback
-4. **Listen Mode** — Hear the full ceremony read aloud with unique officer voices
-5. **Voices** — Record voice samples for Voxtral voice cloning
-6. **Progress** — Track accuracy trends and identify trouble spots
+3. **Listen Mode** — Hear the full ceremony read aloud with unique officer voices
+4. **Voices** — Record voice samples for Voxtral voice cloning
+5. **Progress** — Track accuracy trends and identify trouble spots
 
 ---
 
