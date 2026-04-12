@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { decideLineAction } from "../rehearsal-decision";
+import {
+  decideLineAction,
+  planComparisonAction,
+  DEFAULT_AUTO_ADVANCE_THRESHOLD,
+  DEFAULT_AUTO_ADVANCE_BEAT_MS,
+} from "../rehearsal-decision";
 
 describe("decideLineAction — basic routing", () => {
   it("listens when the speaker matches the user's role and text is present", () => {
@@ -100,5 +105,106 @@ describe("decideLineAction — selectedRole matters", () => {
     expect(
       decideLineAction({ speaker: null, text: "stage direction" }, null),
     ).toBe("silent-advance");
+  });
+});
+
+// ============================================================
+// planComparisonAction — post-recitation routing
+// ============================================================
+
+describe("planComparisonAction — happy path", () => {
+  it("exports default threshold of 95", () => {
+    expect(DEFAULT_AUTO_ADVANCE_THRESHOLD).toBe(95);
+  });
+
+  it("exports default beat of 300ms", () => {
+    expect(DEFAULT_AUTO_ADVANCE_BEAT_MS).toBe(300);
+  });
+
+  it("auto-advances on perfect 100% match", () => {
+    const action = planComparisonAction(100, 5);
+    expect(action.kind).toBe("auto-advance");
+    if (action.kind === "auto-advance") {
+      expect(action.nextIndex).toBe(6);
+      expect(action.beatMs).toBe(300);
+    }
+  });
+
+  it("auto-advances exactly at the threshold (boundary condition)", () => {
+    // 95.0 is the smallest value that should auto-advance
+    const action = planComparisonAction(95.0, 10);
+    expect(action.kind).toBe("auto-advance");
+  });
+
+  it("auto-advances just above the threshold", () => {
+    const action = planComparisonAction(95.1, 10);
+    expect(action.kind).toBe("auto-advance");
+  });
+
+  it("routes to judge just below the threshold", () => {
+    // 94.9 is the largest value that should NOT auto-advance
+    const action = planComparisonAction(94.9, 10);
+    expect(action.kind).toBe("judge");
+  });
+
+  it("routes to judge on phonetic-match-only score (~80%)", () => {
+    // The phonetic forgiveness layer caps matches at 80%. If a user says
+    // "tiler" when cipher is "tyler", they score ~80% — phonetically correct
+    // but not near-perfect. Should show the judging screen so they can see.
+    const action = planComparisonAction(80, 3);
+    expect(action.kind).toBe("judge");
+  });
+
+  it("routes to judge on total failure (0%)", () => {
+    const action = planComparisonAction(0, 0);
+    expect(action.kind).toBe("judge");
+  });
+
+  it("advances to currentIndex + 1, not some other offset", () => {
+    const action = planComparisonAction(100, 42);
+    if (action.kind === "auto-advance") {
+      expect(action.nextIndex).toBe(43);
+    }
+  });
+});
+
+describe("planComparisonAction — defensive handling", () => {
+  it("routes to judge on NaN accuracy (never silently auto-advance on broken comparison)", () => {
+    const action = planComparisonAction(NaN, 0);
+    expect(action.kind).toBe("judge");
+  });
+
+  it("routes to judge on Infinity accuracy", () => {
+    const action = planComparisonAction(Infinity, 0);
+    expect(action.kind).toBe("judge");
+  });
+
+  it("routes to judge on negative Infinity accuracy", () => {
+    const action = planComparisonAction(-Infinity, 0);
+    expect(action.kind).toBe("judge");
+  });
+
+  it("treats negative accuracy as judge", () => {
+    const action = planComparisonAction(-5, 0);
+    expect(action.kind).toBe("judge");
+  });
+});
+
+describe("planComparisonAction — custom thresholds", () => {
+  it("respects a custom threshold", () => {
+    const action = planComparisonAction(85, 0, 80);
+    expect(action.kind).toBe("auto-advance");
+  });
+
+  it("respects a custom beat duration", () => {
+    const action = planComparisonAction(100, 0, 95, 500);
+    if (action.kind === "auto-advance") {
+      expect(action.beatMs).toBe(500);
+    }
+  });
+
+  it("strict threshold of 100 means only perfect advances", () => {
+    expect(planComparisonAction(99.9, 0, 100).kind).toBe("judge");
+    expect(planComparisonAction(100, 0, 100).kind).toBe("auto-advance");
   });
 });
