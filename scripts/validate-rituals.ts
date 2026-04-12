@@ -31,8 +31,38 @@ import {
 } from "../src/lib/dialogue-format";
 
 const RITUALS_DIR = path.resolve(__dirname, "..", "rituals");
-const PLAIN_FILE = path.join(RITUALS_DIR, "ea-opening-dialogue.md");
-const CIPHER_FILE = path.join(RITUALS_DIR, "ea-opening-dialogue-cipher.md");
+const DEFAULT_PLAIN_FILE = path.join(RITUALS_DIR, "ea-opening-dialogue.md");
+const DEFAULT_CIPHER_FILE = path.join(
+  RITUALS_DIR,
+  "ea-opening-dialogue-cipher.md",
+);
+
+// Accept `<plain.md> <cipher.md>` as positional arguments, default to the
+// EA opening pair when no args are given. Lets the script validate any
+// future ritual's dialogue files without editing the script.
+function parseArgs(): { plainFile: string; cipherFile: string } {
+  const args = process.argv.slice(2);
+  if (args.length === 0) {
+    return { plainFile: DEFAULT_PLAIN_FILE, cipherFile: DEFAULT_CIPHER_FILE };
+  }
+  if (args.length !== 2) {
+    console.error(
+      "Usage: npx tsx scripts/validate-rituals.ts [<plain.md> <cipher.md>]",
+    );
+    console.error(
+      "  Defaults to rituals/ea-opening-dialogue{,-cipher}.md when no args given.",
+    );
+    process.exit(1);
+  }
+  const [plainArg, cipherArg] = args;
+  // Resolve to absolute so error messages are unambiguous
+  return {
+    plainFile: path.resolve(plainArg),
+    cipherFile: path.resolve(cipherArg),
+  };
+}
+
+const { plainFile: PLAIN_FILE, cipherFile: CIPHER_FILE } = parseArgs();
 
 const ok = (msg: string) => console.log(`  ✓ ${msg}`);
 const warn = (msg: string) => console.log(`  ! ${msg}`);
@@ -45,10 +75,17 @@ const fail = (msg: string): never => {
 // ~4 chars/token is the accepted rule of thumb for English on modern tokenizers.
 const estimateTokens = (text: string): number => Math.ceil(text.length / 4);
 
-function loadOrSkip(filepath: string): string | null {
+function loadOrSkip(filepath: string, isDefault: boolean): string | null {
   if (!fs.existsSync(filepath)) {
-    warn(`${path.relative(process.cwd(), filepath)} not present (local-only file)`);
-    return null;
+    if (isDefault) {
+      // Defaults may legitimately not exist on a fresh checkout — the
+      // ritual .md files are gitignored. Skip gracefully so CI doesn't
+      // fail in environments that don't have local ritual files.
+      warn(`${path.relative(process.cwd(), filepath)} not present (local-only file)`);
+      return null;
+    }
+    // User passed an explicit path that doesn't exist — fail loudly
+    fail(`file not found: ${filepath}`);
   }
   return fs.readFileSync(filepath, "utf-8");
 }
@@ -81,8 +118,12 @@ function padL(s: string, width: number): string {
 
 function main() {
   header("=== Loading ritual files ===");
-  const plainSrc = loadOrSkip(PLAIN_FILE);
-  const cipherSrc = loadOrSkip(CIPHER_FILE);
+  // If the user passed explicit paths, "not found" is a hard failure.
+  // If we're using defaults, missing files may be expected (gitignored).
+  const usingDefaults =
+    PLAIN_FILE === DEFAULT_PLAIN_FILE && CIPHER_FILE === DEFAULT_CIPHER_FILE;
+  const plainSrc = loadOrSkip(PLAIN_FILE, usingDefaults);
+  const cipherSrc = loadOrSkip(CIPHER_FILE, usingDefaults);
 
   if (!plainSrc || !cipherSrc) {
     console.log("\nSkipping validation: one or both ritual files missing.");
@@ -97,6 +138,26 @@ function main() {
   const cipher = parseDialogue(cipherSrc);
   ok(`plain  — ${plain.nodes.length} nodes, title="${plain.title}"`);
   ok(`cipher — ${cipher.nodes.length} nodes, title="${cipher.title}"`);
+
+  // Frontmatter sanity checks. The plain file should have frontmatter,
+  // the cipher file should not (cipher inherits at build time).
+  if (plain.metadata) {
+    const m = plain.metadata;
+    ok(
+      `plain metadata: jurisdiction="${m.jurisdiction ?? "(missing)"}", ` +
+        `degree="${m.degree ?? "(missing)"}", ceremony="${m.ceremony ?? "(missing)"}"`,
+    );
+  } else {
+    warn(
+      `plain file has no frontmatter block (required for build-mram-from-dialogue)`,
+    );
+  }
+  if (cipher.metadata && Object.keys(cipher.metadata).length > 0) {
+    warn(
+      `cipher file has frontmatter — it will be IGNORED by the build script. ` +
+        `Metadata lives in the plain file only.`,
+    );
+  }
 
   // Surface unparseable-line warnings. These usually mean a hidden char
   // (BOM, RTL mark, typo with missing colon) prevented a line from being
