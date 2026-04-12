@@ -17,6 +17,27 @@ function getAudioContext(): AudioContext | null {
 }
 
 /**
+ * Create and resume the AudioContext during a user gesture (click, tap, key).
+ *
+ * Browsers enforce that AudioContext can only transition from "suspended" to
+ * "running" during the synchronous call stack of a user gesture. If you
+ * create/resume the context later (e.g., from a useEffect or setTimeout),
+ * the browser silently blocks it.
+ *
+ * Call this from any click handler that precedes audio playback (e.g., the
+ * "Start Rehearsal" button). The later playGavelKnocks call from a useEffect
+ * chain will then find the context already running and play immediately.
+ *
+ * Harmless to call multiple times — resume() on a running context is a no-op.
+ */
+export function warmAudioContext(): void {
+  const ctx = getAudioContext();
+  if (ctx && ctx.state === "suspended") {
+    ctx.resume().catch(() => {});
+  }
+}
+
+/**
  * Play a single gavel knock.
  * Duration ~120ms — a short, sharp percussive "tok".
  */
@@ -95,7 +116,11 @@ export async function playGavelKnocks(count: number): Promise<void> {
   }
 
   const knockSpacing = 0.35; // seconds between knocks
-  const now = ctx.currentTime;
+  // Small future offset: scheduling at exactly ctx.currentTime can miss on
+  // some browsers (especially right after resume when currentTime is 0 or
+  // barely ticking). 50ms is imperceptible but guarantees the audio thread
+  // has time to set up the nodes.
+  const now = ctx.currentTime + 0.05;
 
   for (let i = 0; i < count; i++) {
     playKnock(ctx, now + i * knockSpacing);

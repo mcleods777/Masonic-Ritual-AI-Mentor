@@ -24,7 +24,7 @@ import {
   clearLastTTSError,
   type RoleVoiceProfile,
 } from "@/lib/text-to-speech";
-import { playGavelKnocks, countGavelMarks } from "@/lib/gavel-sound";
+import { playGavelKnocks, countGavelMarks, warmAudioContext } from "@/lib/gavel-sound";
 import { VOXTRAL_ROLE_OPTIONS } from "@/lib/tts-cloud";
 import {
   decideLineAction,
@@ -189,8 +189,16 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
     return ROLE_DISPLAY_NAMES[role] || role;
   }, []);
 
-  // Start the rehearsal — begin advancing through sections
+  // Start the rehearsal — begin advancing through sections.
+  // IMPORTANT: warmAudioContext() MUST be called here, in the synchronous
+  // call stack of the user's click event. The browser only allows
+  // AudioContext.resume() during a user gesture. If we wait until
+  // advanceInternal fires (from a useEffect), the browser silently blocks
+  // the resume and gavel knocks never play. This was the root cause of
+  // "gavel sounds never audible" — the context was created outside a
+  // gesture and stayed permanently suspended.
   const startRehearsal = useCallback(() => {
+    warmAudioContext();
     cancelledRef.current = false;
     sessionStartRef.current = new Date().toISOString();
     setCurrentIndex(0);
@@ -767,7 +775,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
               return (
                 <button
                   key={role}
-                  onClick={() => setSelectedRole(role)}
+                  onClick={() => { warmAudioContext(); setSelectedRole(role); }}
                   className={`
                     flex items-start gap-4 text-left px-5 py-5 rounded-xl border-2 transition-all relative overflow-hidden group
                     ${selectedRole === role
