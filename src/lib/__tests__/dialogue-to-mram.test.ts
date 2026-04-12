@@ -6,7 +6,12 @@ import {
   normalizeRole,
   CUE_ROLE,
 } from "../dialogue-to-mram";
-import { encryptMRAM, decryptMRAM, type MRAMDocument } from "../mram-format";
+import {
+  encryptMRAM,
+  decryptMRAM,
+  mramToPlainText,
+  type MRAMDocument,
+} from "../mram-format";
 
 // Node-side encryptor — mirrors scripts/build-mram-from-dialogue.ts exactly
 // so this test catches any drift between the Node CLI path and the browser
@@ -347,5 +352,148 @@ describe("cross-runtime crypto — Node encrypt → Web Crypto decrypt", () => {
 
     const buf = encryptMRAMNodeForTest(doc, "correct");
     await expect(decryptMRAM(buf, "wrong")).rejects.toThrow();
+  });
+});
+
+// ============================================================
+// mramToPlainText CUE cleanup (PR #34a)
+//
+// The old rendering emitted `**CUE**: [Action: if vouched]` for every
+// structural cue, which polluted the AI mentor context with a fake
+// speaker. The new rendering emits bare `[if vouched]` without a role
+// prefix. Spoken lines render unchanged (regression guard).
+// ============================================================
+
+describe("mramToPlainText — CUE cleanup", () => {
+  const plain = parseDialogue(PLAIN);
+  const cipher = parseDialogue(CIPHER);
+  const doc = buildFromDialogue(plain, cipher, OPTS);
+
+  it("emits CUE-role lines as bare bracketed cues without **CUE** prefix", () => {
+    const text = mramToPlainText(doc);
+    // The PLAIN fixture includes `[if the hall is full]` + `[else]` + `[end]`
+    expect(text).toContain("[if the hall is full]");
+    expect(text).toContain("[else]");
+    expect(text).toContain("[end]");
+    // The old format — which we're fixing — would look like `**CUE**:`
+    expect(text).not.toMatch(/\*\*CUE\*\*/);
+    // And the action-wrapper form is also gone
+    expect(text).not.toMatch(/\[Action: if the hall is full\]/);
+  });
+
+  it("still renders spoken lines with their speaker prefix (regression)", () => {
+    const text = mramToPlainText(doc);
+    // The fixture has `WM: Brother Senior Warden...` — spoken line
+    // rendering must NOT change from the CUE cleanup. Regression guard.
+    expect(text).toContain("**WM**:");
+    expect(text).toContain("Brother Senior Warden, greet the brethren.");
+    expect(text).toContain("**SW**:");
+    expect(text).toContain("Brethren, greetings.");
+  });
+
+  it("renders section headers", () => {
+    const text = mramToPlainText(doc);
+    expect(text).toContain("### I. Greetings");
+    expect(text).toContain("### II. Closing");
+  });
+
+  it("skips CUE lines that somehow have no action text (defensive)", () => {
+    // Manually construct an MRAMDocument with a degenerate CUE line
+    // (action: null). The cleanup should silently skip it instead of
+    // emitting garbage.
+    const mockDoc: MRAMDocument = {
+      format: "MRAM",
+      version: 1,
+      metadata: {
+        jurisdiction: "Test",
+        degree: "Test",
+        ceremony: "Test",
+        checksum: "",
+      },
+      roles: { A: "A", CUE: "Cue" },
+      sections: [{ id: "s1", title: "Only Section" }],
+      lines: [
+        {
+          id: 1,
+          section: "s1",
+          role: "A",
+          gavels: 0,
+          action: null,
+          cipher: "Hi.",
+          plain: "Hi.",
+        },
+        {
+          id: 2,
+          section: "s1",
+          role: "CUE",
+          gavels: 0,
+          action: null, // degenerate — no cue text
+          cipher: "",
+          plain: "",
+        },
+        {
+          id: 3,
+          section: "s1",
+          role: "A",
+          gavels: 0,
+          action: null,
+          cipher: "Bye.",
+          plain: "Bye.",
+        },
+      ],
+    };
+    const text = mramToPlainText(mockDoc);
+    expect(text).toContain("**A**: Hi.");
+    expect(text).toContain("**A**: Bye.");
+    // The degenerate CUE line should NOT appear as `[]` or `[null]` or similar
+    expect(text).not.toMatch(/\[\]/);
+    expect(text).not.toMatch(/\[null\]/);
+    expect(text).not.toMatch(/\*\*CUE\*\*/);
+  });
+});
+
+// ============================================================
+// Frontmatter integration with build (PR #34a)
+//
+// When parseDialogue extracts metadata from a plain file, the build
+// script reads it instead of the hardcoded default. The builder itself
+// takes explicit BuildOptions, so we just verify parseDialogue + the
+// builder call-site work together end-to-end.
+// ============================================================
+
+describe("frontmatter → buildFromDialogue integration", () => {
+  it("builds with metadata derived from plain frontmatter", () => {
+    const plainWithFm = `---
+jurisdiction: Custom Jurisdiction
+degree: Custom Degree
+ceremony: Custom Ceremony
+---
+
+## I. Greetings
+
+A: Hello.
+B: Hi.
+`;
+    const cipherNoFm = `## I. Greetings
+
+A: H.
+B: H.
+`;
+    const plain = parseDialogue(plainWithFm);
+    const cipher = parseDialogue(cipherNoFm);
+
+    expect(plain.metadata?.jurisdiction).toBe("Custom Jurisdiction");
+    expect(cipher.metadata).toBeUndefined();
+
+    // Build using metadata from plain — simulating the CLI script flow
+    const doc = buildFromDialogue(plain, cipher, {
+      jurisdiction: plain.metadata!.jurisdiction!,
+      degree: plain.metadata!.degree!,
+      ceremony: plain.metadata!.ceremony!,
+    });
+
+    expect(doc.metadata.jurisdiction).toBe("Custom Jurisdiction");
+    expect(doc.metadata.degree).toBe("Custom Degree");
+    expect(doc.metadata.ceremony).toBe("Custom Ceremony");
   });
 });
