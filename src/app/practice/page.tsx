@@ -13,7 +13,7 @@ import {
 } from "@/lib/storage";
 import TTSEngineSelector from "@/components/TTSEngineSelector";
 
-type PracticeTab = "solo" | "rehearsal" | "listen";
+type PracticeTab = "rehearsal" | "listen";
 
 function PracticeContent() {
   const searchParams = useSearchParams();
@@ -130,10 +130,7 @@ function PracticeContent() {
         </div>
       </div>
 
-      {/* Mode Toggle — Solo Practice tab hidden until the mode is tested.
-          The tab button, the "Switch to Solo Practice" escape hatches, and
-          the PracticeMode rendering branch are removed. The "solo" variant
-          in PracticeTab type stays for PR #36 cleanup. */}
+      {/* Mode Toggle */}
       <div className="flex bg-zinc-800/50 rounded-lg p-1 w-fit">
         <button
           onClick={() => setActiveTab("rehearsal")}
@@ -199,12 +196,7 @@ function PracticeContent() {
               Upload a different ritual
             </Link>
           </div>
-        ) : (
-          // Defensive: should be unreachable because activeTab defaults to
-          // "rehearsal" and the Solo Practice tab button is hidden. Renders
-          // nothing rather than falling back to PracticeMode.
-          null
-        )
+        ) : null
       ) : (
         <div className="text-center py-12 text-zinc-500">
           <p>No sections found in this document.</p>
