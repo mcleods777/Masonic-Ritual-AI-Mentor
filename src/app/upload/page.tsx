@@ -83,7 +83,7 @@ export default function UploadPage() {
                     onClick={() => router.push(`/practice?doc=${doc.id}`)}
                     className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-sm font-medium transition-colors"
                   >
-                    Practice
+                    Rehearse
                   </button>
                   <button
                     onClick={() => handleDelete(doc.id)}

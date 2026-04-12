@@ -66,19 +66,20 @@ export default function HomePage() {
         >
           <svg
             className="w-5 h-5 text-amber-500 mt-0.5 shrink-0"
-            fill="currentColor"
+            fill="none"
             viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
           >
-            <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
-            <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
           <div>
             <h3 className="text-lg font-semibold text-zinc-200 group-hover:text-amber-400 transition-colors">
-              Practice Mode
+              Rehearsal
             </h3>
             <p className="hidden md:block text-sm text-zinc-500 mt-1">
-              Speak or type from memory and get word-by-word accuracy
-              feedback with voice corrections.
+              Pick your officer role and rehearse with the AI reading every
+              other part in a distinct voice.
             </p>
           </div>
         </Link>
@@ -135,7 +136,7 @@ export default function HomePage() {
                   href={`/practice?doc=${doc.id}`}
                   className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-sm font-medium transition-colors"
                 >
-                  Practice
+                  Rehearse
                 </Link>
               </div>
             ))}
@@ -158,7 +159,7 @@ export default function HomePage() {
             {
               step: "2",
               title: "Select",
-              desc: "Choose a section to practice. Cipher text is shown by default, toggle to reveal plain text.",
+              desc: "Pick your officer role. The AI reads every other officer with a distinct voice while you speak your own lines.",
             },
             {
               step: "3",

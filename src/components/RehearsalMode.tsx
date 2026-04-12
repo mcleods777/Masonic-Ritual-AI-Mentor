@@ -26,7 +26,12 @@ import {
 } from "@/lib/text-to-speech";
 import { playGavelKnocks, countGavelMarks } from "@/lib/gavel-sound";
 import { VOXTRAL_ROLE_OPTIONS } from "@/lib/tts-cloud";
-import { decideLineAction } from "@/lib/rehearsal-decision";
+import {
+  decideLineAction,
+  planComparisonAction,
+  DEFAULT_AUTO_ADVANCE_THRESHOLD,
+  DEFAULT_AUTO_ADVANCE_BEAT_MS,
+} from "@/lib/rehearsal-decision";
 import DiffDisplay from "./DiffDisplay";
 import {
   saveSession,
@@ -43,14 +48,19 @@ interface RehearsalModeProps {
 
 type RehearsalState =
   | "setup"         // Picking a role
-  | "ready"         // Role picked, ready to start
-  | "ai-speaking"   // AI is reading another officer's line
-  | "user-turn"     // Waiting for user to recite
-  | "listening"     // User is speaking (STT active)
-  | "transcribing"  // Whisper: recording done, waiting for server transcript
-  | "auto-checking" // Browser STT auto-stopped — compute comparison
-  | "checking"      // Showing accuracy for user's line
-  | "complete";     // Rehearsal finished
+  | "ready"           // Role picked, ready to start
+  | "ai-speaking"     // AI is reading another officer's line
+  | "user-turn"       // Waiting for user to recite
+  | "listening"       // User is speaking (STT active)
+  | "transcribing"    // Whisper: recording done, waiting for server transcript
+  | "auto-checking"   // Browser STT auto-stopped — compute comparison
+  | "checking"        // Showing accuracy for user's line (judging screen)
+  | "auto-advancing"  // Accuracy >= threshold — show checkmark briefly then advance
+  | "complete";       // Rehearsal finished
+
+// Auto-advance threshold + beat duration are imported from rehearsal-decision.
+// The actual routing is done by planComparisonAction, a pure function that's
+// unit-tested directly.
 
 interface LineResult {
   sectionIndex: number;
@@ -69,7 +79,10 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   const [sttError, setSttError] = useState<string | null>(null);
   const [inputMode, setInputMode] = useState<"voice" | "type">("voice");
   const [sttProvider, setSTTProvider] = useState<STTProvider>("whisper");
-  const [aiCoaching, setAiCoaching] = useState(true);
+  // AI coaching default is OFF — spoken feedback after every line breaks the
+  // call-and-response rhythm of the ritual. Users can flip it back on from
+  // the role-pick screen if they want coaching for a specific session.
+  const [aiCoaching, setAiCoaching] = useState(false);
   const [aiFeedback, setAiFeedback] = useState<string | null>(null);
   const [isSpeakingFeedback, setIsSpeakingFeedback] = useState(false);
   const [feedbackVoice, setFeedbackVoice] = useState<string>("Narrator");
@@ -281,6 +294,51 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
     advanceInternal(index, gen);
   }, [advanceInternal]);
 
+  // Centralized comparison-result handler. Called from all 4 places that
+  // compute a ComparisonResult: stopListening (browser STT branch), the
+  // transcribing useEffect (Whisper path), the auto-checking useEffect
+  // (browser STT auto-stop), and handleCheckTyped (typed input).
+  //
+  // Routes to one of two states:
+  //   - accuracy >= AUTO_ADVANCE_THRESHOLD → "auto-advancing" (brief checkmark,
+  //     then advance to next line after AUTO_ADVANCE_BEAT_MS)
+  //   - otherwise → "checking" (judging screen with diff and retry)
+  //
+  // The auto-advance setTimeout uses the existing generation-counter cancel
+  // pattern from advanceInternal (line 198): capture advanceGenRef at submit
+  // time, check it inside the callback, and no-op if the generation has been
+  // bumped (meaning external navigation like jumpToLine, Back, Next, or
+  // restartRehearsal fired during the beat).
+  const submitComparisonResult = useCallback(
+    (result: ComparisonResult) => {
+      setCurrentComparison(result);
+      setLineResults((prev) => [
+        ...prev,
+        { sectionIndex: currentIndex, accuracy: result.accuracy, comparison: result },
+      ]);
+
+      const action = planComparisonAction(
+        result.accuracy,
+        currentIndex,
+        DEFAULT_AUTO_ADVANCE_THRESHOLD,
+        DEFAULT_AUTO_ADVANCE_BEAT_MS,
+      );
+
+      if (action.kind === "auto-advance") {
+        setRehearsalState("auto-advancing");
+        const gen = advanceGenRef.current;
+        setTimeout(() => {
+          if (cancelledRef.current) return;
+          if (gen !== advanceGenRef.current) return;
+          advanceToLine(action.nextIndex);
+        }, action.beatMs);
+      } else {
+        setRehearsalState("checking");
+      }
+    },
+    [currentIndex, advanceToLine],
+  );
+
   // Trigger first advance when rehearsal starts
   useEffect(() => {
     if (rehearsalState === "ready") {
@@ -365,63 +423,45 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
       if (transcript && currentSection) {
         const cleanRef = cleanRitualText(currentSection.text);
         const result = compareTexts(transcript, cleanRef);
-        setCurrentComparison(result);
-        setLineResults((prev) => [
-          ...prev,
-          { sectionIndex: currentIndex, accuracy: result.accuracy, comparison: result },
-        ]);
+        submitComparisonResult(result);
+      } else {
+        setRehearsalState("checking");
       }
-      setRehearsalState("checking");
     }
-  }, [transcript, currentSection, currentIndex]);
+  }, [transcript, currentSection, submitComparisonResult]);
   stopListeningRef.current = stopListening;
 
   // When Whisper finishes transcribing, the transcript state updates.
-  // This effect detects that and moves from "transcribing" → "checking".
+  // This effect detects that and moves from "transcribing" → submit.
   useEffect(() => {
     if (rehearsalState === "transcribing" && transcript && currentSection) {
       engineRef.current = null;
       const cleanRef = cleanRitualText(currentSection.text);
       const result = compareTexts(transcript, cleanRef);
-      setCurrentComparison(result);
-      setLineResults((prev) => [
-        ...prev,
-        { sectionIndex: currentIndex, accuracy: result.accuracy, comparison: result },
-      ]);
-      setRehearsalState("checking");
+      submitComparisonResult(result);
     }
-  }, [rehearsalState, transcript, currentSection, currentIndex]);
+  }, [rehearsalState, transcript, currentSection, submitComparisonResult]);
 
-  // Browser STT auto-stopped after silence — compute comparison and show results.
+  // Browser STT auto-stopped after silence — compute comparison and submit.
   useEffect(() => {
     if (rehearsalState === "auto-checking" && transcript && currentSection) {
       const cleanRef = cleanRitualText(currentSection.text);
       const result = compareTexts(transcript, cleanRef);
-      setCurrentComparison(result);
-      setLineResults((prev) => [
-        ...prev,
-        { sectionIndex: currentIndex, accuracy: result.accuracy, comparison: result },
-      ]);
-      setRehearsalState("checking");
+      submitComparisonResult(result);
     } else if (rehearsalState === "auto-checking") {
       // No transcript captured — go back to user-turn
       setRehearsalState("user-turn");
     }
-  }, [rehearsalState, transcript, currentSection, currentIndex]);
+  }, [rehearsalState, transcript, currentSection, submitComparisonResult]);
 
   // Check typed input
   const handleCheckTyped = useCallback(() => {
     if (transcript && currentSection) {
       const cleanRef = cleanRitualText(currentSection.text);
       const result = compareTexts(transcript, cleanRef);
-      setCurrentComparison(result);
-      setLineResults((prev) => [
-        ...prev,
-        { sectionIndex: currentIndex, accuracy: result.accuracy, comparison: result },
-      ]);
-      setRehearsalState("checking");
+      submitComparisonResult(result);
     }
-  }, [transcript, currentSection, currentIndex]);
+  }, [transcript, currentSection, submitComparisonResult]);
 
   // Continue to next line after checking
   const continueAfterCheck = useCallback(() => {
@@ -1036,6 +1076,12 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
           const cleanText = cleanRitualText(section.text);
           const displayText = section.cipherText || cleanText;
 
+          // Auto-advance visual: when the user just recited a line with
+          // accuracy >= threshold, render a green highlight + checkmark for
+          // the brief beat before advancing to the next line. This replaces
+          // the amber "your turn" highlight for this specific transition.
+          const isAutoAdvancing = isCurrent && rehearsalState === "auto-advancing";
+
           return (
             <div
               key={section.id}
@@ -1045,16 +1091,18 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
                 flex gap-3 px-3 py-2 rounded-lg mb-1 transition-all
                 ${!isCurrent ? "cursor-pointer hover:bg-white/5" : ""}
                 ${isPast ? "opacity-30" : ""}
-                ${isCurrent && isUserSection ? "bg-amber-500/10 border border-amber-500/30" : ""}
-                ${isCurrent && !isUserSection ? "bg-blue-500/10 border border-blue-500/20" : ""}
+                ${isAutoAdvancing ? "bg-green-500/15 border border-green-500/40" : ""}
+                ${isCurrent && !isAutoAdvancing && isUserSection ? "bg-amber-500/10 border border-amber-500/30" : ""}
+                ${isCurrent && !isAutoAdvancing && !isUserSection ? "bg-blue-500/10 border border-blue-500/20" : ""}
                 ${!isCurrent && !isPast ? "opacity-60" : ""}
               `}
             >
               <span
                 className={`
                   text-xs font-mono font-bold w-10 flex-shrink-0 pt-0.5 text-right
-                  ${isCurrent && isUserSection ? "text-amber-400" : ""}
-                  ${isCurrent && !isUserSection ? "text-blue-400" : ""}
+                  ${isAutoAdvancing ? "text-green-400" : ""}
+                  ${isCurrent && !isAutoAdvancing && isUserSection ? "text-amber-400" : ""}
+                  ${isCurrent && !isAutoAdvancing && !isUserSection ? "text-blue-400" : ""}
                   ${!isCurrent ? "text-zinc-600" : ""}
                 `}
               >
@@ -1063,8 +1111,9 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
               <span
                 className={`
                   text-sm flex-1
-                  ${isCurrent && isUserSection ? "text-amber-200" : ""}
-                  ${isCurrent && !isUserSection ? "text-blue-200" : ""}
+                  ${isAutoAdvancing ? "text-green-200" : ""}
+                  ${isCurrent && !isAutoAdvancing && isUserSection ? "text-amber-200" : ""}
+                  ${isCurrent && !isAutoAdvancing && !isUserSection ? "text-blue-200" : ""}
                   ${isPast ? "text-zinc-600" : "text-zinc-400"}
                 `}
               >
@@ -1075,7 +1124,18 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
                     ))}
                   </span>
                 )}
-                {isCurrent && isUserSection && rehearsalState !== "checking" ? (
+                {isAutoAdvancing && (
+                  <span
+                    role="status"
+                    aria-label="Line correct, advancing"
+                    className="inline-flex items-center gap-1.5 font-semibold text-green-400 mr-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  </span>
+                )}
+                {isCurrent && isUserSection && !isAutoAdvancing && rehearsalState !== "checking" ? (
                   <span className="italic text-amber-400/70">[ Your line — recite from memory ]</span>
                 ) : displayText ? (
                   <span
