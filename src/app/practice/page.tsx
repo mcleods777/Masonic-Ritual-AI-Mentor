@@ -3,7 +3,6 @@
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import PracticeMode from "@/components/PracticeMode";
 import RehearsalMode from "@/components/RehearsalMode";
 import ListenMode from "@/components/ListenMode";
 import {
@@ -102,13 +101,11 @@ function PracticeContent() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-zinc-100">Practice Mode</h1>
+          <h1 className="text-2xl font-bold text-zinc-100">Practice</h1>
           <p className="text-zinc-500 mt-1">
             {activeTab === "rehearsal"
               ? "Pick your role and rehearse the full ceremony with AI reading the other parts."
-              : activeTab === "listen"
-                ? "Listen to the full ceremony read aloud, each officer in a distinct voice."
-                : "Select a section, then speak or type from memory."}
+              : "Listen to the full ceremony read aloud, each officer in a distinct voice."}
           </p>
         </div>
 
@@ -133,7 +130,10 @@ function PracticeContent() {
         </div>
       </div>
 
-      {/* Mode Toggle */}
+      {/* Mode Toggle — Solo Practice tab hidden until the mode is tested.
+          The tab button, the "Switch to Solo Practice" escape hatches, and
+          the PracticeMode rendering branch are removed. The "solo" variant
+          in PracticeTab type stays for PR #36 cleanup. */}
       <div className="flex bg-zinc-800/50 rounded-lg p-1 w-fit">
         <button
           onClick={() => setActiveTab("rehearsal")}
@@ -167,23 +167,6 @@ function PracticeContent() {
             Listen
           </span>
         </button>
-        <button
-          onClick={() => setActiveTab("solo")}
-          className={`
-            px-5 py-2 rounded-md text-sm font-medium transition-all
-            ${activeTab === "solo"
-              ? "bg-amber-600 text-white shadow-sm"
-              : "text-zinc-400 hover:text-zinc-200"}
-          `}
-        >
-          <span className="flex items-center gap-2">
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
-              <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
-            </svg>
-            Solo Practice
-          </span>
-        </button>
       </div>
 
       {sections.length > 0 ? (
@@ -195,12 +178,12 @@ function PracticeContent() {
               Rehearsal mode requires a document with multiple speaker roles.
               This document doesn&apos;t have distinct speaker prefixes.
             </p>
-            <button
-              onClick={() => setActiveTab("solo")}
-              className="mt-4 px-6 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-medium transition-colors"
+            <Link
+              href="/upload"
+              className="inline-block mt-4 px-6 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-medium transition-colors"
             >
-              Switch to Solo Practice
-            </button>
+              Upload a different ritual
+            </Link>
           </div>
         ) : activeTab === "listen" && hasMultipleSpeakers ? (
           <ListenMode sections={sections} />
@@ -209,15 +192,18 @@ function PracticeContent() {
             <p className="text-zinc-400">
               Listen mode requires a document with multiple speaker roles.
             </p>
-            <button
-              onClick={() => setActiveTab("solo")}
-              className="mt-4 px-6 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-medium transition-colors"
+            <Link
+              href="/upload"
+              className="inline-block mt-4 px-6 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-medium transition-colors"
             >
-              Switch to Solo Practice
-            </button>
+              Upload a different ritual
+            </Link>
           </div>
         ) : (
-          <PracticeMode sections={sections} documentId={selectedDocId || undefined} documentTitle={documents.find(d => d.id === selectedDocId)?.title} />
+          // Defensive: should be unreachable because activeTab defaults to
+          // "rehearsal" and the Solo Practice tab button is hidden. Renders
+          // nothing rather than falling back to PracticeMode.
+          null
         )
       ) : (
         <div className="text-center py-12 text-zinc-500">

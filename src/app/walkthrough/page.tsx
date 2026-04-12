@@ -28,7 +28,6 @@ export default function WalkthroughPage() {
             { href: "#upload", icon: "M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5", label: "Upload" },
             { href: "#listen", icon: "M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z", label: "Listen Mode" },
             { href: "#rehearsal", icon: "M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z", label: "Rehearsal" },
-            { href: "#solo", icon: "M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z", label: "Solo Practice" },
             { href: "#progress", icon: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z", label: "Progress" },
             { href: "#tts", icon: "M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z", label: "Voice AI" },
             { href: "#privacy", icon: "M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z", label: "Privacy" },
@@ -282,77 +281,7 @@ export default function WalkthroughPage() {
       </Section>
 
       {/* ================================================================ */}
-      {/* 5. SOLO PRACTICE                                                 */}
-      {/* ================================================================ */}
-      <Section id="solo" title="Solo Practice Mode" subtitle="Drill a single section until you have it perfect">
-        <div className="max-w-lg mx-auto">
-          <FlowStep
-            icon="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"
-            color="amber"
-            title="1. Pick a section"
-            desc="Sections are grouped by degree (Entered Apprentice, Fellow Craft, Master Mason). Pick the one you want to drill."
-          />
-          <DownArrow />
-          <FlowStep
-            icon="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"
-            color="blue"
-            title="2. Recite from memory"
-            desc="Speak your lines aloud (the app transcribes in real time) using either built-in Browser Speech or high-accuracy OpenAI Whisper STT powered by Groq, or type them from memory."
-          >
-            <div className="flex flex-wrap gap-2 mt-3">
-              <Tag>Browser STT (Free, Fast)</Tag>
-              <Tag>OpenAI Whisper STT (High Accuracy)</Tag>
-            </div>
-          </FlowStep>
-          <DownArrow />
-
-          {/* Accuracy visualization */}
-          <div className="bg-zinc-800/40 rounded-xl border border-zinc-700/50 p-5">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-9 h-9 rounded-xl bg-green-500/10 flex items-center justify-center">
-                <svg className="w-5 h-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <div>
-                <p className="text-zinc-200 font-semibold text-sm">3. Word-by-word accuracy check</p>
-                <p className="text-zinc-500 text-xs">Every word is compared against the original</p>
-              </div>
-            </div>
-            {/* Example diff */}
-            <div className="bg-zinc-900 rounded-lg p-4 font-mono text-sm leading-loose">
-              <span className="text-green-400">I </span>
-              <span className="text-green-400">was </span>
-              <span className="text-green-400">conducted </span>
-              <span className="text-green-400">to </span>
-              <span className="text-green-400">the </span>
-              <span className="text-red-400 line-through decoration-red-400/50">middle</span>{" "}
-              <span className="text-green-400 underline decoration-green-400/30">center </span>
-              <span className="text-green-400">of </span>
-              <span className="text-green-400">the </span>
-              <span className="text-blue-400">lodge</span>
-            </div>
-            <div className="flex flex-wrap gap-3 mt-3 text-xs">
-              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-green-400" /> Correct</span>
-              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-red-400" /> Wrong</span>
-              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-blue-400" /> Phonetic match</span>
-              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-yellow-400" /> Close enough</span>
-              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-zinc-500" /> Missing</span>
-            </div>
-          </div>
-
-          <DownArrow />
-          <FlowStep
-            icon="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z"
-            color="blue"
-            title="4. Hear corrections & feedback"
-            desc='Press "Hear Corrections" to have the app read back the words you missed. You also get an encouraging feedback message based on your score.'
-          />
-        </div>
-      </Section>
-
-      {/* ================================================================ */}
-      {/* 6. PROGRESS TRACKING                                             */}
+      {/* 5. PROGRESS TRACKING                                             */}
       {/* ================================================================ */}
       <Section id="progress" title="Progress Tracking" subtitle="Track your accuracy, streaks, and trouble spots over time">
         <div className="max-w-lg mx-auto">
