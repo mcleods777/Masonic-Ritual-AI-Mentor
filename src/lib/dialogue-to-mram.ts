@@ -126,6 +126,34 @@ export function buildFromDialogue(
 
     if (pNode.kind === "cue") {
       if (!doc.roles[CUE_ROLE.id]) doc.roles[CUE_ROLE.id] = CUE_ROLE.display;
+
+      // Gavel cues: `[gavels: N]` carries the knock count for this line
+      // transition. The parser stores them as generic cues with text
+      // "gavels: N"; the transformer interprets them here. All other cue
+      // text (`if vouched`, `else`, `end`, `prayer — either version`,
+      // etc.) keeps the existing behavior (gavels: 0, CUE role, cue text
+      // in the `action` field).
+      const gavelMatch = /^gavels:\s*(\d+)$/i.exec(pNode.text);
+      if (gavelMatch) {
+        const n = parseInt(gavelMatch[1], 10);
+        if (n > 0) {
+          doc.lines.push({
+            id: lineId++,
+            section: currentSectionId,
+            role: CUE_ROLE.id,
+            gavels: n,
+            action: null,
+            cipher: "",
+            plain: "",
+          });
+          continue;
+        }
+        // gavels: 0 is pointless — skip the cue entirely. The parser
+        // could have warned about this in a future version, but for now
+        // we silently elide it.
+        continue;
+      }
+
       doc.lines.push({
         id: lineId++,
         section: currentSectionId,

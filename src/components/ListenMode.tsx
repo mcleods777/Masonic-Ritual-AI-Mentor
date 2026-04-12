@@ -11,7 +11,7 @@ import {
   isTTSAvailable,
   type RoleVoiceProfile,
 } from "@/lib/text-to-speech";
-import { playGavelKnocks, countGavelMarks } from "@/lib/gavel-sound";
+import { playGavelKnocks, countGavelMarks, warmAudioContext } from "@/lib/gavel-sound";
 
 interface ListenModeProps {
   sections: RitualSectionWithCipher[];
@@ -164,6 +164,7 @@ export default function ListenMode({ sections }: ListenModeProps) {
   );
 
   const handlePlay = useCallback(() => {
+    warmAudioContext(); // Must happen during user gesture, not in useEffect
     if (playState === "paused") {
       // Resume
       pausedRef.current = false;
