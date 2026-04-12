@@ -285,6 +285,17 @@ export function mramToPlainText(doc: MRAMDocument): string {
       lines.push(`\n### ${currentSection}\n`);
     }
 
+    // Structural cues (CUE role) are synthetic markers that carry their
+    // text in the `action` field. Render them as bare bracketed cues
+    // without a role prefix so the AI mentor sees `[if vouched]` rather
+    // than `**CUE**: [Action: if vouched]` — the original dialogue shape.
+    if (line.role === "CUE") {
+      if (line.action) {
+        lines.push(`[${line.action}]`);
+      }
+      continue;
+    }
+
     const gavels = "*".repeat(line.gavels);
     const action = line.action ? ` [Action: ${line.action}]` : "";
     const prefix = line.role ? `**${line.role}**: ` : "";

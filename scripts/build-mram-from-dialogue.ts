@@ -191,11 +191,49 @@ async function main() {
     }
   }
 
+  // Derive BuildOptions from the plain dialogue's YAML frontmatter.
+  // Required fields: jurisdiction, degree, ceremony. Refuse to build if
+  // any are missing — the old code hardcoded these, which meant building
+  // any ritual other than EA opening silently mislabeled the metadata.
+  //
+  // The cipher dialogue file does NOT carry its own frontmatter by design
+  // (simpler authoring, no lockstep risk). If a cipher file accidentally
+  // has frontmatter, we warn but don't fail — the plain file's metadata
+  // is authoritative.
+  if (cipher.metadata && Object.keys(cipher.metadata).length > 0) {
+    console.error(
+      `Warning: cipher file has frontmatter — ignored. Metadata lives in the plain file only.`,
+    );
+  }
+  const metadata = plain.metadata;
+  if (!metadata) {
+    console.error(`Error: plain dialogue file has no frontmatter block.`);
+    console.error(
+      `Add a YAML frontmatter at the top of ${plainPath}:\n\n` +
+        `---\n` +
+        `jurisdiction: Grand Lodge of Iowa\n` +
+        `degree: Entered Apprentice\n` +
+        `ceremony: Opening on the First Degree\n` +
+        `---\n`,
+    );
+    process.exit(1);
+  }
+  const missingFields: string[] = [];
+  if (!metadata.jurisdiction) missingFields.push("jurisdiction");
+  if (!metadata.degree) missingFields.push("degree");
+  if (!metadata.ceremony) missingFields.push("ceremony");
+  if (missingFields.length > 0) {
+    console.error(
+      `Error: plain dialogue frontmatter is missing required field(s): ${missingFields.join(", ")}`,
+    );
+    process.exit(1);
+  }
+
   console.error("Pairing and building MRAMDocument...");
   const doc = buildFromDialogue(plain, cipher, {
-    jurisdiction: "Grand Lodge of Iowa",
-    degree: "Entered Apprentice",
-    ceremony: "Opening on the First Degree",
+    jurisdiction: metadata.jurisdiction!,
+    degree: metadata.degree!,
+    ceremony: metadata.ceremony!,
   });
 
   console.error(`  Sections: ${doc.sections.length}`);

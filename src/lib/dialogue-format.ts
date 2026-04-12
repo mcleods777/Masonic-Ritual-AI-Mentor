@@ -62,11 +62,33 @@ export interface DialogueWarning {
   reason: string;
 }
 
+/**
+ * Metadata extracted from a YAML-style frontmatter block at the very top
+ * of a plain dialogue file:
+ *
+ *   ---
+ *   jurisdiction: Grand Lodge of Iowa
+ *   degree: Entered Apprentice
+ *   ceremony: Opening on the First Degree
+ *   ---
+ *
+ * The build pipeline reads these fields from the plain dialogue file and
+ * feeds them into MRAMDocument.metadata. Cipher dialogue files do NOT
+ * carry their own frontmatter — they inherit from the plain file at build
+ * time (simpler authoring, no lockstep risk between two frontmatter blocks).
+ */
+export interface DialogueMetadata {
+  jurisdiction?: string;
+  degree?: string;
+  ceremony?: string;
+}
+
 export interface DialogueDocument {
   title: string;
   preamble: string[];
   nodes: DialogueNode[];
   warnings: DialogueWarning[];
+  metadata?: DialogueMetadata;
 }
 
 // Speaker: letter start, then letters/digits/slash.
@@ -74,20 +96,142 @@ const SPEAKER_RE = /^([A-Za-z][A-Za-z0-9/]*):\s+(.+)$/;
 const H1_RE = /^# (.+)$/;
 const H2_RE = /^## (.+)$/;
 const DIVIDER_RE = /^-{3,}$/;
+const FRONTMATTER_KV_RE = /^([a-zA-Z][a-zA-Z0-9_]*)\s*:\s*(.*)$/;
 const BRACKETED_RE = /^\[(.+)\]$/;
 
-export function parseDialogue(source: string): DialogueDocument {
+/**
+ * Extract a YAML-style frontmatter block from the top of the source if
+ * present. A frontmatter block is delimited by a `---` line as the first
+ * non-whitespace line of the file, followed by `key: value` pairs, closed
+ * by another `---` line. If the file has no frontmatter, returns
+ * `{metadata: undefined, remainingLines: allLines}`.
+ *
+ * This is deliberately a tiny single-file YAML subset — we do NOT use a
+ * full YAML parser because (a) the format we need is trivial (flat
+ * string-keyed scalars), (b) a full YAML parser is a supply-chain and
+ * attack-surface expansion we don't need, and (c) ambiguous YAML features
+ * like anchors, tags, and nested mappings have no place in ritual metadata.
+ *
+ * Known limitations vs full YAML:
+ *   - No nested mappings
+ *   - No multi-line values (| > folding)
+ *   - No arrays
+ *   - Quoted strings: unquoted only, surrounding quotes stripped if present
+ *   - Comments not supported inside frontmatter
+ *
+ * All values are returned as strings — consumers validate types.
+ */
+interface FrontmatterResult {
+  metadata?: DialogueMetadata;
+  remainingLines: string[];
+  /** 0-indexed offset into the original source for remaining line numbers. */
+  lineOffset: number;
+  /** Any parse warnings (malformed keys, ignored lines inside the block). */
+  warnings: DialogueWarning[];
+}
+
+function extractFrontmatter(source: string): FrontmatterResult {
   const lines = source.split(/\r?\n/);
-  const nodes: DialogueNode[] = [];
   const warnings: DialogueWarning[] = [];
+
+  // Find first non-empty line
+  let firstIdx = 0;
+  while (firstIdx < lines.length && lines[firstIdx].trim() === "") {
+    firstIdx++;
+  }
+
+  // If the first non-empty line isn't exactly `---`, there's no frontmatter
+  if (firstIdx >= lines.length || lines[firstIdx].trim() !== "---") {
+    return {
+      metadata: undefined,
+      remainingLines: lines,
+      lineOffset: 0,
+      warnings: [],
+    };
+  }
+
+  // Walk forward looking for the closing `---`
+  const openLineNo = firstIdx + 1;
+  let closeIdx = -1;
+  for (let i = firstIdx + 1; i < lines.length; i++) {
+    if (lines[i].trim() === "---") {
+      closeIdx = i;
+      break;
+    }
+  }
+
+  if (closeIdx === -1) {
+    // Unclosed frontmatter — treat as a parse error and emit a warning.
+    // The rest of the file is still parsed, but metadata is undefined.
+    warnings.push({
+      lineNo: openLineNo,
+      line: lines[firstIdx],
+      reason: "Frontmatter block opened with '---' but never closed",
+    });
+    return {
+      metadata: undefined,
+      remainingLines: lines,
+      lineOffset: 0,
+      warnings,
+    };
+  }
+
+  // Parse key: value pairs between firstIdx and closeIdx
+  const metadata: Record<string, string> = {};
+  for (let i = firstIdx + 1; i < closeIdx; i++) {
+    const raw = lines[i];
+    const trimmed = raw.trim();
+    if (!trimmed) continue; // blank lines allowed inside frontmatter
+    const kv = FRONTMATTER_KV_RE.exec(trimmed);
+    if (!kv) {
+      warnings.push({
+        lineNo: i + 1,
+        line: raw,
+        reason: "Frontmatter line does not match 'key: value' format",
+      });
+      continue;
+    }
+    const key = kv[1];
+    let value = kv[2].trim();
+    // Strip surrounding single or double quotes if present
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    metadata[key] = value;
+  }
+
+  return {
+    metadata: metadata as DialogueMetadata,
+    remainingLines: lines.slice(closeIdx + 1),
+    lineOffset: closeIdx + 1,
+    warnings,
+  };
+}
+
+export function parseDialogue(source: string): DialogueDocument {
+  const fm = extractFrontmatter(source);
+  const lines = fm.remainingLines;
+  const nodes: DialogueNode[] = [];
+  const warnings: DialogueWarning[] = [...fm.warnings];
   let title = "";
   const preamble: string[] = [];
   let seenFirstSection = false;
+  // Track used section slugs to produce unique ids on collision. Two
+  // sections with titles that slugify to the same string (e.g. "The
+  // Opening" and "The Opening!") both get a valid id instead of silently
+  // sharing one. The first collision becomes `foo-2`, the next `foo-3`.
+  const usedSectionIds = new Set<string>();
 
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
     const line = raw.trim();
-    const lineNo = i + 1;
+    // Line numbers are reported in terms of the original source file, so
+    // warnings and node.lineNo remain accurate even when frontmatter was
+    // stripped from the head of the file.
+    const lineNo = i + 1 + fm.lineOffset;
 
     if (!line) continue;
     if (DIVIDER_RE.test(line)) continue;
@@ -103,9 +247,18 @@ export function parseDialogue(source: string): DialogueDocument {
     if (h2) {
       seenFirstSection = true;
       const sectionTitle = h2[1];
+      const baseSlug = slugify(sectionTitle);
+      // Dedup: if the slug is already used, append -2, -3, ... until unique
+      let id = baseSlug;
+      let suffix = 2;
+      while (usedSectionIds.has(id)) {
+        id = `${baseSlug}-${suffix}`;
+        suffix++;
+      }
+      usedSectionIds.add(id);
       nodes.push({
         kind: "section",
-        id: slugify(sectionTitle),
+        id,
         title: sectionTitle,
         lineNo,
       });
@@ -155,7 +308,13 @@ export function parseDialogue(source: string): DialogueDocument {
     });
   }
 
-  return { title, preamble, nodes, warnings };
+  return {
+    title,
+    preamble,
+    nodes,
+    warnings,
+    metadata: fm.metadata,
+  };
 }
 
 function slugify(s: string): string {
@@ -173,6 +332,18 @@ function slugify(s: string): string {
  */
 export function serializeDialogue(doc: DialogueDocument): string {
   const out: string[] = [];
+
+  // Frontmatter first if metadata was set. Round-trip stable — parse +
+  // serialize + parse produces the same metadata object.
+  if (doc.metadata && Object.keys(doc.metadata).length > 0) {
+    out.push("---");
+    for (const [key, value] of Object.entries(doc.metadata)) {
+      if (value === undefined) continue;
+      out.push(`${key}: ${value}`);
+    }
+    out.push("---");
+    out.push("");
+  }
 
   if (doc.title) {
     out.push(`# ${doc.title}`);
