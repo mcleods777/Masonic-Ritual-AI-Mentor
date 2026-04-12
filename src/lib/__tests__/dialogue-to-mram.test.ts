@@ -461,6 +461,65 @@ describe("mramToPlainText — CUE cleanup", () => {
 // builder call-site work together end-to-end.
 // ============================================================
 
+describe("buildFromDialogue — gavel cue routing", () => {
+  it("transforms [gavels: 3] cue into a CUE-role MRAMLine with gavels=3", () => {
+    const plainSrc = `## I. S\nA: hi\n[gavels: 3]\nB: bye\n`;
+    const cipherSrc = `## I. S\nA: h\n[gavels: 3]\nB: b\n`;
+    const plain = parseDialogue(plainSrc);
+    const cipher = parseDialogue(cipherSrc);
+    const doc = buildFromDialogue(plain, cipher, OPTS);
+
+    const gavelLine = doc.lines.find((l) => l.gavels > 0);
+    expect(gavelLine).toBeDefined();
+    expect(gavelLine!.gavels).toBe(3);
+    expect(gavelLine!.role).toBe("CUE");
+    expect(gavelLine!.action).toBeNull(); // gavels have no action text
+    expect(gavelLine!.plain).toBe("");
+    expect(gavelLine!.cipher).toBe("");
+  });
+
+  it("elides [gavels: 0] cue (zero knocks is a no-op)", () => {
+    const plainSrc = `## I. S\nA: hi\n[gavels: 0]\nB: bye\n`;
+    const cipherSrc = `## I. S\nA: h\n[gavels: 0]\nB: b\n`;
+    const plain = parseDialogue(plainSrc);
+    const cipher = parseDialogue(cipherSrc);
+    const doc = buildFromDialogue(plain, cipher, OPTS);
+
+    // No line should have gavels > 0, and the gavels: 0 cue should not
+    // appear as a CUE-role line at all (elided)
+    expect(doc.lines.find((l) => l.gavels > 0)).toBeUndefined();
+  });
+
+  it("preserves non-gavel structural cues alongside gavel cues", () => {
+    const plainSrc = `## I. S\n[gavels: 1]\nA: hi\n[if morning]\nA: good morning\n[end]\n`;
+    const cipherSrc = `## I. S\n[gavels: 1]\nA: h\n[if morning]\nA: gm\n[end]\n`;
+    const plain = parseDialogue(plainSrc);
+    const cipher = parseDialogue(cipherSrc);
+    const doc = buildFromDialogue(plain, cipher, OPTS);
+
+    const gavelLines = doc.lines.filter((l) => l.gavels > 0);
+    const actionCues = doc.lines.filter((l) => l.action !== null);
+    expect(gavelLines).toHaveLength(1);
+    expect(gavelLines[0].gavels).toBe(1);
+    // The "if morning" and "end" cues still have action text
+    expect(actionCues.some((l) => l.action === "if morning")).toBe(true);
+    expect(actionCues.some((l) => l.action === "end")).toBe(true);
+  });
+
+  it("handles multiple gavel cues in the same section", () => {
+    const plainSrc = `## I. S\n[gavels: 1]\nA: hi\n[gavels: 3]\nB: bye\n`;
+    const cipherSrc = `## I. S\n[gavels: 1]\nA: h\n[gavels: 3]\nB: b\n`;
+    const plain = parseDialogue(plainSrc);
+    const cipher = parseDialogue(cipherSrc);
+    const doc = buildFromDialogue(plain, cipher, OPTS);
+
+    const gavelLines = doc.lines.filter((l) => l.gavels > 0);
+    expect(gavelLines).toHaveLength(2);
+    expect(gavelLines[0].gavels).toBe(1);
+    expect(gavelLines[1].gavels).toBe(3);
+  });
+});
+
 describe("frontmatter → buildFromDialogue integration", () => {
   it("builds with metadata derived from plain frontmatter", () => {
     const plainWithFm = `---
