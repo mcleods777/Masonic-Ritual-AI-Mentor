@@ -326,3 +326,254 @@ describe("pairPlainCipher", () => {
     expect(() => pairPlainCipher(a, b)).toThrow(/divergent structure/);
   });
 });
+
+// ============================================================
+// YAML frontmatter parsing (PR #34a)
+// ============================================================
+
+describe("parseDialogue — YAML frontmatter", () => {
+  it("extracts a valid frontmatter block", () => {
+    const src = `---
+jurisdiction: Grand Lodge of Iowa
+degree: Entered Apprentice
+ceremony: Opening on the First Degree
+---
+
+# EA Opening
+
+## I. First Section
+
+WM: Hello.
+`;
+    const doc = parseDialogue(src);
+    expect(doc.metadata).toBeDefined();
+    expect(doc.metadata?.jurisdiction).toBe("Grand Lodge of Iowa");
+    expect(doc.metadata?.degree).toBe("Entered Apprentice");
+    expect(doc.metadata?.ceremony).toBe("Opening on the First Degree");
+    // Body still parses normally
+    expect(doc.title).toBe("EA Opening");
+    expect(doc.nodes.filter((n) => n.kind === "line")).toHaveLength(1);
+  });
+
+  it("returns metadata undefined when no frontmatter present", () => {
+    const src = `# Title
+
+## I. Section
+
+A: hi.
+`;
+    const doc = parseDialogue(src);
+    expect(doc.metadata).toBeUndefined();
+  });
+
+  it("extracts partial frontmatter (missing fields)", () => {
+    // The parser populates what's there; a downstream consumer (like the
+    // build script) is responsible for enforcing required fields.
+    const src = `---
+jurisdiction: Grand Lodge of Iowa
+---
+
+## I. Section
+
+A: hi.
+`;
+    const doc = parseDialogue(src);
+    expect(doc.metadata?.jurisdiction).toBe("Grand Lodge of Iowa");
+    expect(doc.metadata?.degree).toBeUndefined();
+    expect(doc.metadata?.ceremony).toBeUndefined();
+  });
+
+  it("warns and does not set metadata on unclosed frontmatter", () => {
+    const src = `---
+jurisdiction: Iowa
+degree: EA
+
+## Actually this is a section
+
+A: hi.
+`;
+    const doc = parseDialogue(src);
+    expect(doc.metadata).toBeUndefined();
+    expect(doc.warnings.length).toBeGreaterThan(0);
+    expect(doc.warnings[0].reason).toMatch(/never closed/i);
+  });
+
+  it("strips surrounding single and double quotes from values", () => {
+    const src = `---
+jurisdiction: "Grand Lodge of Iowa"
+degree: 'Entered Apprentice'
+ceremony: Opening on the First Degree
+---
+
+## I. S
+
+A: hi.
+`;
+    const doc = parseDialogue(src);
+    expect(doc.metadata?.jurisdiction).toBe("Grand Lodge of Iowa");
+    expect(doc.metadata?.degree).toBe("Entered Apprentice");
+    expect(doc.metadata?.ceremony).toBe("Opening on the First Degree");
+  });
+
+  it("tolerates blank lines inside the frontmatter block", () => {
+    const src = `---
+
+jurisdiction: Iowa
+
+degree: EA
+
+---
+
+## I. S
+
+A: hi.
+`;
+    const doc = parseDialogue(src);
+    expect(doc.metadata?.jurisdiction).toBe("Iowa");
+    expect(doc.metadata?.degree).toBe("EA");
+  });
+
+  it("warns on malformed key-value lines but keeps parsing", () => {
+    const src = `---
+jurisdiction: Iowa
+not-a-valid-line-no-colon
+degree: EA
+---
+
+## I. S
+
+A: hi.
+`;
+    const doc = parseDialogue(src);
+    expect(doc.metadata?.jurisdiction).toBe("Iowa");
+    expect(doc.metadata?.degree).toBe("EA");
+    expect(doc.warnings.some((w) => w.reason.match(/key: value/))).toBe(true);
+  });
+
+  it("passes through extra unknown fields without erroring", () => {
+    const src = `---
+jurisdiction: Iowa
+degree: EA
+ceremony: Opening
+extraField: something else
+---
+
+## I. S
+
+A: hi.
+`;
+    const doc = parseDialogue(src);
+    expect(doc.metadata?.jurisdiction).toBe("Iowa");
+    // Extra field survives via the underlying Record<string, string> shape
+    expect((doc.metadata as Record<string, string>)?.extraField).toBe(
+      "something else",
+    );
+  });
+
+  it("does NOT interpret mid-document `---` as frontmatter", () => {
+    // Section dividers and mid-document --- lines must not be mistaken
+    // for frontmatter. Frontmatter only counts at the very top.
+    const src = `# Title
+
+## I. First
+
+A: hi.
+
+---
+
+## II. Second
+
+B: bye.
+`;
+    const doc = parseDialogue(src);
+    expect(doc.metadata).toBeUndefined();
+    // Both sections parse normally
+    expect(doc.nodes.filter((n) => n.kind === "section")).toHaveLength(2);
+  });
+
+  it("reports original line numbers after frontmatter is stripped", () => {
+    // A warning on a line AFTER the frontmatter block should report the
+    // line number in the original source, not in the frontmatter-stripped
+    // remainder.
+    const src = `---
+jurisdiction: Iowa
+---
+
+## I. S
+
+not-a-speaker-line-that-generates-a-warning
+`;
+    const doc = parseDialogue(src);
+    expect(doc.warnings).toHaveLength(1);
+    // The warning should reference line 7 of the original source
+    expect(doc.warnings[0].lineNo).toBe(7);
+  });
+});
+
+describe("parseDialogue — slugify collision dedup", () => {
+  it("gives distinct ids to sections that collapse to the same slug", () => {
+    const src = `## The Opening
+
+A: hi.
+
+## The Opening!
+
+B: hi.
+
+## The Opening?
+
+C: hi.
+`;
+    const doc = parseDialogue(src);
+    const sections = doc.nodes.filter((n) => n.kind === "section");
+    const ids = sections.map((s) => s.kind === "section" && s.id);
+    expect(ids).toEqual(["the-opening", "the-opening-2", "the-opening-3"]);
+  });
+
+  it("keeps unique ids untouched when slugs don't collide", () => {
+    const src = `## First
+
+A: hi.
+
+## Second
+
+B: hi.
+`;
+    const doc = parseDialogue(src);
+    const sections = doc.nodes.filter((n) => n.kind === "section");
+    const ids = sections.map((s) => s.kind === "section" && s.id);
+    expect(ids).toEqual(["first", "second"]);
+  });
+});
+
+describe("serializeDialogue — frontmatter round-trip", () => {
+  it("round-trips frontmatter through parse → serialize → parse", () => {
+    const original = `---
+jurisdiction: Grand Lodge of Iowa
+degree: Entered Apprentice
+ceremony: Opening
+---
+
+## I. S
+
+A: hello.
+`;
+    const doc1 = parseDialogue(original);
+    const text = serializeDialogue(doc1);
+    const doc2 = parseDialogue(text);
+    expect(doc2.metadata).toEqual(doc1.metadata);
+  });
+
+  it("emits no frontmatter when doc.metadata is undefined", () => {
+    // The serializer emits `---` as a section divider before sections —
+    // that's NOT frontmatter. Check semantically: parse the output and
+    // confirm metadata is still undefined. A real frontmatter block
+    // would survive the round-trip and populate metadata.
+    const src = `## I. S\nA: hi.\n`;
+    const doc1 = parseDialogue(src);
+    expect(doc1.metadata).toBeUndefined();
+    const text = serializeDialogue(doc1);
+    const doc2 = parseDialogue(text);
+    expect(doc2.metadata).toBeUndefined();
+  });
+});
