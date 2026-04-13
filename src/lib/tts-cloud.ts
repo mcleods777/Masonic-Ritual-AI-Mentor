@@ -6,6 +6,8 @@
  * HTMLAudioElement.
  */
 
+import { fetchApi } from "./api-fetch";
+
 // ============================================================
 // Shared audio player
 // ============================================================
@@ -172,7 +174,7 @@ export async function speakElevenLabs(
 
     let resp: Response;
     try {
-      resp = await fetch("/api/tts/elevenlabs", {
+      resp = await fetchApi("/api/tts/elevenlabs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -317,7 +319,7 @@ export async function speakGoogleCloud(
 
     let resp: Response;
     try {
-      resp = await fetch("/api/tts/google", {
+      resp = await fetchApi("/api/tts/google", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -453,7 +455,7 @@ export async function speakDeepgram(
 
     let resp: Response;
     try {
-      resp = await fetch("/api/tts/deepgram", {
+      resp = await fetchApi("/api/tts/deepgram", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -579,7 +581,7 @@ export async function speakKokoro(
 
     let resp: Response;
     try {
-      resp = await fetch("/api/tts/kokoro", {
+      resp = await fetchApi("/api/tts/kokoro", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -804,7 +806,7 @@ export async function speakVoxtral(
 
     let resp: Response;
     try {
-      resp = await fetch("/api/tts/voxtral", {
+      resp = await fetchApi("/api/tts/voxtral", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -868,7 +870,7 @@ export async function fetchEngineAvailability(): Promise<{
   voxtral: boolean;
 }> {
   try {
-    const resp = await fetch("/api/tts/engines");
+    const resp = await fetchApi("/api/tts/engines");
     if (!resp.ok) return { elevenlabs: false, google: false, deepgram: false, kokoro: false, voxtral: false };
     return resp.json();
   } catch {
