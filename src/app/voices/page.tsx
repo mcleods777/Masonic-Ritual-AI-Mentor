@@ -14,6 +14,7 @@ import {
 import { clearVoxtralVoicesCache, VOXTRAL_ROLE_OPTIONS } from "@/lib/tts-cloud";
 import { normalizeAudio, encodeWav } from "@/lib/audio-utils";
 import { ensureDefaultVoices, getDefaultVoiceNames } from "@/lib/default-voices";
+import { fetchApi } from "@/lib/api-fetch";
 
 // ============================================================
 // Types
@@ -333,7 +334,7 @@ export default function VoicesPage() {
     setError(null);
 
     try {
-      const resp = await fetch("/api/tts/voxtral", {
+      const resp = await fetchApi("/api/tts/voxtral", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

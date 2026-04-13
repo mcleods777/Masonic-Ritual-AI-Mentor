@@ -7,6 +7,8 @@
  *                        requires GROQ_API_KEY on the server
  */
 
+import { fetchApi } from "./api-fetch";
+
 export interface STTResult {
   transcript: string;
   isFinal: boolean;
@@ -249,7 +251,7 @@ export function createWhisperEngine(): STTEngine {
             const formData = new FormData();
             formData.append("audio", audioBlob, "recording.webm");
 
-            const response = await fetch("/api/transcribe", {
+            const response = await fetchApi("/api/transcribe", {
               method: "POST",
               body: formData,
             });

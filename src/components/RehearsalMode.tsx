@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { RitualSectionWithCipher } from "@/lib/storage";
 import { ROLE_DISPLAY_NAMES, cleanRitualText } from "@/lib/document-parser";
 import { compareTexts, type ComparisonResult } from "@/lib/text-comparison";
+import { fetchApi } from "@/lib/api-fetch";
 import { getRoleIcon } from "./MasonicIcons";
 import {
   createWebSpeechEngine,
@@ -499,7 +500,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
       if (!aiCoaching || !isTTSAvailable()) return;
 
       try {
-        const res = await fetch("/api/rehearsal-feedback", {
+        const res = await fetchApi("/api/rehearsal-feedback", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
