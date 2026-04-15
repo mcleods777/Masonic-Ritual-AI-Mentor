@@ -15,7 +15,7 @@ export default function PilotBanner() {
       role="status"
       className="w-full bg-amber-950/80 border-b border-amber-800 text-amber-100 text-center text-xs py-2 px-4 tracking-wide"
     >
-      PILOT BUILD — pending Grand Lodge review. Please do not share outside the pilot group.
+      PILOT BUILD — please do not share outside the pilot group.
     </div>
   );
 }

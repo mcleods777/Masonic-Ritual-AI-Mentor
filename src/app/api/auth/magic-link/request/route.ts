@@ -45,7 +45,6 @@ function renderEmailHtml(link: string): string {
   <p>Click the link below to sign in. The link expires in 10 minutes.</p>
   <p style="margin: 32px 0;"><a href="${link}" style="display: inline-block; padding: 12px 24px; background: #c9962c; color: #fff; text-decoration: none; font-weight: bold; letter-spacing: 0.06em;">Sign in</a></p>
   <p style="font-size: 12px; color: #888;">If you did not request this, you can safely ignore this email. Your address is not added to any list.</p>
-  <p style="font-size: 12px; color: #888;">Pilot build. Pending Grand Lodge review.</p>
 </body>
 </html>`;
 }
@@ -59,7 +58,6 @@ function renderEmailText(link: string): string {
     link,
     "",
     "If you did not request this, you can safely ignore this email.",
-    "Pilot build. Pending Grand Lodge review.",
   ].join("\n");
 }
 

@@ -23,9 +23,7 @@ export default function SignInPage({
         </p>
         <SignInForm searchParamsPromise={searchParams} />
         <p className="mt-12 text-center text-[11px] text-zinc-600 leading-relaxed">
-          Pilot build. Pending Grand Lodge review.
-          <br />
-          Access is limited to Brothers on the approved list.
+          Pilot build. Access is limited to Brothers on the approved list.
         </p>
       </div>
     </main>
