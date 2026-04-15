@@ -3,7 +3,7 @@
  *
  * Magic-link email sign-in for the lodge pilot. Two JWT token types:
  *
- *   - Magic-link token: short-lived (10 min), sent to the Brother's email.
+ *   - Magic-link token: short-lived (24h), sent to the Brother's email.
  *     Clicking the link exchanges this for a session token.
  *   - Session token: longer-lived (30 days), stored in an httpOnly cookie.
  *     Middleware verifies this on every protected request.
@@ -21,7 +21,7 @@
 import { SignJWT, jwtVerify } from "jose";
 
 export const SESSION_COOKIE_NAME = "pilot-session";
-export const MAGIC_LINK_TTL_SECONDS = 60 * 10; // 10 minutes
+export const MAGIC_LINK_TTL_SECONDS = 60 * 60 * 24; // 24 hours
 export const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
 
 const MAGIC_LINK_AUDIENCE = "pilot-magic-link";

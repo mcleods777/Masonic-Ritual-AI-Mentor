@@ -42,7 +42,7 @@ function renderEmailHtml(link: string): string {
 <html>
 <body style="font-family: Georgia, serif; max-width: 560px; margin: 0 auto; padding: 40px 20px; color: #222;">
   <h1 style="font-size: 20px; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 24px;">Masonic Ritual Mentor</h1>
-  <p>Click the link below to sign in. The link expires in 10 minutes.</p>
+  <p>Click the link below to sign in. The link expires in 24 hours.</p>
   <p style="margin: 32px 0;"><a href="${link}" style="display: inline-block; padding: 12px 24px; background: #c9962c; color: #fff; text-decoration: none; font-weight: bold; letter-spacing: 0.06em;">Sign in</a></p>
   <p style="font-size: 12px; color: #888;">If you did not request this, you can safely ignore this email. Your address is not added to any list.</p>
 </body>
@@ -53,7 +53,7 @@ function renderEmailText(link: string): string {
   return [
     "Masonic Ritual Mentor",
     "",
-    "Click the link below to sign in. The link expires in 10 minutes.",
+    "Click the link below to sign in. The link expires in 24 hours.",
     "",
     link,
     "",

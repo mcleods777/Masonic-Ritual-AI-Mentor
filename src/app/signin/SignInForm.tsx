@@ -17,7 +17,7 @@ export default function SignInForm({
   useEffect(() => {
     if (searchParams.error === "invalid-link") {
       setErrorMessage(
-        "That sign-in link is no longer valid. Links expire after 10 minutes. Request a new one below.",
+        "That sign-in link is no longer valid. Links expire after 24 hours. Request a new one below.",
       );
     }
   }, [searchParams.error]);
@@ -55,7 +55,7 @@ export default function SignInForm({
           If your email is on the pilot list, a sign-in link is on its way.
         </p>
         <p className="text-xs text-zinc-500">
-          The link expires in 10 minutes. Check your inbox (and spam folder).
+          The link expires in 24 hours. Check your inbox (and spam folder).
         </p>
       </div>
     );

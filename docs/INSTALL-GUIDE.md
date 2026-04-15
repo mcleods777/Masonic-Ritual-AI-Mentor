@@ -57,7 +57,7 @@ you receive, and you're in.
 The sign-in remembers you for 30 days on this device. You will not need to do
 this every time you open the app.
 
-The sign-in link inside the email is only good for 10 minutes. If you wait
+The sign-in link inside the email is only good for 24 hours. If you wait
 longer than that, just request a new link.
 
 ---
@@ -222,7 +222,7 @@ device, you load the `.mram` file there too.
 
 **The sign-in link takes me to a page that says "invalid link."**
 
-- Sign-in links expire in 10 minutes. Request a new one.
+- Sign-in links expire in 24 hours. Request a new one.
 - Each link is tied to a specific web address. If you request the link on
   one device and open it on another, make sure both devices are on the same
   pilot URL.
