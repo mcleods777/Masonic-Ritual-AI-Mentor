@@ -3,23 +3,34 @@
  *
  * These are pre-generated Deepgram Aura-2 male voice samples stored as
  * static files in public/voices/. They load automatically on first visit
- * and serve as the default Voxtral ref_audio for each officer role.
+ * and serve as Voxtral ref_audio.
  *
- * Users can override any default by recording their own voice on the
- * Voices page. User voices take priority over defaults.
+ * Defaults ship with NO explicit role assignment — the voice-selection
+ * logic in tts-cloud.ts falls back to deterministic round-robin across
+ * the voice list, keyed by the role's group index. With 7 default voices
+ * and 10 role groups, the first 7 officers each get a distinct voice and
+ * the remaining three wrap back to the start of the list.
+ *
+ * Users can override by recording their own voice and assigning a role on
+ * the Voices page. User voices take priority over defaults.
  */
 
-import { listVoices, saveVoice, type LocalVoice } from "./voice-storage";
+import {
+  listVoices,
+  saveVoice,
+  assignVoiceRole,
+  type LocalVoice,
+} from "./voice-storage";
 
 /** Default voice definitions — all male Aura-2 voices. */
 const DEFAULT_VOICES = [
-  { name: "Zeus",    file: "/voices/zeus.mp3",    role: "WM", description: "Commanding, deep" },
-  { name: "Orion",   file: "/voices/orion.mp3",   role: "SW", description: "Clear, steady" },
-  { name: "Arcas",   file: "/voices/arcas.mp3",   role: "JW", description: "Measured" },
-  { name: "Orpheus", file: "/voices/orpheus.mp3", role: "SD", description: "Warm" },
-  { name: "Apollo",  file: "/voices/apollo.mp3",  role: "JD", description: "Bright, articulate" },
-  { name: "Hermes",  file: "/voices/hermes.mp3",  role: "Ch", description: "Smooth, resonant" },
-  { name: "Atlas",   file: "/voices/atlas.mp3",   role: "T",  description: "Steady, grounded" },
+  { name: "Zeus",    file: "/voices/zeus.mp3",    description: "Commanding, deep" },
+  { name: "Orion",   file: "/voices/orion.mp3",   description: "Clear, steady" },
+  { name: "Arcas",   file: "/voices/arcas.mp3",   description: "Measured" },
+  { name: "Orpheus", file: "/voices/orpheus.mp3", description: "Warm" },
+  { name: "Apollo",  file: "/voices/apollo.mp3",  description: "Bright, articulate" },
+  { name: "Hermes",  file: "/voices/hermes.mp3",  description: "Smooth, resonant" },
+  { name: "Atlas",   file: "/voices/atlas.mp3",   description: "Steady, grounded" },
 ] as const;
 
 /** Check if default voices are already loaded in IndexedDB. */
@@ -50,6 +61,7 @@ async function fetchAsBase64(url: string): Promise<string> {
 export async function ensureDefaultVoices(): Promise<{
   loaded: number;
   skipped: number;
+  migrated: number;
 }> {
   const existing = await listVoices();
   const existingNames = new Set(existing.map((v) => v.name));
@@ -71,7 +83,8 @@ export async function ensureDefaultVoices(): Promise<{
         audioBase64,
         mimeType: "audio/mpeg",
         duration: 5,
-        role: def.role,
+        // role intentionally omitted — defaults ship unassigned so the
+        // round-robin fallback handles role → voice mapping.
         createdAt: 0, // epoch = default voice, distinguishes from user-recorded
       };
       await saveVoice(voice);
@@ -81,7 +94,19 @@ export async function ensureDefaultVoices(): Promise<{
     }
   }
 
-  return { loaded, skipped };
+  // Migration: earlier versions shipped defaults with explicit role assignments
+  // (WM, SW, JW, ...). Clear those so existing installs also get round-robin.
+  // Only touches default voices (createdAt === 0) — user-recorded voices
+  // (createdAt > 0) keep whatever role the user assigned.
+  let migrated = 0;
+  for (const v of existing) {
+    if (v.createdAt === 0 && v.role) {
+      await assignVoiceRole(v.id, undefined);
+      migrated++;
+    }
+  }
+
+  return { loaded, skipped, migrated };
 }
 
 /** Get the list of default voice names (for UI to mark them). */
