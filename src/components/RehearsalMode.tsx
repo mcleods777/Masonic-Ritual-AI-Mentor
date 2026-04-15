@@ -632,24 +632,37 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
       }
       if (stale()) return;
 
-      // Speak the clicked line (even stage directions / narrator)
-      const cleanText = cleanRitualText(section.text);
-      if (cleanText && section.speaker) {
-        setRehearsalState("ai-speaking");
-        try {
-          await speakAsRole(cleanText, section.speaker, voiceMapRef.current);
-        } catch {
-          /* ignore */
+      // Route the clicked line the same way natural advance does, so that
+      // clicking the user's own role lands on a listening turn instead of
+      // the AI reading it aloud.
+      const action = decideLineAction(section, selectedRole);
+
+      if (action === "user-turn") {
+        setRehearsalState("listening");
+        setTimeout(() => {
+          if (!cancelledRef.current) startListeningRef.current();
+        }, 400);
+        return;
+      }
+
+      if (action === "ai-speaks" && section.speaker) {
+        const cleanText = cleanRitualText(section.text);
+        if (cleanText) {
+          setRehearsalState("ai-speaking");
+          try {
+            await speakAsRole(cleanText, section.speaker, voiceMapRef.current);
+          } catch {
+            /* ignore */
+          }
         }
       }
 
       if (stale()) return;
 
-      // Now continue rehearsal from the next line using advanceToLine
-      // (which bumps generation, killing this chain's gen — that's fine)
+      // Silent-advance or AI-speaks: continue rehearsal from the next line.
       advanceToLine(index + 1);
     },
-    [sections, advanceToLine],
+    [sections, advanceToLine, selectedRole],
   );
 
   // Click-to-speak: tap the current line's text to re-hear it (one-shot).
