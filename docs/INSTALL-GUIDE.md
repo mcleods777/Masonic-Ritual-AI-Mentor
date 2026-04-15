@@ -13,7 +13,7 @@ The whole process takes about two minutes per device.
 
 ## The Pilot URL
 
-> **https://masonic-ritual-ai-mentor-git-feat-p-ff4a68-mcleods777s-projects.vercel.app**
+> **https://masonic-ritual-ai-mentor.vercel.app**
 
 Open that address in your web browser on any device. Everywhere in this guide
 that says "the pilot URL," that is what I mean. Please do not share it outside
