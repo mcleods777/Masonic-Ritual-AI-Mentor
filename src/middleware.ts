@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import {
+  SESSION_COOKIE_NAME,
+  isAuthConfigured,
+  verifySessionToken,
+} from "@/lib/auth";
 
 /**
  * Origins allowed to call the API. Preview deploys on Vercel match
@@ -25,7 +30,21 @@ function isAllowedOrigin(origin: string | null): boolean {
   }
 }
 
-export function middleware(request: NextRequest) {
+/**
+ * Paths that never require a pilot session cookie. These must remain
+ * reachable to unauthenticated users so the sign-in flow can complete.
+ * Static assets (/_next/*, /manifest.json, icons) are excluded from the
+ * middleware matcher entirely; these are the paths that DO match the
+ * matcher but still pass through without auth.
+ */
+function isPilotPublicPath(pathname: string): boolean {
+  if (pathname === "/signin") return true;
+  if (pathname.startsWith("/api/auth/")) return true;
+  if (pathname === "/manifest.json") return true;
+  return false;
+}
+
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Root redirect (existing behavior).
@@ -33,7 +52,7 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL("/landing.html", request.url));
   }
 
-  // API route protection.
+  // API route protection (existing).
   if (pathname.startsWith("/api/")) {
     const origin = request.headers.get("origin");
 
@@ -53,16 +72,18 @@ export function middleware(request: NextRequest) {
       });
     }
 
-    // Shared-secret check. If unset server-side, skip (dev / misconfigured
-    // deploy stays functional but logs a warning).
-    const expected = process.env.RITUAL_CLIENT_SECRET;
-    if (expected) {
-      const provided = request.headers.get("x-client-secret");
-      if (provided !== expected) {
-        return NextResponse.json(
-          { error: "Unauthorized" },
-          { status: 401 }
-        );
+    // Shared-secret check for /api/* (skip /api/auth/*). If unset server-side,
+    // skip (dev / misconfigured deploy stays functional).
+    if (!pathname.startsWith("/api/auth/")) {
+      const expected = process.env.RITUAL_CLIENT_SECRET;
+      if (expected) {
+        const provided = request.headers.get("x-client-secret");
+        if (provided !== expected) {
+          return NextResponse.json(
+            { error: "Unauthorized" },
+            { status: 401 },
+          );
+        }
       }
     }
 
@@ -72,7 +93,7 @@ export function middleware(request: NextRequest) {
     if (origin && !isAllowedOrigin(origin)) {
       return NextResponse.json(
         { error: "Forbidden origin" },
-        { status: 403 }
+        { status: 403 },
       );
     }
 
@@ -80,11 +101,36 @@ export function middleware(request: NextRequest) {
     if (origin) {
       const res = NextResponse.next();
       res.headers.set("Access-Control-Allow-Origin", origin);
-      return res;
+      // Fall through to pilot auth check below for /api/auth/* or leave
+      // this response as the final one for other API paths.
+      if (!pathname.startsWith("/api/auth/")) {
+        return res;
+      }
+    }
+  }
+
+  // Pilot auth gate. Only active when JWT_SECRET is configured; this way
+  // local dev (without secrets set) stays open and the middleware is a
+  // no-op. In production on Vercel, JWT_SECRET is set and the gate is on.
+  if (isAuthConfigured() && !isPilotPublicPath(pathname)) {
+    const cookie = request.cookies.get(SESSION_COOKIE_NAME)?.value;
+    const session = await verifySessionToken(cookie);
+    if (!session) {
+      const signInUrl = new URL("/signin", request.url);
+      return NextResponse.redirect(signInUrl);
     }
   }
 }
 
 export const config = {
-  matcher: ["/", "/api/:path*"],
+  matcher: [
+    /*
+     * Match all request paths except:
+     *   - _next/static (build output)
+     *   - _next/image (image optimization)
+     *   - favicon, apple-touch icons, manifest icons
+     *   - static files with extensions (.png, .jpg, .svg, .ico, .txt, .woff2, .mram, .webmanifest)
+     */
+    "/((?!_next/static|_next/image|favicon\\.ico|apple-touch-icon|icon-|.*\\.(?:png|jpg|jpeg|svg|ico|txt|woff2|mram|webmanifest)).*)",
+  ],
 };

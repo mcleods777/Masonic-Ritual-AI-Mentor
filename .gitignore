@@ -54,6 +54,9 @@ gitkey
 *.credentials
 credentials.json
 
+# plaintext ritual source files — never commit under any circumstances
+files/
+
 # gstack build artifacts
 .claude/skills/gstack/node_modules/
 .claude/skills/gstack/browse/dist/

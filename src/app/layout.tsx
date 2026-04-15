@@ -1,7 +1,8 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Cinzel, Lato } from "next/font/google";
 import "./globals.css";
 import Navigation from "@/components/Navigation";
+import PilotBanner from "@/components/PilotBanner";
 
 const cinzel = Cinzel({
   subsets: ["latin"],
@@ -20,6 +21,16 @@ export const metadata: Metadata = {
   title: "Masonic Ritual Mentor",
   description:
     "A privacy-first voice-driven practice tool for Masonic ritual memorization. Upload your ritual, practice by speaking, and get instant accuracy feedback — all on your device.",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Ritual Mentor",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0a0a0a",
 };
 
 export default function RootLayout({
@@ -30,6 +41,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body className={`antialiased min-h-screen ${cinzel.variable} ${lato.variable}`}>
+        <PilotBanner />
         <Navigation />
         <main className="pt-4 md:pt-20 pb-20 md:pb-4 px-4 max-w-5xl mx-auto">
           {children}
