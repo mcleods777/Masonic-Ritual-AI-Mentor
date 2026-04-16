@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 620" font-family="Georgia, 'Times New Roman', serif">
+  <rect width="1200" height="620" fill="#faf6ed"/>
+
+  <!-- title -->
+  <text x="600" y="50" font-size="30" font-weight="bold" fill="#5a4410" text-anchor="middle">
+    Sign-in flow — the token of the pass
+  </text>
+  <line x1="300" y1="66" x2="900" y2="66" stroke="#c9962c" stroke-width="1.5"/>
+
+  <!-- swim-lane labels -->
+  <text x="160" y="120" font-size="18" font-weight="bold" fill="#8b6914" text-anchor="middle">BROTHER</text>
+  <text x="600" y="120" font-size="18" font-weight="bold" fill="#8b6914" text-anchor="middle">PILOT SERVER</text>
+  <text x="1040" y="120" font-size="18" font-weight="bold" fill="#8b6914" text-anchor="middle">EMAIL INBOX</text>
+
+  <!-- swim-lane vertical rails (subtle) -->
+  <line x1="160" y1="140" x2="160" y2="560" stroke="#d9cfb5" stroke-width="2" stroke-dasharray="2 4"/>
+  <line x1="600" y1="140" x2="600" y2="560" stroke="#d9cfb5" stroke-width="2" stroke-dasharray="2 4"/>
+  <line x1="1040" y1="140" x2="1040" y2="560" stroke="#d9cfb5" stroke-width="2" stroke-dasharray="2 4"/>
+
+  <defs>
+    <marker id="sarr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#c9962c"/>
+    </marker>
+  </defs>
+
+  <!-- Step 1: Brother → server (email entered) -->
+  <g font-family="Helvetica, Arial, sans-serif">
+    <line x1="170" y1="180" x2="590" y2="180" stroke="#c9962c" stroke-width="2.5" marker-end="url(#sarr)"/>
+    <rect x="250" y="155" width="260" height="26" fill="#fff8e1" stroke="#c9962c" stroke-width="1" rx="4"/>
+    <text x="380" y="173" font-size="14" fill="#222" text-anchor="middle">1.  enters lodge email address</text>
+  </g>
+
+  <!-- Step 2: Server → inbox (magic link) -->
+  <g font-family="Helvetica, Arial, sans-serif">
+    <line x1="610" y1="250" x2="1030" y2="250" stroke="#c9962c" stroke-width="2.5" marker-end="url(#sarr)"/>
+    <rect x="670" y="225" width="320" height="26" fill="#fff8e1" stroke="#c9962c" stroke-width="1" rx="4"/>
+    <text x="830" y="243" font-size="14" fill="#222" text-anchor="middle">2.  sends magic-link email · 24h JWT</text>
+    <text x="830" y="277" font-size="12" fill="#8b6914" text-anchor="middle" font-style="italic">short-lived pass</text>
+  </g>
+
+  <!-- Step 3: Brother clicks (inbox back to brother, then to server) -->
+  <g font-family="Helvetica, Arial, sans-serif">
+    <line x1="1030" y1="330" x2="170" y2="330" stroke="#c9962c" stroke-width="2.5" marker-end="url(#sarr)"/>
+    <rect x="320" y="305" width="520" height="26" fill="#fff8e1" stroke="#c9962c" stroke-width="1" rx="4"/>
+    <text x="580" y="323" font-size="14" fill="#222" text-anchor="middle">3.  Brother opens inbox and taps the "Sign in" button in the email</text>
+  </g>
+
+  <!-- Step 4: Brother → server (click verifies link) -->
+  <g font-family="Helvetica, Arial, sans-serif">
+    <line x1="170" y1="400" x2="590" y2="400" stroke="#c9962c" stroke-width="2.5" marker-end="url(#sarr)"/>
+    <rect x="200" y="375" width="360" height="26" fill="#fff8e1" stroke="#c9962c" stroke-width="1" rx="4"/>
+    <text x="380" y="393" font-size="14" fill="#222" text-anchor="middle">4.  click delivers magic-link JWT back to server</text>
+  </g>
+
+  <!-- Step 5: Server → brother (session cookie) -->
+  <g font-family="Helvetica, Arial, sans-serif">
+    <line x1="590" y1="470" x2="170" y2="470" stroke="#c9962c" stroke-width="2.5" marker-end="url(#sarr)"/>
+    <rect x="200" y="445" width="360" height="26" fill="#fff8e1" stroke="#c9962c" stroke-width="1" rx="4"/>
+    <text x="380" y="463" font-size="14" fill="#222" text-anchor="middle">5.  server verifies, issues 30-day session cookie</text>
+    <text x="380" y="493" font-size="12" fill="#8b6914" text-anchor="middle" font-style="italic">the token of the pass</text>
+  </g>
+
+  <!-- Bottom caption -->
+  <rect x="80" y="540" width="1040" height="54" fill="#fff8e1" stroke="#c9962c" stroke-width="1" rx="6"/>
+  <text x="600" y="563" font-size="14" fill="#222" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">
+    Return visits within 30 days: the browser presents the cookie, the server verifies its signature, access granted.
+  </text>
+  <text x="600" y="582" font-size="13" fill="#5a4410" text-anchor="middle" font-style="italic" font-family="Helvetica, Arial, sans-serif">
+    httpOnly · sameSite=lax · secure · first-party only · contains only your email + expiry + signature
+  </text>
+</svg>

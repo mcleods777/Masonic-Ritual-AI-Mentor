@@ -106,6 +106,8 @@ you as you listen.
 
 Privacy is not an afterthought in this app. It is the design.
 
+![Diagram: what stays on your device versus what briefly transits the cloud](./diagrams/data-flow.png)
+
 ### What stays on your device, always
 
 - **The ritual text itself.** Encrypted with **AES-GCM** via the browser's
@@ -124,6 +126,8 @@ One small piece of data does stay on your device between visits: the
 sign-in cookie. Think of it as the lodge's **token of the pass** — the
 digital sign the app presents at the door each time you return, so you
 do not have to repeat the magic-link ceremony every visit.
+
+![Diagram: the five-step sign-in flow that issues the token of the pass](./diagrams/signin-flow.png)
 
 It contains exactly this:
 
