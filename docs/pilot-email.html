@@ -88,9 +88,41 @@
 
 <p>After the diff, a large language model (Llama 3.3 70B via Groq) generates a short spoken coaching response — brief, contextual, and streamed to you as you listen.</p>
 
-<h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">Encrypted by default, local by default</h3>
+<h2 style="font-family: Georgia, 'Times New Roman', serif; color: #8b6914; border-bottom: 1px solid #c9962c; padding-bottom: 6px; margin-top: 32px;">Your data — what leaves your device, and what doesn't</h2>
 
-<p>Your ritual file is encrypted with <strong>AES-GCM</strong> via the browser's Web Crypto API and stored in your device's IndexedDB. It never leaves your device unencrypted. The only things ever sent to a cloud service are short audio snippets (for Whisper) and short text snippets (for voice synthesis and feedback) — and Groq, Mistral, Google, and Deepgram all have no-retention policies covering those snippets.</p>
+<p>Privacy is not an afterthought in this app. It is the design.</p>
+
+<h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">What stays on your device, always</h3>
+
+<ul>
+  <li><strong>The ritual text itself.</strong> Encrypted with <strong>AES-GCM</strong> via the browser's Web Crypto API and stored in your device's local IndexedDB. Decrypted only in memory while you are practicing. Never written to disk unencrypted. <strong>Never sent to any server, at any time, for any reason.</strong></li>
+  <li><strong>Your password.</strong> Used to derive the decryption key right there in your browser. Never transmitted anywhere.</li>
+  <li><strong>Any voice samples you record</strong> for the voice-cloning feature. Kept locally in IndexedDB.</li>
+  <li><strong>Your progress, scores, and practice history.</strong> Local only. No analytics.</li>
+</ul>
+
+<h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">What briefly transits the cloud while you practice</h3>
+
+<p>Only these, only while you are actively rehearsing, and only as short ephemeral snippets:</p>
+
+<ul>
+  <li><strong>The audio of the line you just spoke</strong> — sent to Groq's Whisper service to transcribe. A few seconds of audio per line.</li>
+  <li><strong>The text of the line about to be spoken</strong> — sent to whichever voice engine you have selected (Voxtral, ElevenLabs, Google, or Deepgram) to synthesize the sound. A single sentence at a time.</li>
+  <li><strong>Your transcribed line and the expected line</strong> — sent to Groq's Llama service for the spoken coaching feedback.</li>
+</ul>
+
+<p>Each of these is a single round-trip per line, answered in under a second, and the cloud service does not keep it. All four vendors — <strong>Groq, Mistral, Google Cloud, and Deepgram</strong> — contractually guarantee no retention and no training on request data. No one at those companies sees or stores your ritual.</p>
+
+<h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">For complete on-device privacy</h3>
+
+<p>If you want zero cloud round-trips of any kind, switch to these settings on the rehearsal screen:</p>
+
+<ul>
+  <li><strong>Speech engine:</strong> <em>Browser</em> — uses your phone or computer's built-in speech recognition. Fully on-device.</li>
+  <li><strong>Voice engine:</strong> <em>Browser</em> — uses your phone or computer's built-in text-to-speech. Fully on-device.</li>
+</ul>
+
+<p>With these two selected, <strong>nothing — not audio, not text, not feedback — ever leaves your device.</strong> The voices are less natural and the recognition is a little less accurate, but the privacy guarantee is absolute.</p>
 
 <h2 style="font-family: Georgia, 'Times New Roman', serif; color: #8b6914; border-bottom: 1px solid #c9962c; padding-bottom: 6px; margin-top: 32px;">The pilot URL</h2>
 

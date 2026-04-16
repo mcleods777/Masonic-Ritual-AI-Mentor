@@ -102,14 +102,55 @@ After the diff, a large language model (Llama 3.3 70B via Groq) generates
 a short spoken coaching response — brief, contextual, and streamed to
 you as you listen.
 
-### Encrypted by default, local by default
+## Your data — what leaves your device, and what doesn't
 
-Your ritual file is encrypted with **AES-GCM** via the browser's Web
-Crypto API and stored in your device's IndexedDB. It never leaves your
-device unencrypted. The only things ever sent to a cloud service are
-short audio snippets (for Whisper) and short text snippets (for voice
-synthesis and feedback) — and Groq, Mistral, Google, and Deepgram all
-have no-retention policies covering those snippets.
+Privacy is not an afterthought in this app. It is the design.
+
+### What stays on your device, always
+
+- **The ritual text itself.** Encrypted with **AES-GCM** via the browser's
+  Web Crypto API and stored in your device's local IndexedDB. Decrypted
+  only in memory while you are practicing. Never written to disk
+  unencrypted. **Never sent to any server, at any time, for any reason.**
+- **Your password.** Used to derive the decryption key right there in
+  your browser. Never transmitted anywhere.
+- **Any voice samples you record** for the voice-cloning feature. Kept
+  locally in IndexedDB.
+- **Your progress, scores, and practice history.** Local only. No analytics.
+
+### What briefly transits the cloud while you practice
+
+Only these, only while you are actively rehearsing, and only as short
+ephemeral snippets:
+
+- **The audio of the line you just spoke** — sent to Groq's Whisper
+  service to transcribe. A few seconds of audio per line.
+- **The text of the line about to be spoken** — sent to whichever voice
+  engine you have selected (Voxtral, ElevenLabs, Google, or Deepgram) to
+  synthesize the sound. A single sentence at a time.
+- **Your transcribed line and the expected line** — sent to Groq's Llama
+  service for the spoken coaching feedback.
+
+Each of these is a single round-trip per line, answered in under a
+second, and the cloud service does not keep it. All four vendors — **Groq,
+Mistral, Google Cloud, and Deepgram** — contractually guarantee no
+retention and no training on request data. No one at those companies
+sees or stores your ritual.
+
+### For complete on-device privacy
+
+If you want zero cloud round-trips of any kind, switch to these settings
+on the rehearsal screen:
+
+- **Speech engine:** *Browser* — uses your phone or computer's built-in
+  speech recognition. Fully on-device.
+- **Voice engine:** *Browser* — uses your phone or computer's built-in
+  text-to-speech. Fully on-device.
+
+With these two selected, **nothing — not audio, not text, not feedback —
+ever leaves your device.** The voices are less natural and the
+recognition is a little less accurate, but the privacy guarantee is
+absolute.
 
 ## The pilot URL
 
