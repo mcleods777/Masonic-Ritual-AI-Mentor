@@ -128,8 +128,17 @@ Ritual files use the `.mram` (Masonic Ritual AI Mentor) encrypted format. Each f
 ### Building .mram Files
 
 ```bash
-npx tsx scripts/build-mram.ts <input.md> <output.mram> [passphrase]
+npx tsx scripts/build-mram.ts <input.md> <output.mram> [passphrase] [options]
 ```
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--expires <ISO-date>` | Hard expiration timestamp (e.g. `2026-12-31` or `2026-12-31T23:59:59Z`). After this moment the file will not decrypt, even with the correct passphrase. |
+| `--expires-in <duration>` | Relative expiration from build time. Supports `d` (days), `h` (hours), `m` (minutes): `90d`, `72h`, `45m`. |
+
+The expiration timestamp lives inside the encrypted payload and is covered by the AES-GCM auth tag, so it cannot be edited without the lodge passphrase. Expired files show a specific "request a fresh .mram file from your lodge" message on upload instead of a passphrase retry. Files built without an `--expires*` flag never expire — the feature is opt-in.
 
 Input format: a markdown file where each spoken line appears twice — cipher first, then plain:
 
