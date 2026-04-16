@@ -152,6 +152,27 @@ SW: * Bros. S. & J.D., p. t. s. y. t. a. p. a. M.
 SW: * Brothers Senior & Junior Deacons, proceed to satisfy yourselves that all present are Masons.
 ```
 
+### Rotating .mram Files (new passphrase or new expiry)
+
+When a .mram file expires or the lodge passphrase is being changed, `rotate-mram.ts` re-encrypts an existing file with a new passphrase and/or new expiry. It generates a fresh salt and IV every rotation.
+
+```bash
+npx tsx scripts/rotate-mram.ts <input.mram> <output.mram> [options]
+```
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--old-pass <pass>` | Current passphrase (prompted if omitted). |
+| `--new-pass <pass>` | New passphrase (prompted if omitted). |
+| `--expires <ISO-date>` | Set a new hard expiration timestamp. |
+| `--expires-in <duration>` | Set a new expiration relative to now: `90d`, `72h`, `45m`. |
+| `--no-expires` | Remove the `expiresAt` field entirely. |
+| `--keep-expires` | Keep the existing `expiresAt` value (default). |
+
+Exactly one expiry flag may be passed. Rotation intentionally bypasses the expiration check on read — reissuing an already-expired file is the main use case — and logs the previous expiry status so the operator sees what was unlocked. Input and output paths must differ so a crash mid-rotate cannot destroy the original.
+
 ---
 
 ## Tech Stack
