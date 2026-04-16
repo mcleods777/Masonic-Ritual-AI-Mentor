@@ -118,6 +118,40 @@ Privacy is not an afterthought in this app. It is the design.
   locally in IndexedDB.
 - **Your progress, scores, and practice history.** Local only. No analytics.
 
+### The sign-in cookie — the token of the pass
+
+One small piece of data does stay on your device between visits: the
+sign-in cookie. Think of it as the lodge's **token of the pass** — the
+digital sign the app presents at the door each time you return, so you
+do not have to repeat the magic-link ceremony every visit.
+
+It contains exactly this:
+
+- The email address you signed in with.
+- The time it was issued.
+- Its expiration (30 days from sign-in).
+- A cryptographic signature proving the pilot server issued it.
+
+Nothing else. No browsing history, no device fingerprint, no tracking
+ID, no analytics, no shadow profile. It is not a third-party cookie —
+it only exists on the pilot URL's own domain, and it is never shared
+with any advertiser, tracker, or outside service.
+
+Three technical safeguards keep it inert:
+
+- **`httpOnly`** — no JavaScript running in your browser can read it.
+  Only the pilot server sees it, only on requests to the pilot URL.
+- **`sameSite=lax`** — the cookie is not sent with requests originating
+  from other websites. A malicious page cannot trick your browser into
+  handing it over.
+- **`secure`** — it only travels over HTTPS, never in the clear.
+
+You can delete the cookie from your browser's settings at any time to
+sign yourself out. And if a brother ever loses a device, replying to
+this email lets me rotate the server's signing key — that instantly
+invalidates every outstanding token across the jurisdiction, the
+emergency kill-switch.
+
 ### What briefly transits the cloud while you practice
 
 Only these, only while you are actively rehearsing, and only as short
