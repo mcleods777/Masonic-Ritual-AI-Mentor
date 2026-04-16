@@ -33,24 +33,39 @@ themselves around the symbol as it moves.
 
 ![Masonic Ritual Mentor landing page](./install-guide-images/03-landing-desktop.png)
 
-That is not a gimmick. The page is a live demo of a brand-new open-source
-text layout standard called **Pretext**, released just days ago by an
-engineer at Midjourney. Pretext is the first practical way to get that
-kind of organic, obstacle-aware text flow on the open web, and our landing
-page is one of the earliest real-world uses of it outside the author's own
-demos.
+That is not a gimmick — and it is not something you have seen on a
+website before, because until now it could not be done. For the entire
+thirty-year history of the web, text has been trapped inside rectangles.
+Paragraphs wrap around the invisible edges of a box, full stop. A narrow
+CSS feature added around 2014 (`shape-outside`) let a paragraph hug the
+edge of *one* static image, but nothing more — no multiple obstacles, no
+moving obstacles, no real reflow.
 
-If you want the background, there's a short YouTube explainer on what
-Pretext is and why it matters:
+The page is a live demo of a brand-new open-source text layout standard
+called **Pretext**, released just days ago by an engineer at Midjourney.
+Pretext is the first practical way to get real, dynamic, multi-obstacle
+text reflow on the open web — text that genuinely recalculates its
+shape in real time as objects drift, resize, or appear. It unlocks an
+entire category of layout that was previously impossible outside of
+print: magazine-grade typography, interactive fiction, games with
+diegetic text, data-viz with inline narrative. Our landing page is one
+of the earliest real-world uses of it outside the author's own demos.
+
+Short YouTube explainer on what Pretext is and why it matters:
 
 https://youtu.be/CUAuy5SWJcw?si=0WRv_QF8yfhyaYKn
 
-And a write-up in VentureBeat:
+Write-up in VentureBeat:
 
 https://venturebeat.com/technology/midjourney-engineer-debuts-new-vibe-coded-open-source-standard-pretext-to
 
-I mention it because a few brothers have asked, "Why does the front page
-feel different from a normal website?" — that's why.
+Full transparency: no brother asked me to put this on the front page. I
+put it there as a flex. When I first read about Pretext, I wanted to
+see if I could get it running inside the app within the hour — and I
+was frankly amazed when I could. It has no bearing on the rehearsal
+feature itself. It is there because it is beautiful, it is new, and
+our lodge's pilot page gets to be one of the first places on the open
+web to show it off.
 
 ## Under the hood — why this app is unique
 
@@ -101,6 +116,34 @@ expected text character-by-character. It runs five layers:
 After the diff, a large language model (Llama 3.3 70B via Groq) generates
 a short spoken coaching response — brief, contextual, and streamed to
 you as you listen.
+
+### Coming soon — expressive TTS from Google and Microsoft
+
+Two major new voice models land in the six-engine dropdown as the pilot
+progresses. Both fix the one thing today's text-to-speech still gets
+wrong for ritual work: *delivery.* A flat, evenly-paced reading is fine
+for a shopping list — it is not fine for the gravitas of an obligation
+or the cadence of a lecture.
+
+- **Google Gemini 3.1 Flash TTS** (released April 2026). It accepts
+  inline *audio tags* — short bracketed directions like `[slow, solemn]`
+  or `[whispered]` — that steer style, pace, and emotion at any point
+  mid-sentence. That means the ritual text itself can pre-mark the
+  cadence shifts the work already calls for, and the voice engine will
+  honor them. It currently sits at the top of the Artificial Analysis
+  TTS quality leaderboard (Elo 1,211), supports 70+ languages, and
+  watermarks every clip with SynthID.
+- **Microsoft Azure Dragon HD / Neural HD 2.5** (rolling out early-to-mid
+  2026). Microsoft's new HD line is LLM-based: the model reads the
+  *meaning* of each line and adjusts emotional tone automatically —
+  measured pause at a solemn passage, lift at a welcome, weight at a
+  charge — without any manual markup at all. A unified model covering
+  700+ voices, with wider availability and a significant price drop
+  arriving in March 2026.
+
+Both slot into the existing six-engine architecture. You will simply
+see two new options appear in the voice-engine dropdown during the
+pilot, and the ritual will start to *sound* like ritual.
 
 ## Your data — what leaves your device, and what doesn't
 
