@@ -8,9 +8,6 @@
 > **To send as plain text:** copy the body below. The Markdown image
 > references render correctly when reading this file on GitHub, but
 > Gmail will not render them — use the HTML version for that.
->
-> Either way, replace `{{pilot-url}}` with the current pilot URL and
-> `{{Your name}}` with your name before sending.
 
 **Subject:** Masonic Ritual Mentor — your pilot invitation
 
@@ -57,7 +54,7 @@ feel different from a normal website?" — that's why.
 
 ## The pilot URL
 
-> **{{pilot-url}}**
+> **https://masonic-ritual-ai-mentor.vercel.app**
 
 Please keep this address inside the pilot group.
 
@@ -202,5 +199,5 @@ you through any of these steps by phone.
 
 Sincerely and fraternally,
 
-{{Your name}}
+Shannon McLeod
 Pilot Lead
