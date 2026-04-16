@@ -18,13 +18,6 @@ missed.
 Everything runs privately. Your ritual file is encrypted, decrypted on your
 own device, and never stored on a server.
 
-## A short video walkthrough
-
-Before you install, I'd like you to watch this short walkthrough so the app
-makes sense when you first open it:
-
-https://youtu.be/CUAuy5SWJcw?si=0WRv_QF8yfhyaYKn
-
 ## About the front page — why it looks the way it does
 
 When you open the pilot URL, the first thing you see is a dark landing
@@ -39,7 +32,12 @@ kind of organic, obstacle-aware text flow on the open web, and our landing
 page is one of the earliest real-world uses of it outside the author's own
 demos.
 
-There's a write-up in VentureBeat if you're curious about the background:
+If you want the background, there's a short YouTube explainer on what
+Pretext is and why it matters:
+
+https://youtu.be/CUAuy5SWJcw?si=0WRv_QF8yfhyaYKn
+
+And a write-up in VentureBeat:
 
 https://venturebeat.com/technology/midjourney-engineer-debuts-new-vibe-coded-open-source-standard-pretext-to
 
