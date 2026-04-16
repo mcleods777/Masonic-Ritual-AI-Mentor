@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 760" font-family="Georgia, 'Times New Roman', serif">
+  <!-- background -->
+  <rect width="1200" height="760" fill="#faf6ed"/>
+
+  <!-- title -->
+  <text x="600" y="50" font-size="30" font-weight="bold" fill="#5a4410" text-anchor="middle">
+    Your data — what stays, what briefly transits
+  </text>
+  <line x1="280" y1="66" x2="920" y2="66" stroke="#c9962c" stroke-width="1.5"/>
+
+  <!-- Left side: "Your device" box (dashed gold) -->
+  <rect x="60" y="110" width="420" height="560" fill="#ffffff" stroke="#c9962c" stroke-width="3" stroke-dasharray="8 6" rx="10"/>
+  <text x="270" y="148" font-size="22" font-weight="bold" fill="#8b6914" text-anchor="middle">YOUR DEVICE</text>
+  <text x="270" y="172" font-size="14" fill="#8b6914" text-anchor="middle" font-style="italic">phone or computer</text>
+
+  <!-- Items that stay on device -->
+  <g font-family="Helvetica, Arial, sans-serif">
+    <rect x="100" y="200" width="340" height="60" fill="#fff8e1" stroke="#c9962c" stroke-width="1" rx="6"/>
+    <text x="270" y="224" font-size="15" font-weight="bold" fill="#222" text-anchor="middle">Ritual text (encrypted, AES-GCM)</text>
+    <text x="270" y="244" font-size="12" fill="#5a5a5a" text-anchor="middle">decrypted only in browser memory</text>
+
+    <rect x="100" y="280" width="340" height="50" fill="#fff8e1" stroke="#c9962c" stroke-width="1" rx="6"/>
+    <text x="270" y="311" font-size="15" font-weight="bold" fill="#222" text-anchor="middle">Your password</text>
+
+    <rect x="100" y="350" width="340" height="50" fill="#fff8e1" stroke="#c9962c" stroke-width="1" rx="6"/>
+    <text x="270" y="381" font-size="15" font-weight="bold" fill="#222" text-anchor="middle">Recorded voice samples</text>
+
+    <rect x="100" y="420" width="340" height="50" fill="#fff8e1" stroke="#c9962c" stroke-width="1" rx="6"/>
+    <text x="270" y="451" font-size="15" font-weight="bold" fill="#222" text-anchor="middle">Progress, scores, practice history</text>
+
+    <rect x="100" y="490" width="340" height="50" fill="#fff8e1" stroke="#c9962c" stroke-width="1" rx="6"/>
+    <text x="270" y="521" font-size="15" font-weight="bold" fill="#222" text-anchor="middle">The sign-in cookie (token of the pass)</text>
+  </g>
+
+  <!-- "Never leaves, ever" callout -->
+  <text x="270" y="595" font-size="17" font-weight="bold" fill="#8b6914" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif">Never leaves, ever</text>
+  <text x="270" y="620" font-size="13" fill="#5a4410" text-anchor="middle" font-style="italic">not to any server, not to any vendor</text>
+
+  <!-- Right side: three cloud service boxes -->
+  <g font-family="Helvetica, Arial, sans-serif">
+    <!-- Box 1: Whisper / Groq -->
+    <rect x="740" y="150" width="400" height="130" fill="#ffffff" stroke="#8b6914" stroke-width="2" rx="8"/>
+    <text x="940" y="180" font-size="17" font-weight="bold" fill="#222" text-anchor="middle">Groq · Whisper-large-v3</text>
+    <text x="940" y="204" font-size="13" fill="#5a5a5a" text-anchor="middle">speech recognition</text>
+    <text x="940" y="242" font-size="14" fill="#222" text-anchor="middle">audio of one spoken line → transcript</text>
+    <text x="940" y="262" font-size="12" fill="#8b6914" text-anchor="middle" font-style="italic">per line, one round-trip, no retention</text>
+
+    <!-- Box 2: TTS -->
+    <rect x="740" y="320" width="400" height="130" fill="#ffffff" stroke="#8b6914" stroke-width="2" rx="8"/>
+    <text x="940" y="350" font-size="17" font-weight="bold" fill="#222" text-anchor="middle">Selected voice engine</text>
+    <text x="940" y="374" font-size="13" fill="#5a5a5a" text-anchor="middle">Voxtral / ElevenLabs / Google / Deepgram</text>
+    <text x="940" y="412" font-size="14" fill="#222" text-anchor="middle">text of one line → synthesized audio</text>
+    <text x="940" y="432" font-size="12" fill="#8b6914" text-anchor="middle" font-style="italic">per line, one round-trip, no retention</text>
+
+    <!-- Box 3: Llama / Groq -->
+    <rect x="740" y="490" width="400" height="130" fill="#ffffff" stroke="#8b6914" stroke-width="2" rx="8"/>
+    <text x="940" y="520" font-size="17" font-weight="bold" fill="#222" text-anchor="middle">Groq · Llama 3.3 70B</text>
+    <text x="940" y="544" font-size="13" fill="#5a5a5a" text-anchor="middle">spoken coaching feedback</text>
+    <text x="940" y="582" font-size="14" fill="#222" text-anchor="middle">your line + expected line → critique</text>
+    <text x="940" y="602" font-size="12" fill="#8b6914" text-anchor="middle" font-style="italic">per line, one round-trip, no retention</text>
+  </g>
+
+  <!-- Arrows from device to cloud (bidirectional, labeled "while practicing") -->
+  <defs>
+    <marker id="arrR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#c9962c"/>
+    </marker>
+    <marker id="arrL" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M10,0 L0,5 L10,10 Z" fill="#c9962c"/>
+    </marker>
+  </defs>
+
+  <!-- Arrow to box 1 -->
+  <line x1="495" y1="210" x2="735" y2="210" stroke="#c9962c" stroke-width="2.5" marker-end="url(#arrR)"/>
+  <line x1="495" y1="230" x2="735" y2="230" stroke="#c9962c" stroke-width="2.5" marker-start="url(#arrL)"/>
+
+  <!-- Arrow to box 2 -->
+  <line x1="495" y1="380" x2="735" y2="380" stroke="#c9962c" stroke-width="2.5" marker-end="url(#arrR)"/>
+  <line x1="495" y1="400" x2="735" y2="400" stroke="#c9962c" stroke-width="2.5" marker-start="url(#arrL)"/>
+
+  <!-- Arrow to box 3 -->
+  <line x1="495" y1="550" x2="735" y2="550" stroke="#c9962c" stroke-width="2.5" marker-end="url(#arrR)"/>
+  <line x1="495" y1="570" x2="735" y2="570" stroke="#c9962c" stroke-width="2.5" marker-start="url(#arrL)"/>
+
+  <!-- Footer note -->
+  <text x="600" y="715" font-size="13" fill="#5a4410" text-anchor="middle" font-style="italic" font-family="Helvetica, Arial, sans-serif">
+    Switch speech + voice to "Browser" in settings and the arrows above disappear — nothing leaves the device at all.
+  </text>
+</svg>

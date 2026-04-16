@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Masonic Ritual Mentor — pilot invitation email</title>
+</head>
+<body style="margin: 0; padding: 24px; background: #f5f3ee; font-family: Georgia, 'Times New Roman', serif; color: #222; line-height: 1.55;">
+
+<!-- ────────────────────────────────────────────────────────────────────
+     Non-copied usage note. This banner is outside the "copy-this-part"
+     block below. Don't include it in the selection when you paste.
+     ──────────────────────────────────────────────────────────────────── -->
+<div style="max-width: 680px; margin: 0 auto 24px; background: #fff8e1; border-left: 4px solid #c9962c; padding: 14px 18px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; color: #5a4410;">
+  <strong style="font-size: 15px;">How to send this</strong>
+  <ol style="margin: 8px 0 0; padding-left: 20px;">
+    <li>Click anywhere inside the beige bordered box below.</li>
+    <li>Press <strong>Ctrl/Cmd + A</strong> to select the body, then <strong>Ctrl/Cmd + C</strong> to copy.</li>
+    <li>In Gmail, click <strong>Compose</strong> and paste into the message body. The six screenshots come through automatically.</li>
+    <li>Subject line: <em>Masonic Ritual Mentor — your pilot invitation</em></li>
+  </ol>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────────────
+     BEGIN COPYABLE EMAIL BODY
+     ──────────────────────────────────────────────────────────────────── -->
+<div style="max-width: 680px; margin: 0 auto; background: #ffffff; border: 1px solid #e0d9c8; padding: 32px 36px; color: #222;">
+
+<p>Brother,</p>
+
+<p>You're being invited into the pilot for <strong>Masonic Ritual Mentor</strong>, an app that lets you practice your ritual work from memory on your phone or computer. You speak your lines, the app reads the other officers' parts in distinct voices, and you get instant word-by-word feedback on what you missed.</p>
+
+<p>Everything runs privately. Your ritual file is encrypted, decrypted on your own device, and never stored on a server.</p>
+
+<h2 style="font-family: Georgia, 'Times New Roman', serif; color: #8b6914; border-bottom: 1px solid #c9962c; padding-bottom: 6px; margin-top: 32px;">About the front page — why it looks the way it does</h2>
+
+<p>When you open the pilot URL, the first thing you see is a dark landing page with a glowing square-and-compass that drifts across the screen while several paragraphs of text flow around it — the words genuinely <em>reshape</em> themselves around the symbol as it moves.</p>
+
+<p style="text-align: center; margin: 20px 0;">
+  <img src="https://raw.githubusercontent.com/mcleods777/Masonic-Ritual-AI-Mentor/main/docs/install-guide-images/03-landing-desktop.png" alt="Masonic Ritual Mentor landing page" width="600" style="max-width: 100%; height: auto; border: 1px solid #ddd;">
+</p>
+
+<p>That is not a gimmick. The page is a live demo of a brand-new open-source text layout standard called <strong>Pretext</strong>, released just days ago by an engineer at Midjourney. Pretext is the first practical way to get that kind of organic, obstacle-aware text flow on the open web, and our landing page is one of the earliest real-world uses of it outside the author's own demos.</p>
+
+<p>If you want the background, there's a short YouTube explainer on what Pretext is and why it matters:</p>
+
+<p><a href="https://youtu.be/CUAuy5SWJcw?si=0WRv_QF8yfhyaYKn" style="color: #c9962c;">https://youtu.be/CUAuy5SWJcw?si=0WRv_QF8yfhyaYKn</a></p>
+
+<p>And a write-up in VentureBeat:</p>
+
+<p><a href="https://venturebeat.com/technology/midjourney-engineer-debuts-new-vibe-coded-open-source-standard-pretext-to" style="color: #c9962c; word-break: break-all;">https://venturebeat.com/technology/midjourney-engineer-debuts-new-vibe-coded-open-source-standard-pretext-to</a></p>
+
+<p>I mention it because a few brothers have asked, "Why does the front page feel different from a normal website?" — that's why.</p>
+
+<h2 style="font-family: Georgia, 'Times New Roman', serif; color: #8b6914; border-bottom: 1px solid #c9962c; padding-bottom: 6px; margin-top: 32px;">Under the hood — why this app is unique</h2>
+
+<p>Most dictation tools stumble the moment you use Masonic vocabulary. This one was built for it. A quick summary of what's actually running.</p>
+
+<h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">Speech recognition tuned for ritual</h3>
+
+<p>When you speak, the app sends your audio to <strong>OpenAI Whisper-large-v3</strong> (running on Groq's hardware for near-instant response) with a vocabulary hint that primes the model for ritual terms — <em>Worshipful Master</em>, <em>Tyler</em>, <em>Jachin</em>, <em>Boaz</em>, <em>Fellowcraft</em>, and so on. If Whisper isn't reachable, it falls back automatically to your browser's built-in recognition.</p>
+
+<h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">Six voice engines, including voice cloning</h3>
+
+<p>Any of six text-to-speech engines can read the ritual aloud:</p>
+
+<ul>
+  <li><strong>Mistral Voxtral</strong> (default) — supports <strong>zero-shot voice cloning</strong>. Record a short sample of a brother speaking and the app will read <em>his</em> officer's lines in <em>his</em> voice. No paid "voice clone" tier required.</li>
+  <li><strong>ElevenLabs</strong> — twelve distinct male voices, one per officer chair.</li>
+  <li><strong>Google Cloud Neural2</strong> — per-role voice, pitch, and rate tuning so the Worshipful Master sounds deeper than the Tyler.</li>
+  <li><strong>Deepgram Aura-2</strong> — seven mythologically-named voices (Zeus, Orion, Arcas, and so on).</li>
+  <li><strong>Kokoro</strong> — a self-hosted option with no cloud dependency.</li>
+  <li><strong>Browser built-in</strong> — always works, even offline.</li>
+</ul>
+
+<p>If one cloud engine is down, the app automatically falls through to the next in the chain.</p>
+
+<h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">Five-layer feedback, not just text matching</h3>
+
+<p>When you finish a line, the app doesn't just compare your words to the expected text character-by-character. It runs five layers:</p>
+
+<ol>
+  <li><strong>Normalization</strong> — lowercase, expand contractions, strip filler words.</li>
+  <li><strong>Word-level diff.</strong></li>
+  <li><strong>Phonetic matching</strong> — Double Metaphone plus a Masonic alias map, so <em>WM</em> and <em>Worshipful Master</em> count as the same thing.</li>
+  <li><strong>Fuzzy tolerance</strong> — small typos or single-edit slips are forgiven.</li>
+  <li><strong>Scoring</strong> — an accuracy percentage and a highlight of exactly which words gave you trouble.</li>
+</ol>
+
+<p>After the diff, a large language model (Llama 3.3 70B via Groq) generates a short spoken coaching response — brief, contextual, and streamed to you as you listen.</p>
+
+<h2 style="font-family: Georgia, 'Times New Roman', serif; color: #8b6914; border-bottom: 1px solid #c9962c; padding-bottom: 6px; margin-top: 32px;">Your data — what leaves your device, and what doesn't</h2>
+
+<p>Privacy is not an afterthought in this app. It is the design.</p>
+
+<p style="text-align: center; margin: 20px 0;">
+  <img src="https://raw.githubusercontent.com/mcleods777/Masonic-Ritual-AI-Mentor/main/docs/diagrams/data-flow.png" alt="Diagram: what stays on your device versus what briefly transits the cloud" width="600" style="max-width: 100%; height: auto; border: 1px solid #e0d9c8;">
+</p>
+
+<h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">What stays on your device, always</h3>
+
+<ul>
+  <li><strong>The ritual text itself.</strong> Encrypted with <strong>AES-GCM</strong> via the browser's Web Crypto API and stored in your device's local IndexedDB. Decrypted only in memory while you are practicing. Never written to disk unencrypted. <strong>Never sent to any server, at any time, for any reason.</strong></li>
+  <li><strong>Your password.</strong> Used to derive the decryption key right there in your browser. Never transmitted anywhere.</li>
+  <li><strong>Any voice samples you record</strong> for the voice-cloning feature. Kept locally in IndexedDB.</li>
+  <li><strong>Your progress, scores, and practice history.</strong> Local only. No analytics.</li>
+</ul>
+
+<h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">The sign-in cookie — the token of the pass</h3>
+
+<p>One small piece of data does stay on your device between visits: the sign-in cookie. Think of it as the lodge's <strong>token of the pass</strong> — the digital sign the app presents at the door each time you return, so you do not have to repeat the magic-link ceremony every visit.</p>
+
+<p style="text-align: center; margin: 20px 0;">
+  <img src="https://raw.githubusercontent.com/mcleods777/Masonic-Ritual-AI-Mentor/main/docs/diagrams/signin-flow.png" alt="Diagram: the five-step sign-in flow that issues the token of the pass" width="600" style="max-width: 100%; height: auto; border: 1px solid #e0d9c8;">
+</p>
+
+<p>It contains exactly this:</p>
+
+<ul>
+  <li>The email address you signed in with.</li>
+  <li>The time it was issued.</li>
+  <li>Its expiration (30 days from sign-in).</li>
+  <li>A cryptographic signature proving the pilot server issued it.</li>
+</ul>
+
+<p>Nothing else. No browsing history, no device fingerprint, no tracking ID, no analytics, no shadow profile. It is not a third-party cookie — it only exists on the pilot URL's own domain, and it is never shared with any advertiser, tracker, or outside service.</p>
+
+<p>Three technical safeguards keep it inert:</p>
+
+<ul>
+  <li><strong><code>httpOnly</code></strong> — no JavaScript running in your browser can read it. Only the pilot server sees it, only on requests to the pilot URL.</li>
+  <li><strong><code>sameSite=lax</code></strong> — the cookie is not sent with requests originating from other websites. A malicious page cannot trick your browser into handing it over.</li>
+  <li><strong><code>secure</code></strong> — it only travels over HTTPS, never in the clear.</li>
+</ul>
+
+<p>You can delete the cookie from your browser's settings at any time to sign yourself out. And if a brother ever loses a device, replying to this email lets me rotate the server's signing key — that instantly invalidates every outstanding token across the jurisdiction, the emergency kill-switch.</p>
+
+<h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">What briefly transits the cloud while you practice</h3>
+
+<p>Only these, only while you are actively rehearsing, and only as short ephemeral snippets:</p>
+
+<ul>
+  <li><strong>The audio of the line you just spoke</strong> — sent to Groq's Whisper service to transcribe. A few seconds of audio per line.</li>
+  <li><strong>The text of the line about to be spoken</strong> — sent to whichever voice engine you have selected (Voxtral, ElevenLabs, Google, or Deepgram) to synthesize the sound. A single sentence at a time.</li>
+  <li><strong>Your transcribed line and the expected line</strong> — sent to Groq's Llama service for the spoken coaching feedback.</li>
+</ul>
+
+<p>Each of these is a single round-trip per line, answered in under a second, and the cloud service does not keep it. All four vendors — <strong>Groq, Mistral, Google Cloud, and Deepgram</strong> — contractually guarantee no retention and no training on request data. No one at those companies sees or stores your ritual.</p>
+
+<h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">For complete on-device privacy</h3>
+
+<p>If you want zero cloud round-trips of any kind, switch to these settings on the rehearsal screen:</p>
+
+<ul>
+  <li><strong>Speech engine:</strong> <em>Browser</em> — uses your phone or computer's built-in speech recognition. Fully on-device.</li>
+  <li><strong>Voice engine:</strong> <em>Browser</em> — uses your phone or computer's built-in text-to-speech. Fully on-device.</li>
+</ul>
+
+<p>With these two selected, <strong>nothing — not audio, not text, not feedback — ever leaves your device.</strong> The voices are less natural and the recognition is a little less accurate, but the privacy guarantee is absolute.</p>
+
+<h2 style="font-family: Georgia, 'Times New Roman', serif; color: #8b6914; border-bottom: 1px solid #c9962c; padding-bottom: 6px; margin-top: 32px;">See the code for yourself</h2>
+
+<p>Everything I have described above is verifiable because the entire app is <strong>open source</strong>. The full source code lives publicly on GitHub:</p>
+
+<p><a href="https://github.com/mcleods777/Masonic-Ritual-AI-Mentor" style="color: #c9962c; font-weight: bold;">https://github.com/mcleods777/Masonic-Ritual-AI-Mentor</a></p>
+
+<h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">What is GitHub?</h3>
+
+<p>GitHub is the standard public website where software developers publish the source code for their programs. Think of it as a library shelf where anyone in the world can pull down the "blueprints" of an app and read them, line by line. If you are not a programmer it will look like a lot of unfamiliar text — but the important point is that it is <em>there</em>, not hidden behind a closed door.</p>
+
+<p>Why that matters for this pilot:</p>
+
+<ul>
+  <li><strong>The claims in this email are checkable.</strong> Any tech-savvy brother — or any computer-science student he knows — can verify for himself that the ritual file is encrypted, that the sign-in cookie contains only what I said it does, and that no tracking or analytics pings exist anywhere in the code.</li>
+  <li><strong>Nothing can be hidden.</strong> Every change to the app is logged publicly with the author's name, the date, and the exact lines of code that changed. There is no private version of the app doing something different from the public one.</li>
+  <li><strong>The documents you are reading came from there.</strong> Both this email and the install guide live in the repository's <code>docs/</code> folder and can be read on GitHub directly.</li>
+</ul>
+
+<p>If you want to poke around, start with the <strong>README</strong> at the top of the repository page — that is the plain-English summary — and the <strong><code>docs/</code> folder</strong>, where the written materials live.</p>
+
+<h2 style="font-family: Georgia, 'Times New Roman', serif; color: #8b6914; border-bottom: 1px solid #c9962c; padding-bottom: 6px; margin-top: 32px;">The pilot URL</h2>
+
+<blockquote style="border-left: 4px solid #c9962c; padding: 10px 16px; margin: 16px 0; background: #faf6ed; font-size: 1.05em;"><strong><a href="https://masonic-ritual-ai-mentor.vercel.app" style="color: #8b6914; text-decoration: none;">https://masonic-ritual-ai-mentor.vercel.app</a></strong></blockquote>
+
+<p>Please keep this address inside the pilot group.</p>
+
+<hr style="border: none; border-top: 1px solid #d9cfb5; margin: 32px 0;">
+
+<h1 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 0;">Install guide</h1>
+
+<h2 style="font-family: Georgia, 'Times New Roman', serif; color: #8b6914; border-bottom: 1px solid #c9962c; padding-bottom: 6px;">Before you start — what you'll need</h2>
+
+<ol>
+  <li><strong>Your lodge email address.</strong> This is the email I've added to the approved list. If you're not sure whether you're on the list, reply to this email.</li>
+  <li><strong>Your encrypted ritual file (the <code>.mram</code> file).</strong> I'll send this to you in a separate email, along with the password. It is not distributed through the app itself.</li>
+  <li><strong>The password for your ritual file.</strong> Memorize it. Do not write it down next to the file.</li>
+  <li><strong>The pilot URL above.</strong></li>
+</ol>
+
+<h2 style="font-family: Georgia, 'Times New Roman', serif; color: #8b6914; border-bottom: 1px solid #c9962c; padding-bottom: 6px; margin-top: 32px;">Part 1 — Sign in (do this first on every device)</h2>
+
+<ol>
+  <li style="margin-bottom: 16px;">
+    Open the pilot URL in your web browser. You'll land on the sign-in page:
+    <p style="text-align: center; margin: 12px 0;">
+      <img src="https://raw.githubusercontent.com/mcleods777/Masonic-Ritual-AI-Mentor/main/docs/install-guide-images/01-signin-page.png" alt="Sign-in page" width="600" style="max-width: 100%; height: auto; border: 1px solid #ddd;">
+    </p>
+  </li>
+  <li style="margin-bottom: 16px;">Type your lodge email in the box and tap <strong>SEND SIGN-IN LINK</strong>.</li>
+  <li style="margin-bottom: 16px;">
+    You'll see a confirmation message:
+    <p style="text-align: center; margin: 12px 0;">
+      <img src="https://raw.githubusercontent.com/mcleods777/Masonic-Ritual-AI-Mentor/main/docs/install-guide-images/05-check-inbox.png" alt="Check your inbox confirmation" width="600" style="max-width: 100%; height: auto; border: 1px solid #ddd;">
+    </p>
+    Check your inbox. Within a minute or so you should receive a message with subject <strong>"Your sign-in link."</strong> Check spam if you don't see it.
+  </li>
+  <li style="margin-bottom: 16px;">Open the email and tap the amber <strong>Sign in</strong> button inside it. This opens the app with you signed in.</li>
+  <li style="margin-bottom: 16px;">You are now on the landing page (shown above). Tap <strong>ENTER THE LODGE</strong>.</li>
+</ol>
+
+<p>The sign-in remembers you for 30 days on this device. The link inside the email is only good for 24 hours — if you wait longer, just request a new one.</p>
+
+<h2 style="font-family: Georgia, 'Times New Roman', serif; color: #8b6914; border-bottom: 1px solid #c9962c; padding-bottom: 6px; margin-top: 32px;">Part 2 — Install as an app (recommended but optional)</h2>
+
+<p>Once signed in, you can install the site as an app on your phone or computer so it gets an icon on your home screen and opens in its own window like a native app. You don't <em>have</em> to install — the site works in any browser tab — but on the phone especially, installing is nicer.</p>
+
+<h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">iPhone (Safari)</h3>
+
+<p>On mobile, the landing page looks like this:</p>
+<p style="text-align: center; margin: 12px 0;">
+  <img src="https://raw.githubusercontent.com/mcleods777/Masonic-Ritual-AI-Mentor/main/docs/install-guide-images/04-landing-mobile.png" alt="Landing page on iPhone" width="360" style="max-width: 100%; height: auto; border: 1px solid #ddd;">
+</p>
+
+<ol>
+  <li>On the landing page, tap the <strong>Share</strong> button (square with an arrow pointing up) at the bottom of Safari.</li>
+  <li>Scroll down and tap <strong>Add to Home Screen</strong>.</li>
+  <li>Confirm the name and tap <strong>Add</strong>.</li>
+  <li>Open <strong>Ritual Mentor</strong> from your Home Screen.</li>
+</ol>
+
+<h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">Android (Chrome or Edge)</h3>
+
+<ol>
+  <li>Tap the <strong>⋮</strong> menu in the top right.</li>
+  <li>Tap <strong>Install app</strong> (or <strong>Add to Home screen</strong> — wording varies).</li>
+  <li>Confirm <strong>Install</strong>.</li>
+</ol>
+
+<h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">Desktop — Microsoft Edge</h3>
+
+<ol>
+  <li>Click <strong>⋯</strong> → <strong>Apps</strong> → <strong>Install this site as an app</strong>. Confirm <strong>Install</strong>.</li>
+</ol>
+
+<h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">Desktop — Google Chrome</h3>
+
+<ol>
+  <li>Look at the right end of the address bar for a small monitor-with-arrow icon and click it; or</li>
+  <li><strong>⋮</strong> menu → <strong>Cast, save, and share</strong> → <strong>Install page as app</strong> (wording varies by Chrome version).</li>
+</ol>
+
+<h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">Desktop — Safari (Mac)</h3>
+
+<ol>
+  <li><strong>File → Add to Dock</strong>. Confirm <strong>Add</strong>.</li>
+</ol>
+
+<h2 style="font-family: Georgia, 'Times New Roman', serif; color: #8b6914; border-bottom: 1px solid #c9962c; padding-bottom: 6px; margin-top: 32px;">Part 3 — Load your ritual</h2>
+
+<ol>
+  <li>In the app, go to the <strong>Upload</strong> screen.</li>
+  <li>Select your encrypted <code>.mram</code> file.</li>
+  <li>Enter the password when prompted. The file decrypts on your device and is never sent to any server.</li>
+  <li>
+    You're now on the <strong>Practice</strong> screen. Until a ritual is loaded, it looks like this:
+    <p style="text-align: center; margin: 12px 0;">
+      <img src="https://raw.githubusercontent.com/mcleods777/Masonic-Ritual-AI-Mentor/main/docs/install-guide-images/06-practice-desktop.png" alt="Practice screen, no ritual loaded" width="600" style="max-width: 100%; height: auto; border: 1px solid #ddd;">
+    </p>
+    After you load the ritual, select a role, press the microphone button, and begin reciting.
+  </li>
+</ol>
+
+<p>Your ritual file stays on this device. To use the app on a second device, you load the <code>.mram</code> file there too.</p>
+
+<h2 style="font-family: Georgia, 'Times New Roman', serif; color: #8b6914; border-bottom: 1px solid #c9962c; padding-bottom: 6px; margin-top: 32px;">Privacy — how the app handles the work</h2>
+
+<ul>
+  <li>Your ritual file is encrypted. Without the password, it cannot be read.</li>
+  <li>Decryption happens in your browser, on your device. The server never sees the decrypted ritual.</li>
+  <li>The app never stores your ritual on any server, ever.</li>
+  <li>When the app reads lines aloud or evaluates what you've said, small pieces of text and audio are sent briefly to voice/AI services (Voxtral, Google, Deepgram, Groq). These services have no-retention policies — they do not save or train on the data.</li>
+</ul>
+
+<h2 style="font-family: Georgia, 'Times New Roman', serif; color: #8b6914; border-bottom: 1px solid #c9962c; padding-bottom: 6px; margin-top: 32px;">Troubleshooting</h2>
+
+<p><strong>I didn't get the sign-in email.</strong> Wait two minutes, check spam/promotions. If you use iCloud Private Relay on iPhone, try disabling it or use your real address. If five minutes pass with nothing, reply to this email — your address may not be on the approved list yet.</p>
+
+<p><strong>"Invalid link."</strong> Sign-in links expire in 24 hours. Request a new one.</p>
+
+<p><strong>No Install option.</strong> Some browser versions don't offer it. The app works fine in a plain browser tab — installation is optional.</p>
+
+<p><strong>Ritual file won't decrypt.</strong> Check the password carefully (it's case-sensitive). If the file itself is corrupted, I'll re-send.</p>
+
+<p><strong>AI voice or feedback isn't working.</strong> Try a different voice engine from the dropdown at the top of the rehearsal screen. If none of the cloud engines work, fall back to the <strong>Browser</strong> voice — it's less natural but always works.</p>
+
+<hr style="border: none; border-top: 1px solid #d9cfb5; margin: 32px 0;">
+
+<p>Questions of any kind — reply to this email or call me directly. I can add your email to the approved list, resend your ritual file, or walk you through any of these steps by phone.</p>
+
+<p>Sincerely and fraternally,</p>
+
+<p>
+  <strong>Shannon McLeod</strong><br>
+  Pilot Lead
+</p>
+
+</div>
+<!-- END COPYABLE EMAIL BODY -->
+
+</body>
+</html>
