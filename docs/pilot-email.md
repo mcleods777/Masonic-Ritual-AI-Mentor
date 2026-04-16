@@ -62,9 +62,9 @@ What follows is the full install guide. It's also available in the repo at
 1. **Your lodge email address.** This is the email I've added to the
    approved list. If you're not sure whether you're on the list, reply to
    this email.
-2. **Your encrypted ritual file (the `.mram` file).** You should have
-   received this separately (USB stick, direct message, or whatever
-   channel our lodge uses). It is not distributed through this app.
+2. **Your encrypted ritual file (the `.mram` file).** I'll send this to
+   you in a separate email, along with the password. It is not
+   distributed through the app itself.
 3. **The password for your ritual file.** Memorize it. Do not write it
    down next to the file.
 4. **The pilot URL above.**
