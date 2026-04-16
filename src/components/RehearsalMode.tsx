@@ -830,12 +830,12 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
           {selectedRole && (
             <div className="mt-6 space-y-4">
               {/* STT engine selector */}
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span className="text-xs text-zinc-500 uppercase tracking-wide">Voice Engine:</span>
                 <div className="flex rounded-lg border border-zinc-700 overflow-hidden">
                   <button
                     onClick={() => setSTTProvider("browser")}
-                    className={`px-4 py-2 text-xs font-medium transition-colors ${sttProvider === "browser"
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${sttProvider === "browser"
                       ? "bg-amber-600 text-white"
                       : "bg-zinc-800 text-zinc-400 hover:text-zinc-200"
                       }`}
@@ -844,7 +844,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
                   </button>
                   <button
                     onClick={() => setSTTProvider("whisper")}
-                    className={`px-4 py-2 text-xs font-medium transition-colors ${sttProvider === "whisper"
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${sttProvider === "whisper"
                       ? "bg-amber-600 text-white"
                       : "bg-zinc-800 text-zinc-400 hover:text-zinc-200"
                       }`}
@@ -852,7 +852,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
                     Whisper (Groq)
                   </button>
                 </div>
-                <span className="text-xs text-zinc-600">
+                <span className="text-xs text-zinc-600 basis-full md:basis-auto">
                   {sttProvider === "whisper"
                     ? "Higher accuracy, Masonic vocabulary hints"
                     : "Free, real-time, browser-native"}
