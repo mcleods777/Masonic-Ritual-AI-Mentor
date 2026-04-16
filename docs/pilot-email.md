@@ -1,7 +1,16 @@
 # Pilot invitation email
 
-> Paste the body below into Gmail. Subject line is above the `---`.
-> Replace `{{pilot-url}}` with the current pilot URL before sending.
+> **To send with images:** open `docs/pilot-email.html` in a browser,
+> select-all (Ctrl/Cmd+A), copy (Ctrl/Cmd+C), and paste into Gmail's
+> compose window. The six screenshots come through automatically because
+> the repo is public.
+>
+> **To send as plain text:** copy the body below. The Markdown image
+> references render correctly when reading this file on GitHub, but
+> Gmail will not render them — use the HTML version for that.
+>
+> Either way, replace `{{pilot-url}}` with the current pilot URL and
+> `{{Your name}}` with your name before sending.
 
 **Subject:** Masonic Ritual Mentor — your pilot invitation
 
@@ -24,6 +33,8 @@ When you open the pilot URL, the first thing you see is a dark landing
 page with a glowing square-and-compass that drifts across the screen while
 several paragraphs of text flow around it — the words genuinely *reshape*
 themselves around the symbol as it moves.
+
+![Masonic Ritual Mentor landing page](./install-guide-images/03-landing-desktop.png)
 
 That is not a gimmick. The page is a live demo of a brand-new open-source
 text layout standard called **Pretext**, released just days ago by an
@@ -72,15 +83,23 @@ What follows is the full install guide. It's also available in the repo at
 ## Part 1 — Sign in (do this first on every device)
 
 1. Open the pilot URL in your web browser. You'll land on the sign-in
-   page.
+   page:
+
+   ![Sign-in page](./install-guide-images/01-signin-page.png)
+
 2. Type your lodge email in the box and tap **SEND SIGN-IN LINK**.
-3. Check your email inbox. Within a minute or so you should receive a
-   message with subject **"Your sign-in link."** Check spam if you don't
-   see it.
+
+3. You'll see a confirmation message:
+
+   ![Check your inbox confirmation](./install-guide-images/05-check-inbox.png)
+
+   Check your inbox. Within a minute or so you should receive a message
+   with subject **"Your sign-in link."** Check spam if you don't see it.
+
 4. Open the email and tap the amber **Sign in** button inside it. This
    opens the app with you signed in.
-5. You are now on the landing page (the dark page with the drifting
-   square-and-compass described above). Tap **ENTER THE LODGE**.
+
+5. You are now on the landing page (shown above). Tap **ENTER THE LODGE**.
 
 The sign-in remembers you for 30 days on this device. The link inside the
 email is only good for 24 hours — if you wait longer, just request a new
@@ -94,6 +113,10 @@ window like a native app. You don't *have* to install — the site works in
 any browser tab — but on the phone especially, installing is nicer.
 
 ### iPhone (Safari)
+
+On mobile, the landing page looks like this:
+
+![Landing page on iPhone](./install-guide-images/04-landing-mobile.png)
 
 1. On the landing page, tap the **Share** button (square with an arrow
    pointing up) at the bottom of Safari.
@@ -129,8 +152,13 @@ any browser tab — but on the phone especially, installing is nicer.
 2. Select your encrypted `.mram` file.
 3. Enter the password when prompted. The file decrypts on your device and
    is never sent to any server.
-4. You're now on the **Practice** screen. Select a role, press the
-   microphone button, and begin reciting.
+4. You're now on the **Practice** screen. Until a ritual is loaded, it
+   looks like this:
+
+   ![Practice screen, no ritual loaded](./install-guide-images/06-practice-desktop.png)
+
+   After you load the ritual, select a role, press the microphone button,
+   and begin reciting.
 
 Your ritual file stays on this device. To use the app on a second device,
 you load the `.mram` file there too.
