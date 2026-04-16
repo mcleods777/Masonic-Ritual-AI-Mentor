@@ -186,6 +186,41 @@ ever leaves your device.** The voices are less natural and the
 recognition is a little less accurate, but the privacy guarantee is
 absolute.
 
+## See the code for yourself
+
+Everything I have described above is verifiable because the entire app
+is **open source**. The full source code lives publicly on GitHub:
+
+**https://github.com/mcleods777/Masonic-Ritual-AI-Mentor**
+
+### What is GitHub?
+
+GitHub is the standard public website where software developers publish
+the source code for their programs. Think of it as a library shelf where
+anyone in the world can pull down the "blueprints" of an app and read
+them, line by line. If you are not a programmer it will look like a lot
+of unfamiliar text — but the important point is that it is *there*, not
+hidden behind a closed door.
+
+Why that matters for this pilot:
+
+- **The claims in this email are checkable.** Any tech-savvy brother —
+  or any computer-science student he knows — can verify for himself that
+  the ritual file is encrypted, that the sign-in cookie contains only
+  what I said it does, and that no tracking or analytics pings exist
+  anywhere in the code.
+- **Nothing can be hidden.** Every change to the app is logged publicly
+  with the author's name, the date, and the exact lines of code that
+  changed. There is no private version of the app doing something
+  different from the public one.
+- **The documents you are reading came from there.** Both this email
+  and the install guide live in the repository's `docs/` folder and can
+  be read on GitHub directly.
+
+If you want to poke around, start with the **README** at the top of the
+repository page — that is the plain-English summary — and the **`docs/`
+folder**, where the written materials live.
+
 ## The pilot URL
 
 > **https://masonic-ritual-ai-mentor.vercel.app**
