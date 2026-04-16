@@ -39,17 +39,19 @@
   <img src="https://raw.githubusercontent.com/mcleods777/Masonic-Ritual-AI-Mentor/main/docs/install-guide-images/03-landing-desktop.png" alt="Masonic Ritual Mentor landing page" width="600" style="max-width: 100%; height: auto; border: 1px solid #ddd;">
 </p>
 
-<p>That is not a gimmick. The page is a live demo of a brand-new open-source text layout standard called <strong>Pretext</strong>, released just days ago by an engineer at Midjourney. Pretext is the first practical way to get that kind of organic, obstacle-aware text flow on the open web, and our landing page is one of the earliest real-world uses of it outside the author's own demos.</p>
+<p>That is not a gimmick — and it is not something you have seen on a website before, because until now it could not be done. For the entire thirty-year history of the web, text has been trapped inside rectangles. Paragraphs wrap around the invisible edges of a box, full stop. A narrow CSS feature added around 2014 (<code>shape-outside</code>) let a paragraph hug the edge of <em>one</em> static image, but nothing more — no multiple obstacles, no moving obstacles, no real reflow.</p>
 
-<p>If you want the background, there's a short YouTube explainer on what Pretext is and why it matters:</p>
+<p>The page is a live demo of a brand-new open-source text layout standard called <strong>Pretext</strong>, released just days ago by an engineer at Midjourney. Pretext is the first practical way to get real, dynamic, multi-obstacle text reflow on the open web — text that genuinely recalculates its shape in real time as objects drift, resize, or appear. It unlocks an entire category of layout that was previously impossible outside of print: magazine-grade typography, interactive fiction, games with diegetic text, data-viz with inline narrative. Our landing page is one of the earliest real-world uses of it outside the author's own demos.</p>
+
+<p>Short YouTube explainer on what Pretext is and why it matters:</p>
 
 <p><a href="https://youtu.be/CUAuy5SWJcw?si=0WRv_QF8yfhyaYKn" style="color: #c9962c;">https://youtu.be/CUAuy5SWJcw?si=0WRv_QF8yfhyaYKn</a></p>
 
-<p>And a write-up in VentureBeat:</p>
+<p>Write-up in VentureBeat:</p>
 
 <p><a href="https://venturebeat.com/technology/midjourney-engineer-debuts-new-vibe-coded-open-source-standard-pretext-to" style="color: #c9962c; word-break: break-all;">https://venturebeat.com/technology/midjourney-engineer-debuts-new-vibe-coded-open-source-standard-pretext-to</a></p>
 
-<p>I mention it because a few brothers have asked, "Why does the front page feel different from a normal website?" — that's why.</p>
+<p>Full transparency: no brother asked me to put this on the front page. I put it there as a flex. When I first read about Pretext, I wanted to see if I could get it running inside the app within the hour — and I was frankly amazed when I could. It has no bearing on the rehearsal feature itself. It is there because it is beautiful, it is new, and our lodge's pilot page gets to be one of the first places on the open web to show it off.</p>
 
 <h2 style="font-family: Georgia, 'Times New Roman', serif; color: #8b6914; border-bottom: 1px solid #c9962c; padding-bottom: 6px; margin-top: 32px;">Under the hood — why this app is unique</h2>
 
@@ -88,6 +90,17 @@
 </ol>
 
 <p>After the diff, a large language model (Llama 3.3 70B via Groq) generates a short spoken coaching response — brief, contextual, and streamed to you as you listen.</p>
+
+<h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">Coming soon — expressive TTS from Google and Microsoft</h3>
+
+<p>Two major new voice models land in the six-engine dropdown as the pilot progresses. Both fix the one thing today's text-to-speech still gets wrong for ritual work: <em>delivery.</em> A flat, evenly-paced reading is fine for a shopping list — it is not fine for the gravitas of an obligation or the cadence of a lecture.</p>
+
+<ul>
+  <li><strong>Google Gemini 3.1 Flash TTS</strong> (released April 2026). It accepts inline <em>audio tags</em> — short bracketed directions like <code>[slow, solemn]</code> or <code>[whispered]</code> — that steer style, pace, and emotion at any point mid-sentence. That means the ritual text itself can pre-mark the cadence shifts the work already calls for, and the voice engine will honor them. It currently sits at the top of the Artificial Analysis TTS quality leaderboard (Elo 1,211), supports 70+ languages, and watermarks every clip with SynthID.</li>
+  <li><strong>Microsoft Azure Dragon HD / Neural HD 2.5</strong> (rolling out early-to-mid 2026). Microsoft's new HD line is LLM-based: the model reads the <em>meaning</em> of each line and adjusts emotional tone automatically — measured pause at a solemn passage, lift at a welcome, weight at a charge — without any manual markup at all. A unified model covering 700+ voices, with wider availability and a significant price drop arriving in March 2026.</li>
+</ul>
+
+<p>Both slot into the existing six-engine architecture. You will simply see two new options appear in the voice-engine dropdown during the pilot, and the ritual will start to <em>sound</em> like ritual.</p>
 
 <h2 style="font-family: Georgia, 'Times New Roman', serif; color: #8b6914; border-bottom: 1px solid #c9962c; padding-bottom: 6px; margin-top: 32px;">Your data — what leaves your device, and what doesn't</h2>
 
