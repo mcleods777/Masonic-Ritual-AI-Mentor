@@ -51,6 +51,47 @@
 
 <p>I mention it because a few brothers have asked, "Why does the front page feel different from a normal website?" — that's why.</p>
 
+<h2 style="font-family: Georgia, 'Times New Roman', serif; color: #8b6914; border-bottom: 1px solid #c9962c; padding-bottom: 6px; margin-top: 32px;">Under the hood — why this app is unique</h2>
+
+<p>Most dictation tools stumble the moment you use Masonic vocabulary. This one was built for it. A quick summary of what's actually running.</p>
+
+<h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">Speech recognition tuned for ritual</h3>
+
+<p>When you speak, the app sends your audio to <strong>OpenAI Whisper-large-v3</strong> (running on Groq's hardware for near-instant response) with a vocabulary hint that primes the model for ritual terms — <em>Worshipful Master</em>, <em>Tyler</em>, <em>Jachin</em>, <em>Boaz</em>, <em>Fellowcraft</em>, and so on. If Whisper isn't reachable, it falls back automatically to your browser's built-in recognition.</p>
+
+<h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">Six voice engines, including voice cloning</h3>
+
+<p>Any of six text-to-speech engines can read the ritual aloud:</p>
+
+<ul>
+  <li><strong>Mistral Voxtral</strong> (default) — supports <strong>zero-shot voice cloning</strong>. Record a short sample of a brother speaking and the app will read <em>his</em> officer's lines in <em>his</em> voice. No paid "voice clone" tier required.</li>
+  <li><strong>ElevenLabs</strong> — twelve distinct male voices, one per officer chair.</li>
+  <li><strong>Google Cloud Neural2</strong> — per-role voice, pitch, and rate tuning so the Worshipful Master sounds deeper than the Tyler.</li>
+  <li><strong>Deepgram Aura-2</strong> — seven mythologically-named voices (Zeus, Orion, Arcas, and so on).</li>
+  <li><strong>Kokoro</strong> — a self-hosted option with no cloud dependency.</li>
+  <li><strong>Browser built-in</strong> — always works, even offline.</li>
+</ul>
+
+<p>If one cloud engine is down, the app automatically falls through to the next in the chain.</p>
+
+<h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">Five-layer feedback, not just text matching</h3>
+
+<p>When you finish a line, the app doesn't just compare your words to the expected text character-by-character. It runs five layers:</p>
+
+<ol>
+  <li><strong>Normalization</strong> — lowercase, expand contractions, strip filler words.</li>
+  <li><strong>Word-level diff.</strong></li>
+  <li><strong>Phonetic matching</strong> — Double Metaphone plus a Masonic alias map, so <em>WM</em> and <em>Worshipful Master</em> count as the same thing.</li>
+  <li><strong>Fuzzy tolerance</strong> — small typos or single-edit slips are forgiven.</li>
+  <li><strong>Scoring</strong> — an accuracy percentage and a highlight of exactly which words gave you trouble.</li>
+</ol>
+
+<p>After the diff, a large language model (Llama 3.3 70B via Groq) generates a short spoken coaching response — brief, contextual, and streamed to you as you listen.</p>
+
+<h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">Encrypted by default, local by default</h3>
+
+<p>Your ritual file is encrypted with <strong>AES-GCM</strong> via the browser's Web Crypto API and stored in your device's IndexedDB. It never leaves your device unencrypted. The only things ever sent to a cloud service are short audio snippets (for Whisper) and short text snippets (for voice synthesis and feedback) — and Groq, Mistral, Google, and Deepgram all have no-retention policies covering those snippets.</p>
+
 <h2 style="font-family: Georgia, 'Times New Roman', serif; color: #8b6914; border-bottom: 1px solid #c9962c; padding-bottom: 6px; margin-top: 32px;">The pilot URL</h2>
 
 <blockquote style="border-left: 4px solid #c9962c; padding: 10px 16px; margin: 16px 0; background: #faf6ed; font-size: 1.05em;"><strong><a href="https://masonic-ritual-ai-mentor.vercel.app" style="color: #8b6914; text-decoration: none;">https://masonic-ritual-ai-mentor.vercel.app</a></strong></blockquote>

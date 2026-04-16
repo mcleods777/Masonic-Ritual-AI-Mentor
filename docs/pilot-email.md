@@ -52,6 +52,65 @@ https://venturebeat.com/technology/midjourney-engineer-debuts-new-vibe-coded-ope
 I mention it because a few brothers have asked, "Why does the front page
 feel different from a normal website?" — that's why.
 
+## Under the hood — why this app is unique
+
+Most dictation tools stumble the moment you use Masonic vocabulary. This
+one was built for it. A quick summary of what's actually running.
+
+### Speech recognition tuned for ritual
+
+When you speak, the app sends your audio to **OpenAI Whisper-large-v3**
+(running on Groq's hardware for near-instant response) with a vocabulary
+hint that primes the model for ritual terms — *Worshipful Master*,
+*Tyler*, *Jachin*, *Boaz*, *Fellowcraft*, and so on. If Whisper isn't
+reachable, it falls back automatically to your browser's built-in
+recognition.
+
+### Six voice engines, including voice cloning
+
+Any of six text-to-speech engines can read the ritual aloud:
+
+- **Mistral Voxtral** (default) — supports **zero-shot voice cloning**.
+  Record a short sample of a brother speaking and the app will read
+  *his* officer's lines in *his* voice. No paid "voice clone" tier
+  required.
+- **ElevenLabs** — twelve distinct male voices, one per officer chair.
+- **Google Cloud Neural2** — per-role voice, pitch, and rate tuning so
+  the Worshipful Master sounds deeper than the Tyler.
+- **Deepgram Aura-2** — seven mythologically-named voices (Zeus, Orion,
+  Arcas, and so on).
+- **Kokoro** — a self-hosted option with no cloud dependency.
+- **Browser built-in** — always works, even offline.
+
+If one cloud engine is down, the app automatically falls through to the
+next in the chain.
+
+### Five-layer feedback, not just text matching
+
+When you finish a line, the app doesn't just compare your words to the
+expected text character-by-character. It runs five layers:
+
+1. **Normalization** — lowercase, expand contractions, strip filler words.
+2. **Word-level diff.**
+3. **Phonetic matching** — Double Metaphone plus a Masonic alias map, so
+   *WM* and *Worshipful Master* count as the same thing.
+4. **Fuzzy tolerance** — small typos or single-edit slips are forgiven.
+5. **Scoring** — an accuracy percentage and a highlight of exactly which
+   words gave you trouble.
+
+After the diff, a large language model (Llama 3.3 70B via Groq) generates
+a short spoken coaching response — brief, contextual, and streamed to
+you as you listen.
+
+### Encrypted by default, local by default
+
+Your ritual file is encrypted with **AES-GCM** via the browser's Web
+Crypto API and stored in your device's IndexedDB. It never leaves your
+device unencrypted. The only things ever sent to a cloud service are
+short audio snippets (for Whisper) and short text snippets (for voice
+synthesis and feedback) — and Groq, Mistral, Google, and Deepgram all
+have no-retention policies covering those snippets.
+
 ## The pilot URL
 
 > **https://masonic-ritual-ai-mentor.vercel.app**
