@@ -231,6 +231,39 @@ If you want to poke around, start with the **README** at the top of the
 repository page — that is the plain-English summary — and the **`docs/`
 folder**, where the written materials live.
 
+### The license — AGPL, and why it matters
+
+The code is published under the **GNU Affero General Public License,
+version 3** (AGPL-3.0). That is a deliberate choice, and it protects
+the brothers who use this app. In plain terms:
+
+- **Free of charge, free to use, free to study, free to modify, free to
+  share.** Any brother, any lodge, any jurisdiction is welcome to take
+  a copy.
+- **It cannot be taken back.** Once the code is published under AGPL,
+  no future owner — not me, not a company that might buy the project,
+  not anyone — can relicense it as closed, proprietary software. The
+  freedom is locked in.
+- **Modifications stay open.** If another person or organization takes
+  this code, changes it, and runs it on their own server for brothers
+  to use, AGPL requires them to publish their modifications under the
+  same license. There is no way to fork the app, quietly add tracking
+  or advertising, and keep those changes private.
+- **No warranty.** Standard for open-source licenses — the software is
+  provided as-is.
+
+The practical upshot for our lodge: the app you install today cannot
+become a closed, proprietary product trying to extract fees or data
+from brothers. If I ever became unable to maintain it, the code would
+remain available for someone else to take up. If another jurisdiction
+likes it, they can adopt it, and their improvements flow back to
+everyone.
+
+AGPL is the same license that covers Mastodon and Nextcloud — the
+established, privacy-respecting open-source projects in that space. The
+full license text is in the repository as `LICENSE`, or you can read it
+at [gnu.org/licenses/agpl-3.0.html](https://www.gnu.org/licenses/agpl-3.0.html).
+
 ## The pilot URL
 
 > **https://masonic-ritual-ai-mentor.vercel.app**
