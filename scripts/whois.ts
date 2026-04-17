@@ -71,7 +71,7 @@ function getAllowlist(emailsFlag?: string): string[] {
       .filter(Boolean);
   }
   const cwd = process.cwd();
-  const merged: Record<string, string> = {
+  const merged: Record<string, string | undefined> = {
     ...loadEnvFile(resolve(cwd, ".env")),
     ...loadEnvFile(resolve(cwd, ".env.local")),
     ...process.env,
