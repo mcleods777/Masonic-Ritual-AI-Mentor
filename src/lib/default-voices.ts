@@ -33,11 +33,16 @@ const DEFAULT_VOICES = [
   { name: "Atlas",   file: "/voices/atlas.mp3",   description: "Steady, grounded" },
 ] as const;
 
+/** Stable id for a default voice, by name. */
+function defaultVoiceId(name: string): string {
+  return `default-${name.toLowerCase()}`;
+}
+
 /** Check if default voices are already loaded in IndexedDB. */
 async function defaultsLoaded(): Promise<boolean> {
   const voices = await listVoices();
-  const names = new Set(voices.map((v) => v.name));
-  return DEFAULT_VOICES.some((d) => names.has(d.name));
+  const ids = new Set(voices.map((v) => v.id));
+  return DEFAULT_VOICES.some((d) => ids.has(defaultVoiceId(d.name)));
 }
 
 /** Fetch an mp3 file and return it as a base64 string. */
@@ -64,13 +69,14 @@ export async function ensureDefaultVoices(): Promise<{
   migrated: number;
 }> {
   const existing = await listVoices();
-  const existingNames = new Set(existing.map((v) => v.name));
+  // Dedupe by id (not name) so a renamed default is not re-created on next visit.
+  const existingIds = new Set(existing.map((v) => v.id));
 
   let loaded = 0;
   let skipped = 0;
 
   for (const def of DEFAULT_VOICES) {
-    if (existingNames.has(def.name)) {
+    if (existingIds.has(defaultVoiceId(def.name))) {
       skipped++;
       continue;
     }
@@ -78,7 +84,7 @@ export async function ensureDefaultVoices(): Promise<{
     try {
       const audioBase64 = await fetchAsBase64(def.file);
       const voice: LocalVoice = {
-        id: `default-${def.name.toLowerCase()}`,
+        id: defaultVoiceId(def.name),
         name: def.name,
         audioBase64,
         mimeType: "audio/mpeg",
