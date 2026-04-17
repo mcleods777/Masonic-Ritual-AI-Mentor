@@ -12,6 +12,7 @@ import {
   type RitualSectionWithCipher,
 } from "@/lib/storage";
 import TTSEngineSelector from "@/components/TTSEngineSelector";
+import { log } from "@/lib/log";
 
 type PracticeTab = "rehearsal" | "listen";
 
@@ -49,7 +50,10 @@ function PracticeContent() {
     if (!selectedDocId) return;
     setLoading(true);
     getDocumentSections(selectedDocId)
-      .then(setSections)
+      .then((s) => {
+        setSections(s);
+        log("ritual.document.loaded", { document_id: selectedDocId });
+      })
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [selectedDocId]);

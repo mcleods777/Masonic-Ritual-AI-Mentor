@@ -40,6 +40,7 @@ import {
   type PracticeSession,
   type LineScore,
 } from "@/lib/performance-history";
+import { log } from "@/lib/log";
 
 interface RehearsalModeProps {
   sections: RitualSectionWithCipher[];
@@ -105,6 +106,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   autoStopRef.current = autoStop;
   const sessionStartRef = useRef<string>(new Date().toISOString());
   const perfContextRef = useRef<string>("");
+  const lineResultsRef = useRef<LineResult[]>([]);
 
   // Load performance context on mount for AI feedback
   useEffect(() => {
@@ -112,6 +114,12 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
       .then((ctx) => { perfContextRef.current = ctx; })
       .catch(console.error);
   }, []);
+
+  // Mirror lineResults into a ref so async callbacks (e.g. the completion
+  // handler in advanceInternal) can read the latest value without stale-closure.
+  useEffect(() => {
+    lineResultsRef.current = lineResults;
+  });
 
   // Extract unique roles from sections (only those with speaker lines)
   const availableRoles = useMemo(() => {
@@ -205,14 +213,37 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
     setCurrentIndex(0);
     setLineResults([]);
     setRehearsalState("ready");
+    log("ritual.practice.started", {
+      role: selectedRole ?? undefined,
+      document_id: documentId,
+    });
     // Advance will be triggered by effect
-  }, []);
+  }, [selectedRole, documentId]);
 
   // Internal advance — walks through lines with a generation guard.
   // Only the matching generation is allowed to continue; a new call
   // to advanceToLine() bumps the generation so any old chain exits.
   const advanceInternal = useCallback(async (index: number, gen: number) => {
     if (cancelledRef.current || index >= sections.length) {
+      if (index >= sections.length) {
+        const startIso = sessionStartRef.current;
+        const duration_ms = startIso
+          ? Math.max(0, Date.now() - new Date(startIso).getTime())
+          : undefined;
+        const results = lineResultsRef.current;
+        const avg =
+          results.length > 0
+            ? Math.round(
+                results.reduce((s, r) => s + r.accuracy, 0) / results.length,
+              )
+            : undefined;
+        log("ritual.practice.ended", {
+          role: selectedRole ?? undefined,
+          document_id: documentId,
+          duration_ms,
+          accuracy_score: avg,
+        });
+      }
       setRehearsalState("complete");
       return;
     }
@@ -294,7 +325,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
         advanceInternal(index + 1, gen);
       }
     }
-  }, [sections, selectedRole]);
+  }, [sections, selectedRole, documentId]);
 
   // Public entry point — bumps generation to cancel any running chain
   const advanceToLine = useCallback((index: number) => {
@@ -333,6 +364,20 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
         DEFAULT_AUTO_ADVANCE_BEAT_MS,
       );
 
+      log("ritual.line.attempted", {
+        role: selectedRole ?? undefined,
+        document_id: documentId,
+        section_index: currentIndex,
+        accuracy_score: result.accuracy,
+      });
+      const passed = action.kind === "auto-advance";
+      log(passed ? "ritual.line.passed" : "ritual.line.failed", {
+        role: selectedRole ?? undefined,
+        document_id: documentId,
+        section_index: currentIndex,
+        accuracy_score: result.accuracy,
+      });
+
       if (action.kind === "auto-advance") {
         setRehearsalState("auto-advancing");
         const gen = advanceGenRef.current;
@@ -345,7 +390,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
         setRehearsalState("checking");
       }
     },
-    [currentIndex, advanceToLine],
+    [currentIndex, advanceToLine, selectedRole, documentId],
   );
 
   // Trigger first advance when rehearsal starts

@@ -23,6 +23,12 @@ import {
   looksLikeEmail,
   signMagicLinkToken,
 } from "@/lib/auth";
+import { hashEmail } from "@/lib/user-id";
+import { logServerEvent } from "@/lib/posthog-server";
+import {
+  TELEMETRY_OPTOUT_COOKIE,
+  isOptedOutFromCookieValue,
+} from "@/lib/telemetry-consent";
 
 export const runtime = "nodejs";
 
@@ -90,6 +96,17 @@ export async function POST(req: NextRequest) {
     return genericOk;
   }
 
+  const optedOut = isOptedOutFromCookieValue(
+    req.cookies.get(TELEMETRY_OPTOUT_COOKIE)?.value,
+  );
+  const distinctId = hashEmail(email);
+
+  await logServerEvent({
+    distinctId,
+    name: "auth.magic_link.requested",
+    optedOut,
+  });
+
   const apiKey = process.env.RESEND_API_KEY;
   const fromAddress = process.env.MAGIC_LINK_FROM_EMAIL;
   if (!apiKey || !fromAddress) {
@@ -112,15 +129,32 @@ export async function POST(req: NextRequest) {
 
     if (error) {
       console.error("Resend error:", error);
+      await logServerEvent({
+        distinctId,
+        name: "auth.magic_link.sent",
+        props: { error_type: "network" },
+        optedOut,
+      });
       return NextResponse.json(
         { error: "Could not send the email. Please try again." },
         { status: 500 },
       );
     }
 
+    await logServerEvent({
+      distinctId,
+      name: "auth.magic_link.sent",
+      optedOut,
+    });
     return genericOk;
   } catch (err) {
     console.error("Magic-link request error:", err);
+    await logServerEvent({
+      distinctId,
+      name: "auth.magic_link.sent",
+      props: { error_type: "unknown" },
+      optedOut,
+    });
     return NextResponse.json(
       { error: "Could not send the email. Please try again." },
       { status: 500 },
