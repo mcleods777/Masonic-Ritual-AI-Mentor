@@ -1,15 +1,14 @@
 /**
  * Default voice profiles shipped with the app.
  *
- * These are pre-generated Deepgram Aura-2 male voice samples stored as
- * static files in public/voices/. They load automatically on first visit
- * and serve as Voxtral ref_audio.
+ * Two groups: character voices (rustic/regional) and Deepgram Aura-2 voices
+ * (neutral male). All are stored as static files in public/voices/ and load
+ * automatically on first visit as Voxtral ref_audio.
  *
- * Defaults ship with NO explicit role assignment — the voice-selection
- * logic in tts-cloud.ts falls back to deterministic round-robin across
- * the voice list, keyed by the role's group index. With 7 default voices
- * and 10 role groups, the first 7 officers each get a distinct voice and
- * the remaining three wrap back to the start of the list.
+ * Defaults ship with NO explicit role assignment — the voice-selection logic
+ * in tts-cloud.ts falls back to deterministic round-robin across the voice
+ * list, keyed by the role's group index. Character voices are listed first
+ * so they become the default picks for the earliest officer slots.
  *
  * Users can override by recording their own voice and assigning a role on
  * the Voices page. User voices take priority over defaults.
@@ -22,25 +21,35 @@ import {
   type LocalVoice,
 } from "./voice-storage";
 
-/** Default voice definitions — all male Aura-2 voices. */
+/** Default voice definitions — character voices first, then Aura-2. */
 const DEFAULT_VOICES = [
-  { name: "Zeus",    file: "/voices/zeus.mp3",    description: "Commanding, deep" },
-  { name: "Orion",   file: "/voices/orion.mp3",   description: "Clear, steady" },
-  { name: "Arcas",   file: "/voices/arcas.mp3",   description: "Measured" },
-  { name: "Orpheus", file: "/voices/orpheus.mp3", description: "Warm" },
-  { name: "Apollo",  file: "/voices/apollo.mp3",  description: "Bright, articulate" },
-  { name: "Hermes",  file: "/voices/hermes.mp3",  description: "Smooth, resonant" },
-  { name: "Atlas",   file: "/voices/atlas.mp3",   description: "Steady, grounded" },
+  { name: "Crazy German",       file: "/voices/crazy-german.wav",       mimeType: "audio/wav",  description: "German accent, theatrical" },
+  { name: "Jebidiah",            file: "/voices/jebidiah.wav",           mimeType: "audio/wav",  description: "Rustic, backwoods" },
+  { name: "Old Man",             file: "/voices/old-man.wav",            mimeType: "audio/wav",  description: "Weathered, aged" },
+  { name: "Scottish Man",        file: "/voices/scottish-man.wav",       mimeType: "audio/wav",  description: "Scottish brogue" },
+  { name: "Southern Gentleman",  file: "/voices/southern-gentleman.wav", mimeType: "audio/wav",  description: "Southern drawl, genteel" },
+  { name: "Zeus",                file: "/voices/zeus.mp3",               mimeType: "audio/mpeg", description: "Commanding, deep" },
+  { name: "Orion",               file: "/voices/orion.mp3",              mimeType: "audio/mpeg", description: "Clear, steady" },
+  { name: "Arcas",               file: "/voices/arcas.mp3",              mimeType: "audio/mpeg", description: "Measured" },
+  { name: "Orpheus",             file: "/voices/orpheus.mp3",            mimeType: "audio/mpeg", description: "Warm" },
+  { name: "Apollo",              file: "/voices/apollo.mp3",             mimeType: "audio/mpeg", description: "Bright, articulate" },
+  { name: "Hermes",              file: "/voices/hermes.mp3",             mimeType: "audio/mpeg", description: "Smooth, resonant" },
+  { name: "Atlas",               file: "/voices/atlas.mp3",              mimeType: "audio/mpeg", description: "Steady, grounded" },
 ] as const;
+
+/** Stable id for a default voice, by name. */
+function defaultVoiceId(name: string): string {
+  return `default-${name.toLowerCase()}`;
+}
 
 /** Check if default voices are already loaded in IndexedDB. */
 async function defaultsLoaded(): Promise<boolean> {
   const voices = await listVoices();
-  const names = new Set(voices.map((v) => v.name));
-  return DEFAULT_VOICES.some((d) => names.has(d.name));
+  const ids = new Set(voices.map((v) => v.id));
+  return DEFAULT_VOICES.some((d) => ids.has(defaultVoiceId(d.name)));
 }
 
-/** Fetch an mp3 file and return it as a base64 string. */
+/** Fetch an audio file and return it as a base64 string. */
 async function fetchAsBase64(url: string): Promise<string> {
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`Failed to fetch ${url}: ${resp.status}`);
@@ -64,13 +73,14 @@ export async function ensureDefaultVoices(): Promise<{
   migrated: number;
 }> {
   const existing = await listVoices();
-  const existingNames = new Set(existing.map((v) => v.name));
+  // Dedupe by id (not name) so a renamed default is not re-created on next visit.
+  const existingIds = new Set(existing.map((v) => v.id));
 
   let loaded = 0;
   let skipped = 0;
 
   for (const def of DEFAULT_VOICES) {
-    if (existingNames.has(def.name)) {
+    if (existingIds.has(defaultVoiceId(def.name))) {
       skipped++;
       continue;
     }
@@ -78,10 +88,10 @@ export async function ensureDefaultVoices(): Promise<{
     try {
       const audioBase64 = await fetchAsBase64(def.file);
       const voice: LocalVoice = {
-        id: `default-${def.name.toLowerCase()}`,
+        id: defaultVoiceId(def.name),
         name: def.name,
         audioBase64,
-        mimeType: "audio/mpeg",
+        mimeType: def.mimeType,
         duration: 5,
         // role intentionally omitted — defaults ship unassigned so the
         // round-robin fallback handles role → voice mapping.

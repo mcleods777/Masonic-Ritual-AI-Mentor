@@ -121,6 +121,17 @@ export async function assignVoiceRole(
   await saveVoice(voice);
 }
 
+/** Rename a voice. Trims input; throws if the trimmed name is empty. */
+export async function renameVoice(id: string, newName: string): Promise<void> {
+  const trimmed = newName.trim();
+  if (!trimmed) throw new Error("Voice name cannot be empty.");
+  const voice = await getVoice(id);
+  if (!voice) return;
+  if (voice.name === trimmed) return;
+  voice.name = trimmed;
+  await saveVoice(voice);
+}
+
 // ============================================================
 // Export / Import
 // ============================================================

@@ -6,6 +6,7 @@ import {
   listVoices,
   deleteVoice,
   assignVoiceRole,
+  renameVoice,
   exportVoices,
   validateVoiceImport,
   importVoices,
@@ -59,6 +60,9 @@ export default function VoicesPage() {
   const [micLevel, setMicLevel] = useState(0);
   const [testingVoiceId, setTestingVoiceId] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [renamingVoiceId, setRenamingVoiceId] = useState<string | null>(null);
+  const [renameInput, setRenameInput] = useState("");
+  const [renameSaving, setRenameSaving] = useState(false);
 
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -318,6 +322,37 @@ export default function VoicesPage() {
       fetchVoices();
     } catch {
       setError("Failed to delete voice");
+    }
+  };
+
+  const startRename = (voice: LocalVoice) => {
+    setRenamingVoiceId(voice.id);
+    setRenameInput(voice.name);
+    setError(null);
+  };
+
+  const cancelRename = () => {
+    setRenamingVoiceId(null);
+    setRenameInput("");
+  };
+
+  const saveRename = async (id: string) => {
+    const trimmed = renameInput.trim();
+    if (!trimmed) {
+      setError("Voice name cannot be empty.");
+      return;
+    }
+    setRenameSaving(true);
+    try {
+      await renameVoice(id, trimmed);
+      clearVoxtralVoicesCache();
+      await fetchVoices();
+      setRenamingVoiceId(null);
+      setRenameInput("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to rename voice");
+    } finally {
+      setRenameSaving(false);
     }
   };
 
@@ -691,36 +726,100 @@ export default function VoicesPage() {
                 key={voice.id}
                 className="bg-zinc-800/50 rounded-lg p-4 space-y-3"
               >
-                {/* Top row: name + delete */}
-                <div className="flex items-center justify-between">
+                {/* Top row: name + rename + delete */}
+                <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0 flex-1">
-                    <p className="text-zinc-200 font-medium truncate">
-                      {voice.name}
-                    </p>
-                    <p className="text-xs text-zinc-500">
-                      {voice.duration}s &middot;{" "}
-                      {new Date(voice.createdAt).toLocaleDateString()}
-                    </p>
+                    {renamingVoiceId === voice.id ? (
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={renameInput}
+                          onChange={(e) => setRenameInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              saveRename(voice.id);
+                            } else if (e.key === "Escape") {
+                              e.preventDefault();
+                              cancelRename();
+                            }
+                          }}
+                          autoFocus
+                          disabled={renameSaving}
+                          className="flex-1 min-w-0 px-3 py-1.5 bg-zinc-800 border border-amber-500 rounded-lg text-zinc-200 text-sm focus:outline-none disabled:opacity-50"
+                          placeholder="Voice name"
+                        />
+                        <button
+                          onClick={() => saveRename(voice.id)}
+                          disabled={renameSaving || !renameInput.trim()}
+                          className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white rounded-lg text-xs font-medium transition-colors"
+                        >
+                          {renameSaving ? "Saving..." : "Save"}
+                        </button>
+                        <button
+                          onClick={cancelRename}
+                          disabled={renameSaving}
+                          className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <p className="text-zinc-200 font-medium truncate">
+                          {voice.name}
+                        </p>
+                        <p className="text-xs text-zinc-500">
+                          {voice.duration}s &middot;{" "}
+                          {new Date(voice.createdAt).toLocaleDateString()}
+                        </p>
+                      </>
+                    )}
                   </div>
-                  <button
-                    onClick={() => handleDelete(voice.id, voice.name)}
-                    className="ml-3 p-2 text-zinc-600 hover:text-red-400 transition-colors flex-shrink-0"
-                    title="Delete voice"
-                  >
-                    <svg
-                      className="w-5 h-5"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                      />
-                    </svg>
-                  </button>
+                  {renamingVoiceId !== voice.id && (
+                    <div className="flex items-center flex-shrink-0">
+                      <button
+                        onClick={() => startRename(voice)}
+                        className="p-2 text-zinc-600 hover:text-amber-400 transition-colors"
+                        title="Rename voice"
+                        aria-label={`Rename ${voice.name}`}
+                      >
+                        <svg
+                          className="w-5 h-5"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                          />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={() => handleDelete(voice.id, voice.name)}
+                        className="p-2 text-zinc-600 hover:text-red-400 transition-colors"
+                        title="Delete voice"
+                        aria-label={`Delete ${voice.name}`}
+                      >
+                        <svg
+                          className="w-5 h-5"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                          />
+                        </svg>
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Bottom row: role dropdown + play button */}
