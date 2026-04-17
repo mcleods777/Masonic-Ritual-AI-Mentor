@@ -160,18 +160,38 @@ When a .mram file expires or the lodge passphrase is being changed, `rotate-mram
 npx tsx scripts/rotate-mram.ts <input.mram> <output.mram> [options]
 ```
 
-**Options:**
+**Passphrase options (prefer `*-file` forms):**
 
 | Flag | Description |
 |------|-------------|
-| `--old-pass <pass>` | Current passphrase (prompted if omitted). |
-| `--new-pass <pass>` | New passphrase (prompted if omitted). |
+| `--old-pass-file <path>` | Read current passphrase from a file (must be `chmod 600`). |
+| `--new-pass-file <path>` | Read new passphrase from a file (must be `chmod 600`). |
+| `--old-pass <pass>` | Current passphrase on CLI. **INSECURE** — leaks to `ps` and shell history. Use `--old-pass-file` for anything but one-off local testing. |
+| `--new-pass <pass>` | New passphrase on CLI. Same caveat. |
+
+If you pass neither, the script prompts interactively. On a TTY the input is masked as `*`.
+
+**Expiry options:**
+
+| Flag | Description |
+|------|-------------|
 | `--expires <ISO-date>` | Set a new hard expiration timestamp. |
 | `--expires-in <duration>` | Set a new expiration relative to now: `90d`, `72h`, `45m`. |
 | `--no-expires` | Remove the `expiresAt` field entirely. |
 | `--keep-expires` | Keep the existing `expiresAt` value (default). |
 
 Exactly one expiry flag may be passed. Rotation intentionally bypasses the expiration check on read — reissuing an already-expired file is the main use case — and logs the previous expiry status so the operator sees what was unlocked. Input and output paths must differ so a crash mid-rotate cannot destroy the original.
+
+**Example (recommended, no passphrase on the command line):**
+
+```bash
+echo -n "old123" > /tmp/old.pass && chmod 600 /tmp/old.pass
+echo -n "new456" > /tmp/new.pass && chmod 600 /tmp/new.pass
+npx tsx scripts/rotate-mram.ts rituals/ea-opening.mram out.mram \
+    --old-pass-file /tmp/old.pass --new-pass-file /tmp/new.pass \
+    --expires-in 90d
+shred -u /tmp/old.pass /tmp/new.pass
+```
 
 ---
 

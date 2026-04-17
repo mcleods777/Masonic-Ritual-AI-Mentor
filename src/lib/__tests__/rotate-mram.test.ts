@@ -198,4 +198,97 @@ describe("rotate-mram CLI", () => {
       decryptMRAM(bufferToArrayBuffer(blob), oldPass),
     ).rejects.toThrow(MRAMExpiredError);
   });
+
+  it("reads passphrases from --old-pass-file and --new-pass-file (mode 0600)", async () => {
+    const blob = encryptMRAMNodeForTest(makeDoc(), oldPass);
+    const inputPath = path.join(tmpDir, "passfile-in.mram");
+    const outputPath = path.join(tmpDir, "passfile-out.mram");
+    const oldPassFile = path.join(tmpDir, "old.pass");
+    const newPassFile = path.join(tmpDir, "new.pass");
+    fs.writeFileSync(inputPath, blob);
+    fs.writeFileSync(oldPassFile, oldPass);
+    fs.chmodSync(oldPassFile, 0o600);
+    fs.writeFileSync(newPassFile, newPass);
+    fs.chmodSync(newPassFile, 0o600);
+
+    const { status, stderr } = runRotate([
+      inputPath,
+      outputPath,
+      "--old-pass-file",
+      oldPassFile,
+      "--new-pass-file",
+      newPassFile,
+      "--expires-in",
+      "7d",
+    ]);
+
+    expect(status, stderr).toBe(0);
+    const rotated = fs.readFileSync(outputPath);
+    const doc = await decryptMRAM(bufferToArrayBuffer(rotated), newPass);
+    expect(doc.lines[0].plain).toBe("Hello, brethren.");
+  }, 30_000);
+
+  it("refuses a group- or world-readable pass file", () => {
+    if (process.platform === "win32") return; // POSIX perms don't apply
+    const blob = encryptMRAMNodeForTest(makeDoc(), oldPass);
+    const inputPath = path.join(tmpDir, "looseperm-in.mram");
+    const outputPath = path.join(tmpDir, "looseperm-out.mram");
+    const loosePassFile = path.join(tmpDir, "loose.pass");
+    fs.writeFileSync(inputPath, blob);
+    fs.writeFileSync(loosePassFile, oldPass);
+    fs.chmodSync(loosePassFile, 0o644);
+
+    const { status, stderr } = runRotate([
+      inputPath,
+      outputPath,
+      "--old-pass-file",
+      loosePassFile,
+      "--new-pass",
+      newPass,
+    ]);
+    expect(status).not.toBe(0);
+    expect(stderr).toMatch(/group- or world-readable/i);
+  }, 30_000);
+
+  it("rejects --old-pass together with --old-pass-file", () => {
+    const blob = encryptMRAMNodeForTest(makeDoc(), oldPass);
+    const inputPath = path.join(tmpDir, "mutex-in.mram");
+    const outputPath = path.join(tmpDir, "mutex-out.mram");
+    const oldPassFile = path.join(tmpDir, "mutex.pass");
+    fs.writeFileSync(inputPath, blob);
+    fs.writeFileSync(oldPassFile, oldPass);
+    fs.chmodSync(oldPassFile, 0o600);
+
+    const { status, stderr } = runRotate([
+      inputPath,
+      outputPath,
+      "--old-pass",
+      oldPass,
+      "--old-pass-file",
+      oldPassFile,
+      "--new-pass",
+      newPass,
+    ]);
+    expect(status).not.toBe(0);
+    expect(stderr).toMatch(/mutually exclusive/i);
+  }, 30_000);
+
+  it("warns on stderr when --old-pass or --new-pass is used", () => {
+    const blob = encryptMRAMNodeForTest(makeDoc(), oldPass);
+    const inputPath = path.join(tmpDir, "warn-in.mram");
+    const outputPath = path.join(tmpDir, "warn-out.mram");
+    fs.writeFileSync(inputPath, blob);
+
+    const { status, stderr } = runRotate([
+      inputPath,
+      outputPath,
+      "--old-pass",
+      oldPass,
+      "--new-pass",
+      newPass,
+    ]);
+    expect(status, stderr).toBe(0);
+    expect(stderr).toMatch(/--old-pass leaks/i);
+    expect(stderr).toMatch(/--new-pass leaks/i);
+  }, 30_000);
 });
