@@ -26,6 +26,8 @@ import {
   type PairLineIssue,
   type PairValidationResult,
 } from "@/lib/author-validation";
+import { buildFromDialogue } from "@/lib/dialogue-to-mram";
+import { encryptMRAM } from "@/lib/mram-format";
 
 interface PairListEntry {
   name: string;
@@ -301,6 +303,14 @@ export default function AuthorPage() {
         cipher={parsedCipher}
         issuesByIndex={issuesByIndex}
         onEdit={updateLineText}
+      />
+
+      <ExportPanel
+        pairName={selectedName}
+        plain={parsedPlain}
+        cipher={parsedCipher}
+        validation={validation}
+        dirty={dirty}
       />
 
       <details
@@ -694,5 +704,205 @@ function IssuesInline({ issues }: { issues: PairLineIssue[] }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+/**
+ * Encrypt + download the current pair as a .mram file. Everything runs in
+ * the browser via Web Crypto — the passphrase never crosses the network.
+ * Refuses to export if validation has any errors or the pair has unsaved
+ * structural problems; a ritual file must be perfect before it ships.
+ */
+function ExportPanel({
+  pairName,
+  plain,
+  cipher,
+  validation,
+  dirty,
+}: {
+  pairName: string;
+  plain: DialogueDocument | null;
+  cipher: DialogueDocument | null;
+  validation: PairValidationResult | null;
+  dirty: boolean;
+}) {
+  const [passphrase, setPassphrase] = useState("");
+  const [confirmPassphrase, setConfirmPassphrase] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string>("");
+  const [statusKind, setStatusKind] = useState<"info" | "error" | "ok">("info");
+
+  const metadata = plain?.metadata;
+  const missingMetaFields: string[] = [];
+  if (plain) {
+    if (!metadata?.jurisdiction) missingMetaFields.push("jurisdiction");
+    if (!metadata?.degree) missingMetaFields.push("degree");
+    if (!metadata?.ceremony) missingMetaFields.push("ceremony");
+  }
+
+  const errors = validation?.lineIssues.filter((i) => i.severity === "error").length ?? 0;
+  const parseErrors =
+    (validation?.plainWarnings.length ?? 0) + (validation?.cipherWarnings.length ?? 0);
+
+  const passphrasesMatch =
+    passphrase.length > 0 && passphrase === confirmPassphrase;
+
+  const canEncrypt =
+    !!plain &&
+    !!cipher &&
+    !!validation &&
+    validation.structureOk &&
+    errors === 0 &&
+    parseErrors === 0 &&
+    missingMetaFields.length === 0 &&
+    passphrasesMatch &&
+    !busy;
+
+  const blockers: string[] = [];
+  if (!plain || !cipher) blockers.push("no ritual pair loaded");
+  if (validation && !validation.structureOk) blockers.push("plain/cipher structure diverged");
+  if (errors > 0) blockers.push(`${errors} validation error(s) must be fixed`);
+  if (parseErrors > 0) blockers.push(`${parseErrors} unparseable line(s) in source`);
+  if (missingMetaFields.length > 0)
+    blockers.push(`plain frontmatter missing: ${missingMetaFields.join(", ")}`);
+  if (dirty)
+    blockers.push(
+      "unsaved edits — save to disk first so the encrypted file matches your source of truth",
+    );
+  if (passphrase.length === 0) blockers.push("passphrase required");
+  else if (!passphrasesMatch) blockers.push("passphrases do not match");
+
+  async function handleEncrypt() {
+    if (!plain || !cipher || !metadata) return;
+    setBusy(true);
+    setStatus("");
+    try {
+      const doc = buildFromDialogue(plain, cipher, {
+        jurisdiction: metadata.jurisdiction!,
+        degree: metadata.degree!,
+        ceremony: metadata.ceremony!,
+      });
+      const buf = await encryptMRAM(doc, passphrase);
+      const blob = new Blob([buf], { type: "application/octet-stream" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${pairName || "ritual"}.mram`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setStatus(
+        `Encrypted ${doc.lines.length} lines across ${doc.sections.length} sections. File downloaded as ${a.download}.`,
+      );
+      setStatusKind("ok");
+      setPassphrase("");
+      setConfirmPassphrase("");
+    } catch (err) {
+      setStatus(`Encryption failed: ${(err as Error).message}`);
+      setStatusKind("error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-zinc-200">
+          Encrypt &amp; download <code className="text-amber-300">.mram</code>
+        </h2>
+        <div className="text-xs text-zinc-500">
+          Passphrase stays in this browser — never sent to any server.
+        </div>
+      </div>
+
+      {metadata && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+          <MetaField label="Jurisdiction" value={metadata.jurisdiction} />
+          <MetaField label="Degree" value={metadata.degree} />
+          <MetaField label="Ceremony" value={metadata.ceremony} />
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs uppercase tracking-wider text-zinc-500 mb-1">
+            Passphrase
+          </label>
+          <input
+            type="password"
+            value={passphrase}
+            onChange={(e) => setPassphrase(e.target.value)}
+            autoComplete="new-password"
+            spellCheck={false}
+            className="w-full bg-zinc-900 border border-zinc-800 rounded-md px-2 py-1.5 text-sm text-zinc-200 font-mono"
+            placeholder="required"
+          />
+        </div>
+        <div>
+          <label className="block text-xs uppercase tracking-wider text-zinc-500 mb-1">
+            Confirm passphrase
+          </label>
+          <input
+            type="password"
+            value={confirmPassphrase}
+            onChange={(e) => setConfirmPassphrase(e.target.value)}
+            autoComplete="new-password"
+            spellCheck={false}
+            className="w-full bg-zinc-900 border border-zinc-800 rounded-md px-2 py-1.5 text-sm text-zinc-200 font-mono"
+            placeholder="must match"
+          />
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          disabled={!canEncrypt}
+          onClick={() => void handleEncrypt()}
+          className="px-3 py-2 text-sm rounded-md bg-amber-600 text-zinc-950 font-semibold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-amber-500"
+        >
+          {busy ? "Encrypting…" : "Encrypt & Download .mram"}
+        </button>
+        {blockers.length > 0 && (
+          <ul className="text-xs text-amber-300 list-disc list-inside">
+            {blockers.map((b, i) => (
+              <li key={i}>{b}</li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {status && (
+        <div
+          className={`rounded-md px-3 py-2 text-xs border ${
+            statusKind === "error"
+              ? "bg-red-950/30 border-red-900/50 text-red-200"
+              : statusKind === "ok"
+                ? "bg-emerald-950/30 border-emerald-900/50 text-emerald-200"
+                : "bg-zinc-900 border-zinc-800 text-zinc-300"
+          }`}
+        >
+          {status}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MetaField({ label, value }: { label: string; value?: string }) {
+  const missing = !value;
+  return (
+    <div
+      className={`rounded-md border px-2 py-1.5 ${
+        missing
+          ? "border-red-900/50 bg-red-950/20 text-red-200"
+          : "border-zinc-800 bg-zinc-900 text-zinc-200"
+      }`}
+    >
+      <div className="uppercase tracking-wider text-[10px] opacity-70">{label}</div>
+      <div className="font-semibold truncate">{value || "(missing)"}</div>
+    </div>
   );
 }
