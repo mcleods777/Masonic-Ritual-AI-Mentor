@@ -923,12 +923,12 @@ const GEMINI_ROLE_VOICES: Record<string, string> = {
   WM: "Alnilam",         // firm and strong — authority of the Master
   SW: "Charon",          // calm and professional — principal officer
   JW: "Puck",            // upbeat and lively — JW calls craft to refreshment
-  SD: "Fenrir",          // excitable and dynamic — carries orders about
+  SD: "Algenib",         // gravelly — carries orders about, masculine
   JD: "Orus",            // firm and decisive — gate-keeper role
   Sec: "Iapetus",        // clear and articulate — fits the record-keeper
   Trs: "Schedar",        // measured, steady — the treasurer's disposition
   Ch: "Achird",          // friendly and approachable — prayers land warm
-  Marshal: "Algenib",    // gravelly — the enforcer / Tyler role
+  Marshal: "Fenrir",     // excitable and dynamic — the enforcer / Tyler
   Steward: "Rasalgethi", // distinctive male voice — attendant role
   Candidate: "Zubenelgenubi", // distinctive male — the new brother
   Narrator: "Enceladus", // breathy and soft — scene-setter voice
@@ -944,8 +944,8 @@ export function getGeminiVoiceForRole(role: string): string {
     // Mirror of GEMINI_ROLE_VOICES by group index. All male voices.
     // Groups 0-11 correspond to VOXTRAL_ROLE_GROUPS ordering.
     const groupDefaults = [
-      "Alnilam", "Charon", "Puck", "Fenrir", "Orus",
-      "Iapetus", "Achird", "Schedar", "Algenib",
+      "Alnilam", "Charon", "Puck", "Algenib", "Orus",
+      "Iapetus", "Achird", "Schedar", "Fenrir",
       "Zubenelgenubi", "Rasalgethi", "Enceladus",
     ];
     return groupDefaults[group] ?? "Kore";
