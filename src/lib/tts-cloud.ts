@@ -863,6 +863,154 @@ export async function speakVoxtralAsRole(
 }
 
 // ============================================================
+// Gemini 3.1 Flash TTS
+// ============================================================
+
+import {
+  AUDIO_CACHE_STORE as _AUDIO_CACHE_STORE_UNUSED, // keep import hint
+  getCachedAudio,
+  putCachedAudio,
+} from "./voice-storage";
+// unused re-export suppression — store name stays in voice-storage public API
+void _AUDIO_CACHE_STORE_UNUSED;
+
+/**
+ * Default Masonic-role → Gemini-voice mapping. Picked for gender + timbre
+ * fit. Concrete voice names come from Google's published roster for
+ * gemini-3.1-flash-tts-preview. Adjust after listening to samples.
+ */
+const GEMINI_ROLE_VOICES: Record<string, string> = {
+  WM: "Kore",
+  SW: "Charon",
+  JW: "Puck",
+  SD: "Fenrir",
+  JD: "Orus",
+  Sec: "Zephyr",
+  Trs: "Aoede",
+  Ch: "Achird",
+  Marshal: "Algenib",
+  Steward: "Rasalgethi",
+  Candidate: "Callirrhoe",
+  Narrator: "Enceladus",
+};
+
+/** Get the default Gemini voice for a Masonic role, or a neutral fallback. */
+export function getGeminiVoiceForRole(role: string): string {
+  // Try exact match first, then try group-based resolution for alias roles.
+  if (GEMINI_ROLE_VOICES[role]) return GEMINI_ROLE_VOICES[role];
+  const group = roleToGroup(role);
+  if (group >= 0) {
+    // Roles-to-group order must stay in sync with VOXTRAL_ROLE_GROUPS.
+    const groupDefaults = [
+      "Kore", "Charon", "Puck", "Fenrir", "Orus",
+      "Zephyr", "Achird", "Aoede", "Algenib",
+      "Callirrhoe", "Rasalgethi", "Enceladus",
+    ];
+    return groupDefaults[group] ?? "Kore";
+  }
+  return "Kore";
+}
+
+/** Content-addressed cache key for Gemini audio output. */
+async function geminiCacheKey(
+  text: string,
+  style: string | undefined,
+  voice: string
+): Promise<string> {
+  const material = `${text}\x00${style ?? ""}\x00${voice}`;
+  const bytes = new TextEncoder().encode(material);
+  const hash = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function base64ToBlob(b64: string, mimeType: string): Blob {
+  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  return new Blob([bytes], { type: mimeType });
+}
+
+async function blobToBase64(blob: Blob): Promise<string> {
+  const buf = await blob.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+/**
+ * Speak text using Google Gemini 3.1 Flash TTS.
+ *
+ * Per eng-review decisions:
+ *   - 1A: Client-side IndexedDB cache (getCachedAudio / putCachedAudio)
+ *   - 2A + 13A: Caller is responsible for Voxtral fallback + error banner UX
+ *     on style-tagged lines. This function throws on failure; RehearsalMode
+ *     catches and decides.
+ *   - 3A: Server concatenates [style] text. Client sends separate params.
+ */
+export async function speakGemini(
+  text: string,
+  options: { style?: string; voice?: string } = {}
+): Promise<void> {
+  const voice = options.voice ?? "Kore";
+  const cacheKey = await geminiCacheKey(text, options.style, voice);
+
+  // Cache hit: play from IndexedDB, no network call.
+  const hit = await getCachedAudio(cacheKey);
+  if (hit) {
+    await playAudioBlob(base64ToBlob(hit.audioBase64, hit.mimeType));
+    return;
+  }
+
+  const signal = getTTSAbortSignal();
+  if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+
+  const resp = await fetchApi("/api/tts/gemini", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, style: options.style, voice }),
+    signal,
+  });
+
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ error: resp.statusText }));
+    throw new Error((err as { error?: string }).error || "Gemini TTS failed");
+  }
+
+  const blob = await resp.blob();
+
+  // Cache before playback so a re-request during the same rehearsal hits.
+  // Fire-and-forget: the playback doesn't wait on the write.
+  void (async () => {
+    try {
+      const audioBase64 = await blobToBase64(blob);
+      await putCachedAudio({
+        key: cacheKey,
+        mimeType: blob.type || "audio/mpeg",
+        audioBase64,
+        createdAt: Date.now(),
+      });
+    } catch {
+      // Silent — cache is optimization, audio already played.
+    }
+  })();
+
+  await playAudioBlob(blob);
+}
+
+/** Speak text as a Masonic officer role using Gemini TTS with optional style. */
+export async function speakGeminiAsRole(
+  text: string,
+  role: string,
+  style?: string
+): Promise<void> {
+  return speakGemini(text, {
+    voice: getGeminiVoiceForRole(role),
+    style,
+  });
+}
+
+// ============================================================
 // Engine availability
 // ============================================================
 
@@ -873,12 +1021,14 @@ export async function fetchEngineAvailability(): Promise<{
   deepgram: boolean;
   kokoro: boolean;
   voxtral: boolean;
+  gemini: boolean;
 }> {
+  const empty = { elevenlabs: false, google: false, deepgram: false, kokoro: false, voxtral: false, gemini: false };
   try {
     const resp = await fetchApi("/api/tts/engines");
-    if (!resp.ok) return { elevenlabs: false, google: false, deepgram: false, kokoro: false, voxtral: false };
+    if (!resp.ok) return empty;
     return resp.json();
   } catch {
-    return { elevenlabs: false, google: false, deepgram: false, kokoro: false, voxtral: false };
+    return empty;
   }
 }

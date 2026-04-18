@@ -8,8 +8,9 @@
  */
 
 const DB_NAME = "masonic-ritual-mentor";
-const DB_VERSION = 3; // bumped from 2 to add voices store
+const DB_VERSION = 4; // bumped from 3 to add audioCache store
 const VOICES_STORE = "voices";
+export const AUDIO_CACHE_STORE = "audioCache";
 
 export interface LocalVoice {
   id: string;
@@ -65,8 +66,68 @@ function openDB(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(VOICES_STORE)) {
         db.createObjectStore(VOICES_STORE, { keyPath: "id" });
       }
+
+      // New in v4: audioCache for Gemini TTS output caching.
+      // Keyed by sha256(text|style|voice) to avoid re-rendering identical
+      // lines. Per eng-review decision 1A — client-side, not server-side
+      // (Vercel Fluid Compute's filesystem is ephemeral).
+      if (!db.objectStoreNames.contains(AUDIO_CACHE_STORE)) {
+        const cacheStore = db.createObjectStore(AUDIO_CACHE_STORE, {
+          keyPath: "key",
+        });
+        cacheStore.createIndex("createdAt", "createdAt", { unique: false });
+      }
     };
   });
+}
+
+// ============================================================
+// Audio cache — exposed for Gemini TTS and any future engines
+// that benefit from client-side output caching
+// ============================================================
+
+export interface AudioCacheEntry {
+  /** sha256(text|style|voice) — content-addressed cache key */
+  key: string;
+  /** MIME type of the cached audio blob */
+  mimeType: string;
+  /** Base64-encoded audio bytes (matches LocalVoice storage pattern) */
+  audioBase64: string;
+  createdAt: number;
+}
+
+/** Read a cached audio entry by key. Returns undefined on miss. */
+export async function getCachedAudio(
+  key: string
+): Promise<AudioCacheEntry | undefined> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(AUDIO_CACHE_STORE, "readonly");
+    const request = tx.objectStore(AUDIO_CACHE_STORE).get(key);
+    request.onsuccess = () =>
+      resolve(request.result as AudioCacheEntry | undefined);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+/** Write a cached audio entry. Silent best-effort — quota errors don't throw. */
+export async function putCachedAudio(entry: AudioCacheEntry): Promise<void> {
+  try {
+    const db = await openDB();
+    return new Promise((resolve) => {
+      const tx = db.transaction(AUDIO_CACHE_STORE, "readwrite");
+      tx.objectStore(AUDIO_CACHE_STORE).put(entry);
+      tx.oncomplete = () => resolve();
+      // Quota-exceeded or any DB error: log and continue. Cache is an
+      // optimization, not a requirement — the audio already played.
+      tx.onerror = () => {
+        console.warn("audioCache write failed:", tx.error);
+        resolve();
+      };
+    });
+  } catch (err) {
+    console.warn("audioCache open failed:", err);
+  }
 }
 
 // ============================================================

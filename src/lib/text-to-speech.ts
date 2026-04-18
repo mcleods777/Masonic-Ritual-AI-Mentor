@@ -25,6 +25,8 @@ import {
   speakKokoroAsRole,
   speakVoxtral,
   speakVoxtralAsRole,
+  speakGemini,
+  speakGeminiAsRole,
   stopCloudAudio,
   isCloudAudioPlaying,
 } from "./tts-cloud";
@@ -33,7 +35,7 @@ import {
 // Engine selection
 // ============================================================
 
-export type TTSEngineName = "browser" | "elevenlabs" | "google-cloud" | "deepgram" | "kokoro" | "voxtral";
+export type TTSEngineName = "browser" | "elevenlabs" | "google-cloud" | "deepgram" | "kokoro" | "voxtral" | "gemini";
 
 const TTS_ENGINE_STORAGE_KEY = "tts-engine";
 
@@ -48,7 +50,8 @@ if (typeof window !== "undefined") {
     stored === "google-cloud" ||
     stored === "deepgram" ||
     stored === "kokoro" ||
-    stored === "voxtral"
+    stored === "voxtral" ||
+    stored === "gemini"
   ) {
     currentEngine = stored;
   }
@@ -363,6 +366,7 @@ export async function speak(
       case "deepgram": return speakDeepgram(text);
       case "kokoro": return speakKokoro(text);
       case "voxtral": return speakVoxtral(text);
+      case "gemini": return speakGemini(text);
       default: return speakBrowser(text, options);
     }
   };
@@ -411,6 +415,7 @@ export async function speakAsRole(
       case "deepgram": return speakDeepgramAsRole(text, role);
       case "kokoro": return speakKokoroAsRole(text, role);
       case "voxtral": return speakVoxtralAsRole(text, role);
+      case "gemini": return speakGeminiAsRole(text, role);
       default: {
         const profile = voiceMap?.get(role) || getVoiceForRole(role);
         return speakBrowser(text, {
