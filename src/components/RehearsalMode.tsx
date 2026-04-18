@@ -99,6 +99,20 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   const [preloadProgress, setPreloadProgress] = useState<PrefetchProgress | null>(null);
   const preloadAbortRef = useRef<(() => void) | null>(null);
 
+  // Track the current TTS engine reactively — getTTSEngine() reads
+  // localStorage, which isn't a React-observable source. The engine
+  // selector fires a "tts-engine-changed" CustomEvent on every change
+  // so this component can show/hide Gemini-only panels immediately.
+  const [currentTTSEngine, setCurrentTTSEngine] = useState(() => getTTSEngine());
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (typeof detail === "string") setCurrentTTSEngine(detail as ReturnType<typeof getTTSEngine>);
+    };
+    window.addEventListener("tts-engine-changed", handler);
+    return () => window.removeEventListener("tts-engine-changed", handler);
+  }, []);
+
   const engineRef = useRef<STTEngine | null>(null);
   const sttProviderRef = useRef<STTProvider>(sttProvider);
   sttProviderRef.current = sttProvider;
@@ -988,7 +1002,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
               </div>
 
               {/* Gemini preload panel — only shown when Gemini is selected. */}
-              {getTTSEngine() === "gemini" && (
+              {currentTTSEngine === "gemini" && (
                 <div className="mt-6 p-4 bg-zinc-900 border border-zinc-800 rounded-lg">
                   <div className="flex items-center justify-between gap-3 mb-2">
                     <div>

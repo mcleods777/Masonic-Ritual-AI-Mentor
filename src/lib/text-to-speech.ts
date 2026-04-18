@@ -62,11 +62,16 @@ export function getTTSEngine(): TTSEngineName {
   return currentEngine;
 }
 
-/** Set the active TTS engine. Persists to localStorage. */
+/** Set the active TTS engine. Persists to localStorage + broadcasts. */
 export function setTTSEngine(engine: TTSEngineName): void {
   currentEngine = engine;
   if (typeof window !== "undefined") {
     localStorage.setItem(TTS_ENGINE_STORAGE_KEY, engine);
+    // Broadcast to any component subscribed via addEventListener so
+    // the UI can react to engine changes (e.g. Gemini-only panels).
+    window.dispatchEvent(
+      new CustomEvent("tts-engine-changed", { detail: engine }),
+    );
   }
 }
 
