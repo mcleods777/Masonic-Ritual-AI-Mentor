@@ -229,12 +229,42 @@ async function main() {
     process.exit(1);
   }
 
+  // Optional: ingest per-line styles from `{prefix}-styles.json` sidecar.
+  // Looks for a file next to the plain dialogue; absent → build without styles.
+  let stylesPayload: import("../src/lib/styles").StylesFile | undefined;
+  const stylesInferred = plainPath.replace(/-dialogue\.md$/, "-styles.json");
+  if (fs.existsSync(stylesInferred)) {
+    try {
+      const raw = fs.readFileSync(stylesInferred, "utf-8");
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.version === 1 && Array.isArray(parsed.styles)) {
+        stylesPayload = parsed;
+        console.error(`Reading ${stylesInferred}... (${parsed.styles.length} style entries)`);
+      } else {
+        console.error(`Warning: ${stylesInferred} present but malformed (expected version:1 + styles:[]). Skipping.`);
+      }
+    } catch (err) {
+      console.error(`Warning: failed to read ${stylesInferred}: ${(err as Error).message}. Skipping.`);
+    }
+  }
+
   console.error("Pairing and building MRAMDocument...");
-  const doc = buildFromDialogue(plain, cipher, {
+  const { doc, report } = await buildFromDialogue(plain, cipher, {
     jurisdiction: metadata.jurisdiction!,
     degree: metadata.degree!,
     ceremony: metadata.ceremony!,
+    styles: stylesPayload,
   });
+
+  if (stylesPayload) {
+    console.error(`  Styles applied: ${report.applied}`);
+    if (report.dropped.length > 0) {
+      console.error(`  Styles dropped: ${report.dropped.length}`);
+      for (const d of report.dropped) {
+        console.error(`    - ${d.reason}: "${d.style}" (lineHash=${d.lineHash.slice(0, 12)}…)`);
+      }
+    }
+  }
 
   console.error(`  Sections: ${doc.sections.length}`);
   console.error(`  Lines:    ${doc.lines.length}`);

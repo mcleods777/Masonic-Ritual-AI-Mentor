@@ -139,10 +139,10 @@ describe("normalizeRole", () => {
   });
 });
 
-describe("buildFromDialogue — shape", () => {
+describe("buildFromDialogue — shape", async () => {
   const plain = parseDialogue(PLAIN);
   const cipher = parseDialogue(CIPHER);
-  const doc = buildFromDialogue(plain, cipher, OPTS);
+  const { doc } = await buildFromDialogue(plain, cipher, OPTS);
 
   it("sets format and version", () => {
     expect(doc.format).toBe("MRAM");
@@ -178,10 +178,10 @@ describe("buildFromDialogue — shape", () => {
   });
 });
 
-describe("buildFromDialogue — line kinds", () => {
+describe("buildFromDialogue — line kinds", async () => {
   const plain = parseDialogue(PLAIN);
   const cipher = parseDialogue(CIPHER);
-  const doc = buildFromDialogue(plain, cipher, OPTS);
+  const { doc } = await buildFromDialogue(plain, cipher, OPTS);
 
   it("stores spoken lines with plain + cipher populated and action=null", () => {
     const spoken = doc.lines.filter((l) => l.plain && l.action === null);
@@ -236,10 +236,10 @@ describe("buildFromDialogue — line kinds", () => {
 });
 
 describe("buildFromDialogue — divergent structure", () => {
-  it("throws when plain and cipher have different structures", () => {
+  it("throws when plain and cipher have different structures", async () => {
     const plain = parseDialogue("## S\nA: hi\nB: hello\n");
     const cipher = parseDialogue("## S\nA: h\nA: hlo\n"); // B changed to A
-    expect(() => buildFromDialogue(plain, cipher, OPTS)).toThrow(
+    await expect(buildFromDialogue(plain, cipher, OPTS)).rejects.toThrow(
       /divergent structure/,
     );
   });
@@ -255,7 +255,7 @@ describe("web crypto round trip", () => {
   it("encrypts + decrypts back to an equivalent MRAMDocument", async () => {
     const plain = parseDialogue(PLAIN);
     const cipher = parseDialogue(CIPHER);
-    const original = buildFromDialogue(plain, cipher, OPTS);
+    const { doc: original } = await buildFromDialogue(plain, cipher, OPTS);
 
     const passphrase = "test-passphrase-for-vitest";
     const encrypted = await encryptMRAM(original, passphrase);
@@ -290,7 +290,7 @@ describe("web crypto round trip", () => {
   it("rejects wrong passphrase", async () => {
     const plain = parseDialogue(PLAIN);
     const cipher = parseDialogue(CIPHER);
-    const doc = buildFromDialogue(plain, cipher, OPTS);
+    const { doc } = await buildFromDialogue(plain, cipher, OPTS);
 
     const encrypted = await encryptMRAM(doc, "correct-passphrase");
     await expect(decryptMRAM(encrypted, "wrong-passphrase")).rejects.toThrow();
@@ -299,7 +299,7 @@ describe("web crypto round trip", () => {
   it("detects tampering via checksum or auth tag", async () => {
     const plain = parseDialogue(PLAIN);
     const cipher = parseDialogue(CIPHER);
-    const doc = buildFromDialogue(plain, cipher, OPTS);
+    const { doc } = await buildFromDialogue(plain, cipher, OPTS);
 
     const encrypted = await encryptMRAM(doc, "test-pass");
     // Flip a byte in the ciphertext portion (after the header)
@@ -324,7 +324,7 @@ describe("cross-runtime crypto — Node encrypt → Web Crypto decrypt", () => {
   it("produces a byte layout decryptMRAM can read", async () => {
     const plain = parseDialogue(PLAIN);
     const cipher = parseDialogue(CIPHER);
-    const original = buildFromDialogue(plain, cipher, OPTS);
+    const { doc: original } = await buildFromDialogue(plain, cipher, OPTS);
 
     const passphrase = "cross-runtime-test";
     const encryptedBuffer = encryptMRAMNodeForTest(original, passphrase);
@@ -348,7 +348,7 @@ describe("cross-runtime crypto — Node encrypt → Web Crypto decrypt", () => {
   it("rejects wrong passphrase on the Node-produced file", async () => {
     const plain = parseDialogue(PLAIN);
     const cipher = parseDialogue(CIPHER);
-    const doc = buildFromDialogue(plain, cipher, OPTS);
+    const { doc } = await buildFromDialogue(plain, cipher, OPTS);
 
     const buf = encryptMRAMNodeForTest(doc, "correct");
     await expect(decryptMRAM(buf, "wrong")).rejects.toThrow();
@@ -364,10 +364,10 @@ describe("cross-runtime crypto — Node encrypt → Web Crypto decrypt", () => {
 // prefix. Spoken lines render unchanged (regression guard).
 // ============================================================
 
-describe("mramToPlainText — CUE cleanup", () => {
+describe("mramToPlainText — CUE cleanup", async () => {
   const plain = parseDialogue(PLAIN);
   const cipher = parseDialogue(CIPHER);
-  const doc = buildFromDialogue(plain, cipher, OPTS);
+  const { doc } = await buildFromDialogue(plain, cipher, OPTS);
 
   it("emits CUE-role lines as bare bracketed cues without **CUE** prefix", () => {
     const text = mramToPlainText(doc);
@@ -462,12 +462,12 @@ describe("mramToPlainText — CUE cleanup", () => {
 // ============================================================
 
 describe("buildFromDialogue — gavel cue routing", () => {
-  it("transforms [gavels: 3] cue into a CUE-role MRAMLine with gavels=3", () => {
+  it("transforms [gavels: 3] cue into a CUE-role MRAMLine with gavels=3", async () => {
     const plainSrc = `## I. S\nA: hi\n[gavels: 3]\nB: bye\n`;
     const cipherSrc = `## I. S\nA: h\n[gavels: 3]\nB: b\n`;
     const plain = parseDialogue(plainSrc);
     const cipher = parseDialogue(cipherSrc);
-    const doc = buildFromDialogue(plain, cipher, OPTS);
+    const { doc } = await buildFromDialogue(plain, cipher, OPTS);
 
     const gavelLine = doc.lines.find((l) => l.gavels > 0);
     expect(gavelLine).toBeDefined();
@@ -478,24 +478,24 @@ describe("buildFromDialogue — gavel cue routing", () => {
     expect(gavelLine!.cipher).toBe("");
   });
 
-  it("elides [gavels: 0] cue (zero knocks is a no-op)", () => {
+  it("elides [gavels: 0] cue (zero knocks is a no-op)", async () => {
     const plainSrc = `## I. S\nA: hi\n[gavels: 0]\nB: bye\n`;
     const cipherSrc = `## I. S\nA: h\n[gavels: 0]\nB: b\n`;
     const plain = parseDialogue(plainSrc);
     const cipher = parseDialogue(cipherSrc);
-    const doc = buildFromDialogue(plain, cipher, OPTS);
+    const { doc } = await buildFromDialogue(plain, cipher, OPTS);
 
     // No line should have gavels > 0, and the gavels: 0 cue should not
     // appear as a CUE-role line at all (elided)
     expect(doc.lines.find((l) => l.gavels > 0)).toBeUndefined();
   });
 
-  it("preserves non-gavel structural cues alongside gavel cues", () => {
+  it("preserves non-gavel structural cues alongside gavel cues", async () => {
     const plainSrc = `## I. S\n[gavels: 1]\nA: hi\n[if morning]\nA: good morning\n[end]\n`;
     const cipherSrc = `## I. S\n[gavels: 1]\nA: h\n[if morning]\nA: gm\n[end]\n`;
     const plain = parseDialogue(plainSrc);
     const cipher = parseDialogue(cipherSrc);
-    const doc = buildFromDialogue(plain, cipher, OPTS);
+    const { doc } = await buildFromDialogue(plain, cipher, OPTS);
 
     const gavelLines = doc.lines.filter((l) => l.gavels > 0);
     const actionCues = doc.lines.filter((l) => l.action !== null);
@@ -506,12 +506,12 @@ describe("buildFromDialogue — gavel cue routing", () => {
     expect(actionCues.some((l) => l.action === "end")).toBe(true);
   });
 
-  it("handles multiple gavel cues in the same section", () => {
+  it("handles multiple gavel cues in the same section", async () => {
     const plainSrc = `## I. S\n[gavels: 1]\nA: hi\n[gavels: 3]\nB: bye\n`;
     const cipherSrc = `## I. S\n[gavels: 1]\nA: h\n[gavels: 3]\nB: b\n`;
     const plain = parseDialogue(plainSrc);
     const cipher = parseDialogue(cipherSrc);
-    const doc = buildFromDialogue(plain, cipher, OPTS);
+    const { doc } = await buildFromDialogue(plain, cipher, OPTS);
 
     const gavelLines = doc.lines.filter((l) => l.gavels > 0);
     expect(gavelLines).toHaveLength(2);
@@ -521,7 +521,7 @@ describe("buildFromDialogue — gavel cue routing", () => {
 });
 
 describe("frontmatter → buildFromDialogue integration", () => {
-  it("builds with metadata derived from plain frontmatter", () => {
+  it("builds with metadata derived from plain frontmatter", async () => {
     const plainWithFm = `---
 jurisdiction: Custom Jurisdiction
 degree: Custom Degree
@@ -545,7 +545,7 @@ B: H.
     expect(cipher.metadata).toBeUndefined();
 
     // Build using metadata from plain — simulating the CLI script flow
-    const doc = buildFromDialogue(plain, cipher, {
+    const { doc } = await buildFromDialogue(plain, cipher, {
       jurisdiction: plain.metadata!.jurisdiction!,
       degree: plain.metadata!.degree!,
       ceremony: plain.metadata!.ceremony!,

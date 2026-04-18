@@ -777,7 +777,7 @@ function ExportPanel({
     setBusy(true);
     setStatus("");
     try {
-      const doc = buildFromDialogue(plain, cipher, {
+      const { doc } = await buildFromDialogue(plain, cipher, {
         jurisdiction: metadata.jurisdiction!,
         degree: metadata.degree!,
         ceremony: metadata.ceremony!,
