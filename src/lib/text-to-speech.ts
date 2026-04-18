@@ -439,20 +439,27 @@ export async function speakAsRole(
 
     if (currentEngine === "browser" || currentEngine === "google-cloud") throw err;
 
-    // Try Google Cloud as fallback (better quality than browser)
+    // Fallback chain: prefer Voxtral (voice-cloning, good quality, has the
+    // user's character voices). Then Google Cloud Neural2. Then browser as
+    // last resort. Previous version went straight to Google Cloud — that
+    // made Gemini failures silently robotic because Google Cloud's generic
+    // voices are the "robot-adjacent" ones in this stack.
     try {
-      await speakGoogleCloudAsRole(text, role);
+      await speakVoxtralAsRole(text, role);
     } catch {
-      // Google also failed — try browser as last resort
       try {
-        const profile = voiceMap?.get(role) || getVoiceForRole(role);
-        await speakBrowser(text, {
-          pitch: profile.pitch,
-          rate: profile.rate,
-          voiceName: profile.voiceName,
-        });
+        await speakGoogleCloudAsRole(text, role);
       } catch {
-        throw err;
+        try {
+          const profile = voiceMap?.get(role) || getVoiceForRole(role);
+          await speakBrowser(text, {
+            pitch: profile.pitch,
+            rate: profile.rate,
+            voiceName: profile.voiceName,
+          });
+        } catch {
+          throw err;
+        }
       }
     }
   }

@@ -976,16 +976,54 @@ export async function speakGemini(
   const signal = getTTSAbortSignal();
   if (signal.aborted) throw new DOMException("Aborted", "AbortError");
 
-  const resp = await fetchApi("/api/tts/gemini", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, style: options.style, voice }),
-    signal,
-  });
+  // Retry transient failures (429 rate-limit, 5xx). Mirrors the Voxtral
+  // route's retry policy. Prevents mid-ritual fallback when Gemini
+  // briefly throttles.
+  const MAX_RETRIES = 2;
+  const RETRY_DELAYS = [500, 1500];
+  let resp: Response | null = null;
 
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ error: resp.statusText }));
-    throw new Error((err as { error?: string }).error || "Gemini TTS failed");
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+
+    try {
+      resp = await fetchApi("/api/tts/gemini", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, style: options.style, voice }),
+        signal,
+      });
+    } catch (fetchErr) {
+      if (fetchErr instanceof DOMException && fetchErr.name === "AbortError") {
+        throw fetchErr;
+      }
+      if (attempt < MAX_RETRIES) {
+        console.warn(
+          `Gemini TTS network error, retrying in ${RETRY_DELAYS[attempt]}ms (attempt ${attempt + 1}/${MAX_RETRIES})...`
+        );
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+        continue;
+      }
+      throw fetchErr;
+    }
+
+    if (resp.ok) break;
+
+    const isRetryable = resp.status === 429 || resp.status >= 500;
+    if (isRetryable && attempt < MAX_RETRIES) {
+      console.warn(
+        `Gemini TTS returned ${resp.status}, retrying in ${RETRY_DELAYS[attempt]}ms (attempt ${attempt + 1}/${MAX_RETRIES})...`
+      );
+      await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+      continue;
+    }
+
+    const err = await resp.json().catch(() => ({ error: resp!.statusText }));
+    throw new Error((err as { error?: string }).error || `Gemini TTS ${resp.status}`);
+  }
+
+  if (!resp || !resp.ok) {
+    throw new Error("Gemini TTS failed after retries");
   }
 
   const blob = await resp.blob();
