@@ -77,10 +77,10 @@ export default function GeminiPreloadPanel({
       <div className="flex items-center justify-between gap-3 mb-2">
         <div>
           <div className="text-sm font-semibold text-zinc-200">
-            Gemini audio preload
+            Gemini audio preload <span className="text-xs font-normal text-zinc-500">(optional)</span>
           </div>
           <div className="text-xs text-zinc-500 mt-0.5">
-            Pre-renders every line into the local cache so playback has zero latency. Takes ~2-3 minutes for a full ritual. Cached lines are free on replay.
+            Streaming playback is fast out of the box — no action needed. Preload pre-renders the entire ritual into local cache up front if you want truly zero-latency playback (~2-3 min, cached lines are free on replay).
           </div>
         </div>
         {preloadState === "idle" && (
