@@ -31,7 +31,10 @@ export async function POST(request: NextRequest) {
   if (!text) {
     return NextResponse.json({ error: "text is required" }, { status: 400 });
   }
-
+  if (typeof text === "string" && text.length > 2000) {
+    return NextResponse.json({ error: `text exceeds 2000 char limit (got ${text.length})` }, { status: 413 });
+  }
+  
   const response = await fetch(
     `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}`,
     {

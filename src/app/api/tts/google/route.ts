@@ -31,7 +31,10 @@ export async function POST(request: NextRequest) {
   if (!text) {
     return NextResponse.json({ error: "text is required" }, { status: 400 });
   }
-
+  if (typeof text === "string" && text.length > 2000) {
+    return NextResponse.json({ error: `text exceeds 2000 char limit (got ${text.length})` }, { status: 413 });
+  }
+  
   // Derive language code from voice name prefix (e.g. "en-GB-Neural2-B" → "en-GB")
   const derivedLang = voiceName.match(/^[a-z]{2}-[A-Z]{2}/)?.[0] ?? languageCode;
 
