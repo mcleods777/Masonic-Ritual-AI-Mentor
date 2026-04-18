@@ -714,10 +714,12 @@ const VOXTRAL_ROLE_GROUPS: string[][] = [
   ["Tr", "Treas", "Treas.", "Trs"],
   // Group 8: Marshal / Tyler
   ["Marshal", "T", "Tyler"],
-  // Group 9: Candidate / Brother / Narrator
-  ["Candidate", "C", "BR", "Bro", "Bro.", "Voucher", "Vchr", "Narrator"],
+  // Group 9: Candidate / Brother
+  ["Candidate", "C", "BR", "Bro", "Bro.", "Voucher", "Vchr"],
   // Group 10: Stewards
   ["Steward", "SS", "JS"],
+  // Group 11: Narrator
+  ["Narrator"],
 ];
 
 /** Map a role to a group index (0-9). Returns -1 if not found. */
