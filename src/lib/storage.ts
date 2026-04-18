@@ -11,7 +11,10 @@ import type { MRAMDocument, MRAMRitualSection } from "./mram-format";
 import { mramToSections, mramToPlainText } from "./mram-format";
 
 const DB_NAME = "masonic-ritual-mentor";
-const DB_VERSION = 3; // v3: adds voices store (see voice-storage.ts)
+// MUST stay in lockstep with src/lib/voice-storage.ts DB_VERSION — same
+// database, different modules that happen to own different object stores.
+// v3: adds voices store. v4: adds audioCache store for Gemini TTS output.
+const DB_VERSION = 4;
 const DOCUMENTS_STORE = "documents";
 const SECTIONS_STORE = "sections";
 const SETTINGS_STORE = "settings";
@@ -49,6 +52,17 @@ function openDB(): Promise<IDBDatabase> {
       // v3: voices store for local Voxtral voice samples
       if (!db.objectStoreNames.contains("voices")) {
         db.createObjectStore("voices", { keyPath: "id" });
+      }
+
+      // v4: audioCache for Gemini TTS output. Parallel definition to
+      // src/lib/voice-storage.ts — both modules need to create the store
+      // because either one might be the first to open the DB after an
+      // upgrade, and IndexedDB only fires onupgradeneeded once per version.
+      if (!db.objectStoreNames.contains("audioCache")) {
+        const cacheStore = db.createObjectStore("audioCache", {
+          keyPath: "key",
+        });
+        cacheStore.createIndex("createdAt", "createdAt", { unique: false });
       }
     };
   });
