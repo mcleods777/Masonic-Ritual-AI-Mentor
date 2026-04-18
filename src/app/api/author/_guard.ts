@@ -44,6 +44,37 @@ export function assertDevLocal(
     }
   }
 
+  // CSRF defense: mutating requests (POST/PUT/PATCH/DELETE) must come from
+  // a same-origin browser context. A malicious site open in the dev user's
+  // browser could otherwise POST to localhost:3000/api/author/* and write
+  // attacker-controlled files into rituals/.
+  const method = request.method.toUpperCase();
+  if (method !== "GET" && method !== "HEAD") {
+    const origin = request.headers.get("origin") ?? "";
+    const host = request.headers.get("host") ?? "";
+    if (!origin) {
+      return NextResponse.json(
+        { error: "missing origin header — cross-origin POST refused" },
+        { status: 403 },
+      );
+    }
+    let originHost = "";
+    try {
+      originHost = new URL(origin).host.toLowerCase();
+    } catch {
+      return NextResponse.json(
+        { error: "invalid origin header" },
+        { status: 403 },
+      );
+    }
+    if (originHost !== host.toLowerCase()) {
+      return NextResponse.json(
+        { error: `origin ${originHost} does not match host ${host}` },
+        { status: 403 },
+      );
+    }
+  }
+
   return null;
 }
 

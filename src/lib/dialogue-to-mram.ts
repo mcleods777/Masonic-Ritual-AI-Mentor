@@ -34,9 +34,17 @@ export const ROLE_MAP: Record<string, { id: string; display: string }> = {
   sec: { id: "Sec", display: "Secretary" },
   trs: { id: "Trs", display: "Treasurer" },
   tyler: { id: "Tyl", display: "Tiler" },
+  ss: { id: "SS", display: "Senior Steward" },
+  js: { id: "JS", display: "Junior Steward" },
+  c: { id: "C", display: "Candidate" },
+  ch: { id: "Ch", display: "Chaplain" },
+  chp: { id: "Ch", display: "Chaplain" },
   voucher: { id: "Vchr", display: "Voucher" },
   all: { id: "ALL", display: "All Brethren" },
-  "wm/chaplain": { id: "Ch", display: "Chaplain (or WM)" },
+  // Legacy compound labels — always resolve to plain Chaplain.
+  "wm/chaplain": { id: "Ch", display: "Chaplain" },
+  "wm/chp": { id: "Ch", display: "Chaplain" },
+  "wm/ch": { id: "Ch", display: "Chaplain" },
 };
 
 /**

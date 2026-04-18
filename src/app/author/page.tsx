@@ -321,7 +321,7 @@ export default function AuthorPage() {
         <summary className="cursor-pointer text-sm font-semibold text-zinc-300 select-none">
           Raw source (for structural edits: speakers, cues, sections, frontmatter)
         </summary>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
+        <div className="grid grid-cols-1 gap-3 mt-4">
           <div>
             <label className="block text-xs uppercase tracking-wider text-zinc-500 mb-1">
               Plain source
@@ -515,15 +515,15 @@ function PairedView({
     const hasWarn = issues.some((x) => x.severity === "warning");
 
     const borderCls = hasError
-      ? "border-red-900/60"
+      ? "border-red-700"
       : hasWarn
-        ? "border-amber-900/60"
-        : "border-zinc-800";
+        ? "border-amber-700"
+        : "border-zinc-700";
     const bgCls = hasError
-      ? "bg-red-950/10"
+      ? "bg-red-950/30"
       : hasWarn
-        ? "bg-amber-950/10"
-        : "bg-zinc-950";
+        ? "bg-amber-950/30"
+        : "bg-zinc-900";
 
     if (!p || !c) {
       rows.push(
@@ -543,9 +543,9 @@ function PairedView({
         <div
           id={`node-row-${i}`}
           key={i}
-          className={`rounded-md border ${borderCls} bg-zinc-900/60 px-3 py-2`}
+          className={`rounded-md border ${borderCls} bg-zinc-800 px-3 py-2`}
         >
-          <div className="text-xs uppercase tracking-wider text-zinc-500">
+          <div className="text-xs uppercase tracking-wider text-zinc-400">
             Section
           </div>
           <div className="font-semibold text-zinc-100">{p.title}</div>
@@ -564,7 +564,7 @@ function PairedView({
         <div
           id={`node-row-${i}`}
           key={i}
-          className={`rounded-md border ${borderCls} ${bgCls} px-3 py-2 grid grid-cols-1 md:grid-cols-2 gap-2`}
+          className={`rounded-md border ${borderCls} ${bgCls} px-3 py-2 grid grid-cols-1 gap-2`}
         >
           <CueField
             label="Plain cue"
@@ -605,7 +605,7 @@ function PairedView({
               </span>
             )}
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 gap-2">
             <TextField
               label={p.isAction ? "Plain action" : "Plain"}
               value={p.text}
@@ -649,7 +649,7 @@ function TextField({
 }) {
   return (
     <div>
-      <label className="block text-xs uppercase tracking-wider text-zinc-500 mb-1">
+      <label className="block text-xs uppercase tracking-wider text-zinc-400 mb-1 font-semibold">
         {label}
       </label>
       <textarea
@@ -657,7 +657,7 @@ function TextField({
         onChange={(e) => onChange(e.target.value)}
         rows={Math.max(1, Math.min(6, Math.ceil(value.length / 80)))}
         spellCheck={false}
-        className="w-full bg-zinc-900 border border-zinc-800 rounded-md px-2 py-1.5 text-sm text-zinc-200 font-serif leading-relaxed"
+        className="w-full bg-zinc-950 border border-zinc-600 rounded-md px-2 py-1.5 text-sm text-zinc-100 font-serif leading-relaxed focus:border-amber-500 focus:outline-none"
       />
     </div>
   );
@@ -674,14 +674,14 @@ function CueField({
 }) {
   return (
     <div>
-      <label className="block text-xs uppercase tracking-wider text-zinc-500 mb-1">
+      <label className="block text-xs uppercase tracking-wider text-zinc-400 mb-1 font-semibold">
         {label}
       </label>
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
         spellCheck={false}
-        className="w-full bg-zinc-900 border border-zinc-800 rounded-md px-2 py-1.5 text-sm text-zinc-200 font-mono"
+        className="w-full bg-zinc-950 border border-zinc-600 rounded-md px-2 py-1.5 text-sm text-zinc-100 font-mono focus:border-amber-500 focus:outline-none"
       />
     </div>
   );
@@ -783,17 +783,22 @@ function ExportPanel({
         ceremony: metadata.ceremony!,
       });
       const buf = await encryptMRAM(doc, passphrase);
-      const blob = new Blob([buf], { type: "application/octet-stream" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${pairName || "ritual"}.mram`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      const name = pairName || "ritual";
+      const res = await fetch(
+        `/api/author/mram?name=${encodeURIComponent(name)}`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/octet-stream" },
+          body: buf,
+        },
+      );
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || `HTTP ${res.status}`);
+      }
+      const saved = (await res.json()) as { path: string; bytes: number };
       setStatus(
-        `Encrypted ${doc.lines.length} lines across ${doc.sections.length} sections. File downloaded as ${a.download}.`,
+        `Encrypted ${doc.lines.length} lines across ${doc.sections.length} sections. Saved ${saved.bytes} bytes to ${saved.path}.`,
       );
       setStatusKind("ok");
       setPassphrase("");
@@ -810,7 +815,8 @@ function ExportPanel({
     <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4 space-y-3">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-zinc-200">
-          Encrypt &amp; download <code className="text-amber-300">.mram</code>
+          Encrypt &amp; save <code className="text-amber-300">.mram</code> to
+          rituals/
         </h2>
         <div className="text-xs text-zinc-500">
           Passphrase stays in this browser — never sent to any server.
@@ -863,7 +869,7 @@ function ExportPanel({
           onClick={() => void handleEncrypt()}
           className="px-3 py-2 text-sm rounded-md bg-amber-600 text-zinc-950 font-semibold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-amber-500"
         >
-          {busy ? "Encrypting…" : "Encrypt & Download .mram"}
+          {busy ? "Encrypting…" : "Encrypt & Save to rituals/"}
         </button>
         {blockers.length > 0 && (
           <ul className="text-xs text-amber-300 list-disc list-inside">
