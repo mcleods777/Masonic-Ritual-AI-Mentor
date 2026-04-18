@@ -875,23 +875,27 @@ import {
 void _AUDIO_CACHE_STORE_UNUSED;
 
 /**
- * Default Masonic-role → Gemini-voice mapping. Picked for gender + timbre
- * fit. Concrete voice names come from Google's published roster for
- * gemini-3.1-flash-tts-preview. Adjust after listening to samples.
+ * Default Masonic-role → Gemini-voice mapping. All male voices (Masonry
+ * is a men's fraternity — female voices are never appropriate for these
+ * roles). Concrete voice names from Google's published roster for
+ * gemini-3.1-flash-tts-preview. Verified male via
+ * https://docs.cloud.google.com/text-to-speech/docs/gemini-tts — prior
+ * mapping accidentally used Kore, Zephyr, Aoede, Callirrhoe which are
+ * all female voices. Fixed here.
  */
 const GEMINI_ROLE_VOICES: Record<string, string> = {
-  WM: "Kore",
-  SW: "Charon",
-  JW: "Puck",
-  SD: "Fenrir",
-  JD: "Orus",
-  Sec: "Zephyr",
-  Trs: "Aoede",
-  Ch: "Achird",
-  Marshal: "Algenib",
-  Steward: "Rasalgethi",
-  Candidate: "Callirrhoe",
-  Narrator: "Enceladus",
+  WM: "Alnilam",         // firm and strong — authority of the Master
+  SW: "Charon",          // calm and professional — principal officer
+  JW: "Puck",            // upbeat and lively — JW calls craft to refreshment
+  SD: "Fenrir",          // excitable and dynamic — carries orders about
+  JD: "Orus",            // firm and decisive — gate-keeper role
+  Sec: "Iapetus",        // clear and articulate — fits the record-keeper
+  Trs: "Schedar",        // measured, steady — the treasurer's disposition
+  Ch: "Achird",          // friendly and approachable — prayers land warm
+  Marshal: "Algenib",    // gravelly — the enforcer / Tyler role
+  Steward: "Rasalgethi", // distinctive male voice — attendant role
+  Candidate: "Zubenelgenubi", // distinctive male — the new brother
+  Narrator: "Enceladus", // breathy and soft — scene-setter voice
 };
 
 /** Get the default Gemini voice for a Masonic role, or a neutral fallback. */
@@ -901,10 +905,12 @@ export function getGeminiVoiceForRole(role: string): string {
   const group = roleToGroup(role);
   if (group >= 0) {
     // Roles-to-group order must stay in sync with VOXTRAL_ROLE_GROUPS.
+    // Mirror of GEMINI_ROLE_VOICES by group index. All male voices.
+    // Groups 0-11 correspond to VOXTRAL_ROLE_GROUPS ordering.
     const groupDefaults = [
-      "Kore", "Charon", "Puck", "Fenrir", "Orus",
-      "Zephyr", "Achird", "Aoede", "Algenib",
-      "Callirrhoe", "Rasalgethi", "Enceladus",
+      "Alnilam", "Charon", "Puck", "Fenrir", "Orus",
+      "Iapetus", "Achird", "Schedar", "Algenib",
+      "Zubenelgenubi", "Rasalgethi", "Enceladus",
     ];
     return groupDefaults[group] ?? "Kore";
   }
