@@ -28,7 +28,7 @@ import {
  * overwrite, preserving any role the user assigned. Omit = version 1.
  */
 const DEFAULT_VOICES = [
-  { name: "Normal Shannon",      file: "/voices/normal-shannon.wav",       mimeType: "audio/wav",  description: "Shannon, natural delivery",  duration: 10 },
+  { name: "Normal Shannon",      file: "/voices/normal-shannon.wav",       mimeType: "audio/wav",  description: "Shannon, natural delivery",  duration: 10, role: "Chap" },
   { name: "Shannon South African", file: "/voices/shannon-south-african.wav", mimeType: "audio/wav", description: "Shannon, South African accent", duration: 6, role: "JW" },
   { name: "Sith Lord Shannon",   file: "/voices/sith-lord-shannon.wav",    mimeType: "audio/wav",  description: "Shannon, commanding Sith tone", duration: 7, role: "Marshal" },
   { name: "Crazy German",        file: "/voices/crazy-german.wav",         mimeType: "audio/wav",  description: "German accent, theatrical", role: "SD" },
@@ -146,4 +146,30 @@ export async function ensureDefaultVoices(): Promise<{
 /** Get the list of default voice names (for UI to mark them). */
 export function getDefaultVoiceNames(): string[] {
   return DEFAULT_VOICES.map((d) => d.name);
+}
+
+/**
+ * Reset default voices to their shipped role assignments. For each default
+ * voice, the role in DEFAULT_VOICES overwrites whatever is in IndexedDB;
+ * defaults shipped without a role have their role cleared (back to Auto).
+ *
+ * User-recorded voices (createdAt > 0) are never touched. Returns the count
+ * of default voices whose role was changed.
+ */
+export async function resetDefaultVoiceRoles(): Promise<{ changed: number }> {
+  const existing = await listVoices();
+  const byId = new Map(existing.map((v) => [v.id, v]));
+  let changed = 0;
+
+  for (const def of DEFAULT_VOICES) {
+    const id = defaultVoiceId(def.name);
+    const stored = byId.get(id);
+    if (!stored) continue;
+    const shippedRole = "role" in def ? (def.role as string) : undefined;
+    if (stored.role === shippedRole) continue;
+    await saveVoice({ ...stored, role: shippedRole });
+    changed++;
+  }
+
+  return { changed };
 }

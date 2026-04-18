@@ -715,7 +715,9 @@ const VOXTRAL_ROLE_GROUPS: string[][] = [
   // Group 8: Marshal / Tyler
   ["Marshal", "T", "Tyler"],
   // Group 9: Candidate / Brother / Narrator
-  ["Candidate", "BR", "Bro", "Bro.", "Voucher", "Vchr", "Narrator"],
+  ["Candidate", "C", "BR", "Bro", "Bro.", "Voucher", "Vchr", "Narrator"],
+  // Group 10: Stewards
+  ["Steward", "SS", "JS"],
 ];
 
 /** Map a role to a group index (0-9). Returns -1 if not found. */
@@ -742,6 +744,7 @@ export const VOXTRAL_ROLE_OPTIONS = [
   { value: "Chap", label: "Chaplain" },
   { value: "Treas", label: "Treasurer" },
   { value: "Marshal", label: "Marshal / Tyler" },
+  { value: "Steward", label: "Steward" },
   { value: "Candidate", label: "Candidate / Brother" },
   { value: "Narrator", label: "Narrator" },
 ];
