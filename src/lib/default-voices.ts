@@ -29,13 +29,13 @@ import {
  */
 const DEFAULT_VOICES = [
   { name: "Normal Shannon",      file: "/voices/normal-shannon.wav",       mimeType: "audio/wav",  description: "Shannon, natural delivery",  duration: 10 },
-  { name: "Shannon South African", file: "/voices/shannon-south-african.wav", mimeType: "audio/wav", description: "Shannon, South African accent", duration: 6 },
-  { name: "Sith Lord Shannon",   file: "/voices/sith-lord-shannon.wav",    mimeType: "audio/wav",  description: "Shannon, commanding Sith tone", duration: 7 },
-  { name: "Crazy German",        file: "/voices/crazy-german.wav",         mimeType: "audio/wav",  description: "German accent, theatrical" },
-  { name: "Jebidiah",            file: "/voices/jebidiah.wav",             mimeType: "audio/wav",  description: "Rustic, backwoods" },
-  { name: "Old Man",             file: "/voices/old-man.wav",              mimeType: "audio/wav",  description: "Weathered, aged" },
-  { name: "Scottish Man",        file: "/voices/scottish-man.wav",         mimeType: "audio/wav",  description: "Scottish brogue" },
-  { name: "Southern Gentleman",  file: "/voices/southern-gentleman.wav",   mimeType: "audio/wav",  description: "Southern drawl, genteel" },
+  { name: "Shannon South African", file: "/voices/shannon-south-african.wav", mimeType: "audio/wav", description: "Shannon, South African accent", duration: 6, role: "JW" },
+  { name: "Sith Lord Shannon",   file: "/voices/sith-lord-shannon.wav",    mimeType: "audio/wav",  description: "Shannon, commanding Sith tone", duration: 7, role: "Marshal" },
+  { name: "Crazy German",        file: "/voices/crazy-german.wav",         mimeType: "audio/wav",  description: "German accent, theatrical", role: "SD" },
+  { name: "Jebidiah",            file: "/voices/jebidiah.wav",             mimeType: "audio/wav",  description: "Rustic, backwoods", role: "WM" },
+  { name: "Old Man",             file: "/voices/old-man.wav",              mimeType: "audio/wav",  description: "Weathered, aged", role: "Sec" },
+  { name: "Scottish Man",        file: "/voices/scottish-man.wav",         mimeType: "audio/wav",  description: "Scottish brogue", role: "JD" },
+  { name: "Southern Gentleman",  file: "/voices/southern-gentleman.wav",   mimeType: "audio/wav",  description: "Southern drawl, genteel", role: "SW" },
   { name: "Zeus",                file: "/voices/zeus.mp3",                 mimeType: "audio/mpeg", description: "Commanding, deep" },
   { name: "Orion",               file: "/voices/orion.mp3",                mimeType: "audio/mpeg", description: "Clear, steady" },
   { name: "Arcas",               file: "/voices/arcas.mp3",                mimeType: "audio/mpeg", description: "Measured" },
@@ -127,8 +127,9 @@ export async function ensureDefaultVoices(): Promise<{
         audioBase64,
         mimeType: def.mimeType,
         duration: "duration" in def ? (def.duration as number) : 5,
-        // role intentionally omitted — defaults ship unassigned so the
-        // round-robin fallback handles role → voice mapping.
+        // def.role is the ship-time default. User can override on /voices;
+        // their override is preserved by the refresh path on version bump.
+        role: "role" in def ? (def.role as string) : undefined,
         createdAt: 0, // epoch = default voice, distinguishes from user-recorded
         version: canonicalVersion,
       };
