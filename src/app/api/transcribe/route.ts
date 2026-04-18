@@ -41,6 +41,16 @@ export async function POST(req: Request) {
       );
     }
 
+    // Input size cap on paid Groq Whisper endpoint (CSO Finding 4).
+    // 1 MB ≈ 60s of compressed speech — well above any single ritual line.
+    const MAX_AUDIO_BYTES = 1024 * 1024;
+    if (audioFile.size > MAX_AUDIO_BYTES) {
+      return Response.json(
+        { error: `audio exceeds ${MAX_AUDIO_BYTES} byte limit (got ${audioFile.size})` },
+        { status: 413 }
+      );
+    }
+
     // Forward to Groq Whisper API
     const groqForm = new FormData();
     groqForm.append("file", audioFile, "recording.webm");

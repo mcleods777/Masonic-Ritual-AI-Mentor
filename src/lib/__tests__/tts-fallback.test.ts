@@ -32,8 +32,8 @@ describe("TTS engine selection", () => {
     });
   });
 
-  it("defaults to voxtral", () => {
-    expect(getTTSEngine()).toBe("voxtral");
+  it("defaults to gemini", () => {
+    expect(getTTSEngine()).toBe("gemini");
   });
 
   it("persists engine selection", () => {
@@ -50,6 +50,7 @@ describe("TTS engine selection", () => {
       "deepgram",
       "kokoro",
       "voxtral",
+      "gemini",
     ] as const;
 
     for (const engine of engines) {

@@ -25,19 +25,25 @@ import {
   speakKokoroAsRole,
   speakVoxtral,
   speakVoxtralAsRole,
+  speakGemini,
+  speakGeminiAsRole,
   stopCloudAudio,
   isCloudAudioPlaying,
+  getUserRecordedRefAudioForRole,
 } from "./tts-cloud";
 
 // ============================================================
 // Engine selection
 // ============================================================
 
-export type TTSEngineName = "browser" | "elevenlabs" | "google-cloud" | "deepgram" | "kokoro" | "voxtral";
+export type TTSEngineName = "browser" | "elevenlabs" | "google-cloud" | "deepgram" | "kokoro" | "voxtral" | "gemini";
 
 const TTS_ENGINE_STORAGE_KEY = "tts-engine";
 
-let currentEngine: TTSEngineName = "voxtral";
+// Gemini 3.1 Flash TTS is the default for new users. Existing users who
+// have explicitly picked a different engine keep their choice because the
+// localStorage read below runs after this default.
+let currentEngine: TTSEngineName = "gemini";
 
 // Restore persisted engine on module load (client only)
 if (typeof window !== "undefined") {
@@ -48,7 +54,8 @@ if (typeof window !== "undefined") {
     stored === "google-cloud" ||
     stored === "deepgram" ||
     stored === "kokoro" ||
-    stored === "voxtral"
+    stored === "voxtral" ||
+    stored === "gemini"
   ) {
     currentEngine = stored;
   }
@@ -59,11 +66,16 @@ export function getTTSEngine(): TTSEngineName {
   return currentEngine;
 }
 
-/** Set the active TTS engine. Persists to localStorage. */
+/** Set the active TTS engine. Persists to localStorage + broadcasts. */
 export function setTTSEngine(engine: TTSEngineName): void {
   currentEngine = engine;
   if (typeof window !== "undefined") {
     localStorage.setItem(TTS_ENGINE_STORAGE_KEY, engine);
+    // Broadcast to any component subscribed via addEventListener so
+    // the UI can react to engine changes (e.g. Gemini-only panels).
+    window.dispatchEvent(
+      new CustomEvent("tts-engine-changed", { detail: engine }),
+    );
   }
 }
 
@@ -363,6 +375,7 @@ export async function speak(
       case "deepgram": return speakDeepgram(text);
       case "kokoro": return speakKokoro(text);
       case "voxtral": return speakVoxtral(text);
+      case "gemini": return speakGemini(text);
       default: return speakBrowser(text, options);
     }
   };
@@ -397,13 +410,42 @@ export async function speak(
 
 /**
  * Speak text as a specific officer role using the current engine.
- * Falls back to Google Cloud → Browser if the primary engine fails.
+ * Falls back through Voxtral → Google Cloud → Browser if the primary
+ * engine fails.
+ *
+ * The `style` param is an optional Gemini 3.1 Flash TTS audio tag
+ * ("gravely", "reverently", etc.) — consumed only by the Gemini engine
+ * and silently ignored by every other engine. Source: `section.style`
+ * populated from the .mram file via mramToSections().
  */
 export async function speakAsRole(
   text: string,
   role: string,
-  voiceMap?: Map<string, RoleVoiceProfile>
+  voiceMap?: Map<string, RoleVoiceProfile>,
+  style?: string,
 ): Promise<void> {
+  // Per-role Voxtral override: if the Brother recorded their own voice
+  // and assigned it to this role, that clone plays regardless of the
+  // currently-active engine. Default shipped voices don't trigger this
+  // (see getUserRecordedRefAudioForRole for why).
+  if (currentEngine !== "voxtral") {
+    const userClone = await getUserRecordedRefAudioForRole(role);
+    if (userClone) {
+      try {
+        await speakVoxtral(text, userClone);
+        lastTTSError = null;
+        return;
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") throw err;
+        console.warn(
+          `Voxtral override for role ${role} failed, falling through to ${currentEngine}:`,
+          err,
+        );
+        // Fall through to the normal engine dispatch.
+      }
+    }
+  }
+
   const primary = () => {
     switch (currentEngine) {
       case "elevenlabs": return speakElevenLabsAsRole(text, role);
@@ -411,6 +453,7 @@ export async function speakAsRole(
       case "deepgram": return speakDeepgramAsRole(text, role);
       case "kokoro": return speakKokoroAsRole(text, role);
       case "voxtral": return speakVoxtralAsRole(text, role);
+      case "gemini": return speakGeminiAsRole(text, role, style);
       default: {
         const profile = voiceMap?.get(role) || getVoiceForRole(role);
         return speakBrowser(text, {
@@ -434,20 +477,27 @@ export async function speakAsRole(
 
     if (currentEngine === "browser" || currentEngine === "google-cloud") throw err;
 
-    // Try Google Cloud as fallback (better quality than browser)
+    // Fallback chain: prefer Voxtral (voice-cloning, good quality, has the
+    // user's character voices). Then Google Cloud Neural2. Then browser as
+    // last resort. Previous version went straight to Google Cloud — that
+    // made Gemini failures silently robotic because Google Cloud's generic
+    // voices are the "robot-adjacent" ones in this stack.
     try {
-      await speakGoogleCloudAsRole(text, role);
+      await speakVoxtralAsRole(text, role);
     } catch {
-      // Google also failed — try browser as last resort
       try {
-        const profile = voiceMap?.get(role) || getVoiceForRole(role);
-        await speakBrowser(text, {
-          pitch: profile.pitch,
-          rate: profile.rate,
-          voiceName: profile.voiceName,
-        });
+        await speakGoogleCloudAsRole(text, role);
       } catch {
-        throw err;
+        try {
+          const profile = voiceMap?.get(role) || getVoiceForRole(role);
+          await speakBrowser(text, {
+            pitch: profile.pitch,
+            rate: profile.rate,
+            voiceName: profile.voiceName,
+          });
+        } catch {
+          throw err;
+        }
       }
     }
   }

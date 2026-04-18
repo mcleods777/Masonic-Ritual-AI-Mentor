@@ -15,5 +15,6 @@ export async function GET() {
     deepgram: !!process.env.DEEPGRAM_API_KEY,
     kokoro: !!process.env.KOKORO_TTS_URL,
     voxtral: !!process.env.MISTRAL_API_KEY,
+    gemini: !!process.env.GOOGLE_GEMINI_API_KEY,
   });
 }

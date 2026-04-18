@@ -14,7 +14,11 @@ import {
 } from "@/lib/voice-storage";
 import { clearVoxtralVoicesCache, VOXTRAL_ROLE_OPTIONS } from "@/lib/tts-cloud";
 import { normalizeAudio, encodeWav } from "@/lib/audio-utils";
-import { ensureDefaultVoices, getDefaultVoiceNames } from "@/lib/default-voices";
+import {
+  ensureDefaultVoices,
+  getDefaultVoiceNames,
+  resetDefaultVoiceRoles,
+} from "@/lib/default-voices";
 import { fetchApi } from "@/lib/api-fetch";
 
 // ============================================================
@@ -687,6 +691,22 @@ export default function VoicesPage() {
             </span>
           </h2>
           <div className="flex items-center gap-2">
+            <button
+              onClick={async () => {
+                const { changed } = await resetDefaultVoiceRoles();
+                clearVoxtralVoicesCache();
+                await fetchVoices();
+                setSuccess(
+                  changed > 0
+                    ? `Reset ${changed} default voice role${changed === 1 ? "" : "s"} to shipped defaults.`
+                    : "Default voice roles already match shipped defaults.",
+                );
+              }}
+              className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-sm font-medium transition-colors"
+              title="Reset default character voices to their shipped role assignments. Does not touch your recorded voices."
+            >
+              Reset Defaults
+            </button>
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={importing}

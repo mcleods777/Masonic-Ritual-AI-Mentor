@@ -12,6 +12,7 @@ import {
   type RoleVoiceProfile,
 } from "@/lib/text-to-speech";
 import { playGavelKnocks, countGavelMarks, warmAudioContext } from "@/lib/gavel-sound";
+import GeminiPreloadPanel from "./GeminiPreloadPanel";
 
 interface ListenModeProps {
   sections: RitualSectionWithCipher[];
@@ -125,7 +126,7 @@ export default function ListenMode({ sections }: ListenModeProps) {
             for (let attempt = 0; attempt < 2 && !spoken; attempt++) {
               if (stale()) return;
               try {
-                await speakAsRole(cleanText, section.speaker, voiceMapRef.current);
+                await speakAsRole(cleanText, section.speaker, voiceMapRef.current, section.style);
                 spoken = true;
               } catch (err) {
                 // Don't retry if this was an intentional abort (user tapped a different line)
@@ -215,7 +216,7 @@ export default function ListenMode({ sections }: ListenModeProps) {
           const cleanText = cleanRitualText(section.text);
           if (cleanText) {
             try {
-              await speakAsRole(cleanText, section.speaker, voiceMapRef.current);
+              await speakAsRole(cleanText, section.speaker, voiceMapRef.current, section.style);
             } catch {
               /* ignore */
             }
@@ -250,6 +251,10 @@ export default function ListenMode({ sections }: ListenModeProps) {
 
   return (
     <div className="space-y-4">
+      {/* Gemini audio preload panel — visible only when Gemini is the
+          selected engine. Shared with RehearsalMode. */}
+      <GeminiPreloadPanel sections={sections} />
+
       {/* Header */}
       <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-5">
         <div className="flex items-center justify-between mb-3">

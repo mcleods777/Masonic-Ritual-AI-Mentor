@@ -27,6 +27,7 @@ import {
 } from "@/lib/text-to-speech";
 import { playGavelKnocks, countGavelMarks, warmAudioContext } from "@/lib/gavel-sound";
 import { VOXTRAL_ROLE_OPTIONS } from "@/lib/tts-cloud";
+import GeminiPreloadPanel from "./GeminiPreloadPanel";
 import {
   decideLineAction,
   planComparisonAction,
@@ -89,6 +90,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   const [feedbackVoice, setFeedbackVoice] = useState<string>("Narrator");
   const [ttsToast, setTtsToast] = useState<string | null>(null);
   const [autoStop, setAutoStop] = useState(true);
+
 
   const engineRef = useRef<STTEngine | null>(null);
   const sttProviderRef = useRef<STTProvider>(sttProvider);
@@ -208,6 +210,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
     // Advance will be triggered by effect
   }, []);
 
+
   // Internal advance — walks through lines with a generation guard.
   // Only the matching generation is allowed to continue; a new call
   // to advanceToLine() bumps the generation so any old chain exits.
@@ -254,7 +257,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
         for (let attempt = 0; attempt < 2 && !spoken; attempt++) {
           if (stale()) return;
           try {
-            await speakAsRole(cleanText, section.speaker, voiceMapRef.current);
+            await speakAsRole(cleanText, section.speaker, voiceMapRef.current, section.style);
             spoken = true;
             // Check if a fallback was used (primary engine failed but browser worked)
             const fallbackMsg = getLastTTSError();
@@ -650,7 +653,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
         if (cleanText) {
           setRehearsalState("ai-speaking");
           try {
-            await speakAsRole(cleanText, section.speaker, voiceMapRef.current);
+            await speakAsRole(cleanText, section.speaker, voiceMapRef.current, section.style);
           } catch {
             /* ignore */
           }
@@ -688,7 +691,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
 
       if (section.speaker) {
         try {
-          await speakAsRole(cleanText, section.speaker, voiceMapRef.current);
+          await speakAsRole(cleanText, section.speaker, voiceMapRef.current, section.style);
         } catch {
           try { await speak(cleanText); } catch { /* ignore */ }
         }
@@ -767,6 +770,10 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   // ============================================================
   // RENDER
   // ============================================================
+
+  // Gemini preload panel — shared component with ListenMode. Renders
+  // null when the engine isn't Gemini.
+  const preloadPanel = <GeminiPreloadPanel sections={sections} />;
 
   // Setup: pick a role
   if (rehearsalState === "setup") {
@@ -941,6 +948,8 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
                   </p>
                 )}
               </div>
+
+              {preloadPanel && <div className="mt-6">{preloadPanel}</div>}
             </div>
           )}
         </div>
@@ -1044,6 +1053,10 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   // Active rehearsal (ai-speaking, user-turn, listening, transcribing, checking)
   return (
     <div className="space-y-4">
+      {/* Gemini preload panel — persistent during active rehearsal so the
+          user can kick off a preload or check progress any time. */}
+      {preloadPanel}
+
       {/* TTS fallback toast */}
       {ttsToast && (
         <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3 flex items-center justify-between">

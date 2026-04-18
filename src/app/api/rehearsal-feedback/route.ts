@@ -77,6 +77,15 @@ export async function POST(req: Request) {
       performanceContext,
     } = await req.json();
 
+    // Input size cap on paid LLM endpoint (CSO Finding 4). The context
+    // field is the only user-controlled free-text — cap it here.
+    if (typeof performanceContext === "string" && performanceContext.length > 4000) {
+      return Response.json(
+        { error: `performanceContext exceeds 4000 char limit (got ${performanceContext.length})` },
+        { status: 413 }
+      );
+    }
+
     const userPrompt = [
       `The Brother just recited line ${lineNumber} of ${totalLines}.`,
       `Accuracy: ${accuracy}%`,

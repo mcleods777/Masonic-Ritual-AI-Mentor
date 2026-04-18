@@ -52,9 +52,19 @@ describe("roleToGroup", () => {
 
   it("maps candidate/brother to group 9", () => {
     expect(roleToGroup("Candidate")).toBe(9);
+    expect(roleToGroup("C")).toBe(9);
     expect(roleToGroup("BR")).toBe(9);
     expect(roleToGroup("Bro")).toBe(9);
-    expect(roleToGroup("Narrator")).toBe(9);
+  });
+
+  it("maps stewards to group 10", () => {
+    expect(roleToGroup("Steward")).toBe(10);
+    expect(roleToGroup("SS")).toBe(10);
+    expect(roleToGroup("JS")).toBe(10);
+  });
+
+  it("maps narrator to group 11 (split from candidate)", () => {
+    expect(roleToGroup("Narrator")).toBe(11);
   });
 
   it("returns -1 for unknown roles", () => {
@@ -70,8 +80,8 @@ describe("VOXTRAL_ROLE_OPTIONS", () => {
     expect(VOXTRAL_ROLE_OPTIONS[0].label).toContain("Auto");
   });
 
-  it("has 12 options total (auto + 11 roles)", () => {
-    expect(VOXTRAL_ROLE_OPTIONS.length).toBe(12);
+  it("has 13 options total (auto + 12 roles)", () => {
+    expect(VOXTRAL_ROLE_OPTIONS.length).toBe(13);
   });
 
   it("includes all major officer roles", () => {
