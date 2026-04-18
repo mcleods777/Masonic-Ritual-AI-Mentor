@@ -48,6 +48,14 @@ export interface MRAMLine {
   action: string | null; // Stage direction text or null
   cipher: string;  // Cipher/abbreviated text (shown to user)
   plain: string;   // Full plain text (used for AI coaching & comparison)
+  /**
+   * Optional Gemini 3.1 Flash TTS audio tag for expressive delivery
+   * (e.g., "gravely", "reverently", "whispers"). Only consumed by
+   * the Gemini TTS engine; other engines ignore this field entirely.
+   * Validates against STYLE_TAG_PATTERN in src/lib/styles.ts.
+   * Present in FORMAT_VERSION 2+ files only.
+   */
+  style?: string;
 }
 
 // ============================================================
@@ -55,7 +63,8 @@ export interface MRAMLine {
 // ============================================================
 
 const MAGIC = new Uint8Array([0x4D, 0x52, 0x41, 0x4D]); // "MRAM"
-const FORMAT_VERSION = 1;
+const FORMAT_VERSION = 2; // v1 files decrypt fine (style field undefined); v2 adds MRAMLine.style
+const SUPPORTED_VERSIONS = [1, 2];
 const SALT_LENGTH = 16;
 const IV_LENGTH = 12;
 const PBKDF2_ITERATIONS = 310_000; // OWASP 2023 recommended minimum
@@ -162,11 +171,12 @@ export async function decryptMRAM(
     }
   }
 
-  // Read version
+  // Read version. v1 and v2 are both supported; v1 files simply have no
+  // style field on any MRAMLine (JSON.parse leaves it undefined).
   const version = bytes[MAGIC.length];
-  if (version !== FORMAT_VERSION) {
+  if (!SUPPORTED_VERSIONS.includes(version)) {
     throw new Error(
-      `Unsupported file version (${version}). This app supports version ${FORMAT_VERSION}.`
+      `Unsupported file version (${version}). This app supports versions ${SUPPORTED_VERSIONS.join(", ")}.`
     );
   }
 
