@@ -174,7 +174,7 @@ describe("buildFromDialogue — shape", () => {
     expect(doc.roles.SW).toBe("Senior Warden");
     expect(doc.roles.JD).toBe("Junior Deacon");
     expect(doc.roles.ALL).toBe("All Brethren");
-    expect(doc.roles.Ch).toBe("Chaplain (or WM)");
+    expect(doc.roles.Ch).toBe("Chaplain");
   });
 });
 

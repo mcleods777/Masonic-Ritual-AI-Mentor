@@ -17,7 +17,6 @@
 import {
   listVoices,
   saveVoice,
-  assignVoiceRole,
   type LocalVoice,
 } from "./voice-storage";
 
@@ -70,7 +69,6 @@ async function fetchAsBase64(url: string): Promise<string> {
 export async function ensureDefaultVoices(): Promise<{
   loaded: number;
   skipped: number;
-  migrated: number;
 }> {
   const existing = await listVoices();
   // Dedupe by id (not name) so a renamed default is not re-created on next visit.
@@ -104,19 +102,7 @@ export async function ensureDefaultVoices(): Promise<{
     }
   }
 
-  // Migration: earlier versions shipped defaults with explicit role assignments
-  // (WM, SW, JW, ...). Clear those so existing installs also get round-robin.
-  // Only touches default voices (createdAt === 0) — user-recorded voices
-  // (createdAt > 0) keep whatever role the user assigned.
-  let migrated = 0;
-  for (const v of existing) {
-    if (v.createdAt === 0 && v.role) {
-      await assignVoiceRole(v.id, undefined);
-      migrated++;
-    }
-  }
-
-  return { loaded, skipped, migrated };
+  return { loaded, skipped };
 }
 
 /** Get the list of default voice names (for UI to mark them). */
