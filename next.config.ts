@@ -1,12 +1,48 @@
 import type { NextConfig } from "next";
 
+// Security headers. CSP is intentionally permissive on scripts/styles
+// ('unsafe-inline' + 'unsafe-eval') because Next.js App Router hydration
+// and Tailwind JIT both need inline execution. Tightening to nonce-based
+// CSP requires threading nonces through every Server Component, which is
+// not worth the ceremony at pilot scale. The non-negotiable pieces
+// (frame-ancestors, object-src, base-uri, form-action) are all locked.
+// connect-src allows our paid AI upstreams so fetch() calls don't break.
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "connect-src 'self' https://api.mistral.ai https://generativelanguage.googleapis.com https://texttospeech.googleapis.com https://api.resend.com",
+  "media-src 'self' blob: data:",
+  "worker-src 'self' blob:",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+].join("; ");
+
+const SECURITY_HEADERS = [
+  { key: "Content-Security-Policy", value: CSP },
+  { key: "X-Frame-Options", value: "DENY" },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  { key: "Permissions-Policy", value: "camera=(), microphone=(self), geolocation=()" },
+];
+
 const nextConfig: NextConfig = {
-  // Use Turbopack (default in Next.js 16)
   turbopack: {},
-  // Webpack fallback config for pdf.js worker (used if --webpack flag is passed)
   webpack: (config) => {
     config.resolve.alias.canvas = false;
     return config;
+  },
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: SECURITY_HEADERS,
+      },
+    ];
   },
 };
 
