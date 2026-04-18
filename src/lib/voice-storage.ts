@@ -25,10 +25,9 @@ export interface LocalVoice {
   role?: string;
   createdAt: number;
   /**
-   * Default-voice audio version. Only set on default voices. When the
-   * shipped DEFAULT_VOICES entry has a higher version than what's stored,
-   * ensureDefaultVoices() re-fetches the audio and overwrites, preserving
-   * user-assigned role. User-recorded voices leave this undefined.
+   * Vestigial field from the deprecated default-voices system. Kept to
+   * preserve compatibility with previously-exported voice JSON files that
+   * still carry a version stamp. Currently ignored by all readers.
    */
   version?: number;
 }
@@ -176,6 +175,43 @@ export async function deleteVoice(id: string): Promise<void> {
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
+}
+
+/**
+ * One-shot migration: delete legacy default voices (id starts with "default-")
+ * from IndexedDB. Marks completion in localStorage so it runs at most once
+ * per browser. Safe to call repeatedly.
+ *
+ * Background: the app used to ship 15 preset Voxtral voices that loaded into
+ * IndexedDB on first visit and pre-assigned themselves to officer roles. We
+ * removed the default-voices system in favor of Gemini-by-default with
+ * user-recorded Voxtral as a per-role override. Existing browsers still have
+ * those 15 voices sitting around — this purges them so the Voices page is
+ * clean and no stale role assignments leak Voxtral playback into Gemini mode.
+ */
+const PURGE_LEGACY_DEFAULTS_MARKER = "voice-defaults-purged-v1";
+
+export async function purgeLegacyDefaultVoices(): Promise<{ purged: number }> {
+  if (typeof window === "undefined") return { purged: 0 };
+  if (window.localStorage.getItem(PURGE_LEGACY_DEFAULTS_MARKER)) {
+    return { purged: 0 };
+  }
+  try {
+    const voices = await listVoices();
+    const legacy = voices.filter((v) => v.id.startsWith("default-"));
+    for (const v of legacy) {
+      await deleteVoice(v.id);
+    }
+    window.localStorage.setItem(
+      PURGE_LEGACY_DEFAULTS_MARKER,
+      String(Date.now())
+    );
+    return { purged: legacy.length };
+  } catch {
+    // IndexedDB unavailable, in private mode, or quota — leave the marker
+    // unset so we retry on a future load when conditions allow.
+    return { purged: 0 };
+  }
 }
 
 /** Update role assignment for a voice. */
