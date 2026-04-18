@@ -2,7 +2,11 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { getTTSEngine } from "@/lib/text-to-speech";
-import { preloadGeminiRitual, type PrefetchProgress } from "@/lib/tts-cloud";
+import {
+  preloadGeminiRitual,
+  countCachedGeminiLines,
+  type PrefetchProgress,
+} from "@/lib/tts-cloud";
 import { cleanRitualText } from "@/lib/document-parser";
 import type { RitualSectionWithCipher } from "@/lib/storage";
 
@@ -26,6 +30,13 @@ export default function GeminiPreloadPanel({
     "idle" | "running" | "done" | "aborted"
   >("idle");
   const [preloadProgress, setPreloadProgress] = useState<PrefetchProgress | null>(null);
+  // Pre-existing cache state surfaced on mount so mode-switches (Listen ↔
+  // Rehearsal) don't make the user think their preload was thrown away.
+  // The IndexedDB cache is persistent; only the panel's own useState was lost.
+  const [cachedSummary, setCachedSummary] = useState<{
+    cached: number;
+    total: number;
+  } | null>(null);
   const abortRef = useRef<(() => void) | null>(null);
 
   // Keep engine selection reactive. setTTSEngine() dispatches the event.
@@ -39,6 +50,33 @@ export default function GeminiPreloadPanel({
     window.addEventListener("tts-engine-changed", handler);
     return () => window.removeEventListener("tts-engine-changed", handler);
   }, []);
+
+  // Probe IndexedDB on mount (and when sections change) to reflect what's
+  // actually cached. If every spoken line is already cached, jump straight
+  // to the "done" state so switching modes doesn't reset the UI.
+  useEffect(() => {
+    if (currentEngine !== "gemini") return;
+    if (preloadState === "running") return;
+    let cancelled = false;
+    (async () => {
+      const lines = sections
+        .filter((s) => s.speaker && cleanRitualText(s.text).length > 0)
+        .map((s) => ({
+          text: cleanRitualText(s.text),
+          role: s.speaker,
+          style: s.style,
+        }));
+      const summary = await countCachedGeminiLines(lines);
+      if (cancelled) return;
+      setCachedSummary(summary);
+      if (summary.total > 0 && summary.cached === summary.total) {
+        setPreloadState("done");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sections, currentEngine, preloadState]);
 
   const startPreload = useCallback(() => {
     const spokenLines = sections
@@ -84,12 +122,21 @@ export default function GeminiPreloadPanel({
           </div>
         </div>
         {preloadState === "idle" && (
-          <button
-            onClick={startPreload}
-            className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-amber-300 rounded-md text-sm font-medium transition-colors whitespace-nowrap"
-          >
-            Preload audio
-          </button>
+          <div className="flex items-center gap-2 whitespace-nowrap">
+            {cachedSummary && cachedSummary.cached > 0 && cachedSummary.cached < cachedSummary.total && (
+              <span className="text-xs text-zinc-400">
+                {cachedSummary.cached} / {cachedSummary.total} already cached
+              </span>
+            )}
+            <button
+              onClick={startPreload}
+              className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-amber-300 rounded-md text-sm font-medium transition-colors"
+            >
+              {cachedSummary && cachedSummary.cached > 0 && cachedSummary.cached < cachedSummary.total
+                ? "Resume preload"
+                : "Preload audio"}
+            </button>
+          </div>
         )}
         {preloadState === "running" && (
           <button

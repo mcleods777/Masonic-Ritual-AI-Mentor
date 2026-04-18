@@ -788,6 +788,42 @@ export async function hasLocalVoices(): Promise<boolean> {
   return voices.length > 0;
 }
 
+/**
+ * Resolve a user-recorded Voxtral voice for a role, if one exists.
+ * Returns the ref_audio base64 for the assigned clone, or undefined
+ * otherwise. Used by speakAsRole() to let a Brother's own recording
+ * override the current engine (e.g. Gemini) on a per-role basis.
+ *
+ * Deliberate exclusion: default shipped voices (createdAt === 0) do NOT
+ * override the active engine. Every default ships with a role assignment,
+ * so treating any role assignment as an override would silently redirect
+ * every role to Voxtral for fresh Gemini users. Only user-recorded voices
+ * (createdAt > 0) signal "I explicitly want this clone here."
+ */
+export async function getUserRecordedRefAudioForRole(
+  role: string
+): Promise<string | undefined> {
+  const group = roleToGroup(role);
+  if (group < 0) return undefined;
+  const rolesInGroup = VOXTRAL_ROLE_GROUPS[group];
+  const voices = await getLocalVoices();
+  const match = voices.find(
+    (v) => v.createdAt > 0 && v.role && rolesInGroup.includes(v.role)
+  );
+  return match?.audioBase64;
+}
+
+/**
+ * Synchronous-style probe: does any user-recorded voice claim this role?
+ * Used by the preload panel to skip lines that would be overridden to
+ * Voxtral (no point burning Gemini API credits on audio we'll never play).
+ */
+export async function hasUserRecordedVoiceForRole(
+  role: string
+): Promise<boolean> {
+  return (await getUserRecordedRefAudioForRole(role)) !== undefined;
+}
+
 /** Speak text using Voxtral TTS (with retry for transient errors). */
 export async function speakVoxtral(
   text: string,
@@ -1101,6 +1137,32 @@ export async function prefetchGeminiLine(
   } catch {
     return "error";
   }
+}
+
+/**
+ * Count how many spoken lines are already cached in IndexedDB. Lets the
+ * preload panel show accurate state on mount (the cache is persistent
+ * across React component lifecycles and mode switches, but the panel's
+ * local useState is not). Skips lines without a speaker or empty text,
+ * matching preloadGeminiRitual's own skip rules.
+ */
+export async function countCachedGeminiLines(
+  lines: { text: string; role: string | null; style?: string }[]
+): Promise<{ cached: number; total: number }> {
+  let cached = 0;
+  let total = 0;
+  for (const line of lines) {
+    if (!line.role || !line.text.trim()) continue;
+    // Skip roles that will be played via a user-recorded Voxtral clone
+    // — Gemini audio for those roles is never used.
+    if (await hasUserRecordedVoiceForRole(line.role)) continue;
+    total++;
+    const voice = getGeminiVoiceForRole(line.role);
+    const key = await geminiCacheKey(line.text, line.style, voice);
+    const hit = await getCachedAudio(key);
+    if (hit) cached++;
+  }
+  return { cached, total };
 }
 
 /**

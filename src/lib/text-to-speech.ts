@@ -29,6 +29,7 @@ import {
   speakGeminiAsRole,
   stopCloudAudio,
   isCloudAudioPlaying,
+  getUserRecordedRefAudioForRole,
 } from "./tts-cloud";
 
 // ============================================================
@@ -39,7 +40,10 @@ export type TTSEngineName = "browser" | "elevenlabs" | "google-cloud" | "deepgra
 
 const TTS_ENGINE_STORAGE_KEY = "tts-engine";
 
-let currentEngine: TTSEngineName = "voxtral";
+// Gemini 3.1 Flash TTS is the default for new users. Existing users who
+// have explicitly picked a different engine keep their choice because the
+// localStorage read below runs after this default.
+let currentEngine: TTSEngineName = "gemini";
 
 // Restore persisted engine on module load (client only)
 if (typeof window !== "undefined") {
@@ -420,6 +424,28 @@ export async function speakAsRole(
   voiceMap?: Map<string, RoleVoiceProfile>,
   style?: string,
 ): Promise<void> {
+  // Per-role Voxtral override: if the Brother recorded their own voice
+  // and assigned it to this role, that clone plays regardless of the
+  // currently-active engine. Default shipped voices don't trigger this
+  // (see getUserRecordedRefAudioForRole for why).
+  if (currentEngine !== "voxtral") {
+    const userClone = await getUserRecordedRefAudioForRole(role);
+    if (userClone) {
+      try {
+        await speakVoxtral(text, userClone);
+        lastTTSError = null;
+        return;
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") throw err;
+        console.warn(
+          `Voxtral override for role ${role} failed, falling through to ${currentEngine}:`,
+          err,
+        );
+        // Fall through to the normal engine dispatch.
+      }
+    }
+  }
+
   const primary = () => {
     switch (currentEngine) {
       case "elevenlabs": return speakElevenLabsAsRole(text, role);
