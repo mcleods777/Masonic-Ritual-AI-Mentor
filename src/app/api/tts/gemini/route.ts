@@ -132,7 +132,7 @@ export async function POST(request: NextRequest) {
   const data = (await resp.json()) as GeminiResponse;
   const part = data.candidates?.[0]?.content?.parts?.[0];
   const audioB64 = part?.inlineData?.data;
-  const mimeType = part?.inlineData?.mimeType ?? "audio/mpeg";
+  const mimeType = part?.inlineData?.mimeType ?? "audio/L16;codec=pcm;rate=24000";
 
   if (!audioB64) {
     console.error("Gemini TTS returned no audio:", JSON.stringify(data));
@@ -142,12 +142,71 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const audioBytes = Buffer.from(audioB64, "base64");
+  const pcmBytes = Buffer.from(audioB64, "base64");
 
-  return new NextResponse(audioBytes, {
+  // Gemini TTS returns raw PCM (typically L16 mono @ 24000 Hz) with a MIME
+  // like "audio/L16;codec=pcm;rate=24000". The browser's <audio> element
+  // can't play raw PCM directly — without a container, it either refuses
+  // or interprets the bytes at some default sample rate, producing the
+  // "robotic" playback seen in the initial integration.
+  //
+  // Fix: wrap the PCM in a minimal 44-byte WAV/RIFF header and return as
+  // audio/wav. The <audio> element plays WAV natively in every browser.
+  const sampleRate = parseSampleRate(mimeType);
+  const wavBytes = wrapPcmInWav(pcmBytes, sampleRate, 1, 16);
+
+  return new NextResponse(new Uint8Array(wavBytes), {
     headers: {
-      "Content-Type": mimeType,
+      "Content-Type": "audio/wav",
       "Cache-Control": "no-cache",
     },
   });
+}
+
+/**
+ * Parse the sample rate from a Gemini TTS response MIME like
+ *   audio/L16;codec=pcm;rate=24000
+ * Falls back to 24000 Hz (the Gemini 3.1 Flash TTS default) if absent.
+ */
+function parseSampleRate(mimeType: string): number {
+  const m = /rate=(\d+)/.exec(mimeType);
+  if (m) {
+    const rate = parseInt(m[1], 10);
+    if (Number.isFinite(rate) && rate > 0) return rate;
+  }
+  return 24000;
+}
+
+/**
+ * Prepend a 44-byte RIFF/WAVE header to raw PCM bytes so a standard
+ * <audio> element can play the result. Little-endian throughout.
+ *
+ * https://docs.fileformat.com/audio/wav/
+ */
+function wrapPcmInWav(
+  pcm: Buffer,
+  sampleRate: number,
+  channels: number,
+  bitsPerSample: number,
+): Buffer {
+  const byteRate = (sampleRate * channels * bitsPerSample) / 8;
+  const blockAlign = (channels * bitsPerSample) / 8;
+  const dataSize = pcm.length;
+  const header = Buffer.alloc(44);
+
+  header.write("RIFF", 0, "ascii");
+  header.writeUInt32LE(36 + dataSize, 4); // file size - 8
+  header.write("WAVE", 8, "ascii");
+  header.write("fmt ", 12, "ascii");
+  header.writeUInt32LE(16, 16);            // fmt chunk size (PCM = 16)
+  header.writeUInt16LE(1, 20);             // format = PCM (uncompressed)
+  header.writeUInt16LE(channels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write("data", 36, "ascii");
+  header.writeUInt32LE(dataSize, 40);
+
+  return Buffer.concat([header, pcm]);
 }

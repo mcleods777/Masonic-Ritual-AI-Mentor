@@ -911,13 +911,24 @@ export function getGeminiVoiceForRole(role: string): string {
   return "Kore";
 }
 
-/** Content-addressed cache key for Gemini audio output. */
+/**
+ * Content-addressed cache key for Gemini audio output.
+ *
+ * KEY_VERSION prefix lets us invalidate the cache when the server audio
+ * format changes without clearing IndexedDB. Bump on any server-side
+ * change that affects bytes (PCM → WAV wrapping, codec change, etc.).
+ *
+ *   v1: initial release — raw PCM bytes served as audio/mpeg (broken —
+ *       browser played as garbled/robotic audio without WAV header)
+ *   v2: server wraps PCM in 44-byte WAV/RIFF header → audio/wav
+ */
 async function geminiCacheKey(
   text: string,
   style: string | undefined,
   voice: string
 ): Promise<string> {
-  const material = `${text}\x00${style ?? ""}\x00${voice}`;
+  const KEY_VERSION = "v2";
+  const material = `${KEY_VERSION}\x00${text}\x00${style ?? ""}\x00${voice}`;
   const bytes = new TextEncoder().encode(material);
   const hash = await crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(hash))
