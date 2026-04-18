@@ -24,9 +24,31 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { STYLE_TAG_PATTERN } from "@/lib/styles";
 
-const GEMINI_MODEL = "gemini-3.1-flash-tts-preview";
-const GEMINI_ENDPOINT =
-  `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:streamGenerateContent?alt=sse`;
+// Gemini TTS preview models, tried in order on 429. Each model has its
+// own daily quota bucket — when 3.1-flash hits its preview cap we can
+// silently fall through to 2.5 variants. All three accept identical
+// request/response shapes and the same prebuilt voice names (Alnilam,
+// Charon, etc.) so the fallback is fully transparent to callers.
+//
+// Override via GEMINI_TTS_MODELS env var (comma-separated, in
+// preferred order) to hot-swap without a deploy when Google rotates
+// preview model availability.
+const DEFAULT_GEMINI_MODELS = [
+  "gemini-3.1-flash-tts-preview",
+  "gemini-2.5-flash-preview-tts",
+  "gemini-2.5-pro-preview-tts",
+];
+
+function getGeminiModels(): string[] {
+  const env = process.env.GEMINI_TTS_MODELS?.trim();
+  if (!env) return DEFAULT_GEMINI_MODELS;
+  const parsed = env.split(",").map((s) => s.trim()).filter(Boolean);
+  return parsed.length > 0 ? parsed : DEFAULT_GEMINI_MODELS;
+}
+
+function geminiEndpoint(model: string): string {
+  return `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`;
+}
 
 // Eng-review + CSO finding: cap input text length on paid AI endpoints.
 // 2000 chars covers the longest Initiation line (the 1,401-char Obligation)
@@ -97,20 +119,69 @@ export async function POST(request: NextRequest) {
     },
   };
 
-  const resp = await fetch(`${GEMINI_ENDPOINT}&key=${apiKey}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(gemReq),
-  });
+  // Try each model in order. 429 (quota) → fall through to next model.
+  // Any other non-2xx is a real failure: surface immediately so the client
+  // fallback chain (Voxtral → browser) can take over.
+  const models = getGeminiModels();
+  let resp: Response | null = null;
+  let servedBy: string | null = null;
+  let lastQuotaError: { model: string; status: number; body: string } | null =
+    null;
 
-  if (!resp.ok) {
-    const errText = await resp.text();
-    console.error(`Gemini TTS error (${resp.status}):`, errText);
+  for (const model of models) {
+    const r = await fetch(`${geminiEndpoint(model)}&key=${apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(gemReq),
+    });
+
+    if (r.ok) {
+      resp = r;
+      servedBy = model;
+      if (lastQuotaError) {
+        console.warn(
+          `Gemini TTS: ${lastQuotaError.model} quota-throttled, falling through to ${model} succeeded`,
+        );
+      }
+      break;
+    }
+
+    if (r.status === 429) {
+      lastQuotaError = {
+        model,
+        status: r.status,
+        body: await r.text(),
+      };
+      console.warn(
+        `Gemini TTS: ${model} returned 429, trying next model in fallback chain`,
+      );
+      continue;
+    }
+
+    const errText = await r.text();
+    console.error(`Gemini TTS error (${r.status}) on ${model}:`, errText);
     return NextResponse.json(
-      { error: `Gemini TTS error (${resp.status})` },
-      { status: resp.status },
+      { error: `Gemini TTS error (${r.status})` },
+      { status: r.status },
     );
   }
+
+  if (!resp || !servedBy) {
+    // Every model in the fallback chain returned 429.
+    console.error(
+      `Gemini TTS: all ${models.length} models quota-throttled. Last: ${lastQuotaError?.model} → ${lastQuotaError?.body}`,
+    );
+    return NextResponse.json(
+      {
+        error: `Gemini TTS quota exhausted across all ${models.length} fallback models`,
+      },
+      { status: 429 },
+    );
+  }
+
+  // Stamp the serving model in the response header so the client (and
+  // anyone debugging from DevTools) can see the fallback in action.
+  const serverModelHeader = servedBy;
 
   const reader = resp.body?.getReader();
   if (!reader) {
@@ -208,6 +279,7 @@ export async function POST(request: NextRequest) {
       "Content-Type": "audio/wav",
       "Transfer-Encoding": "chunked",
       "Cache-Control": "no-cache",
+      "X-Gemini-Model": serverModelHeader,
     },
   });
 }
