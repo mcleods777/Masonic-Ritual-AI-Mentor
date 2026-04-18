@@ -28,7 +28,7 @@ import {
  * overwrite, preserving any role the user assigned. Omit = version 1.
  */
 const DEFAULT_VOICES = [
-  { name: "Normal Shannon",      file: "/voices/normal-shannon.wav",       mimeType: "audio/wav",  description: "Shannon, natural delivery",  duration: 10, role: "Chap" },
+  { name: "Normal Shannon",      file: "/voices/normal-shannon.wav",       mimeType: "audio/wav",  description: "Shannon, natural delivery",  duration: 10, role: "Steward" },
   { name: "Shannon South African", file: "/voices/shannon-south-african.wav", mimeType: "audio/wav", description: "Shannon, South African accent", duration: 6, role: "JW" },
   { name: "Sith Lord Shannon",   file: "/voices/sith-lord-shannon.wav",    mimeType: "audio/wav",  description: "Shannon, commanding Sith tone", duration: 7, role: "Marshal" },
   { name: "Crazy German",        file: "/voices/crazy-german.wav",         mimeType: "audio/wav",  description: "German accent, theatrical", role: "SD" },
@@ -38,10 +38,10 @@ const DEFAULT_VOICES = [
   { name: "Southern Gentleman",  file: "/voices/southern-gentleman.wav",   mimeType: "audio/wav",  description: "Southern drawl, genteel", role: "SW" },
   { name: "Zeus",                file: "/voices/zeus.mp3",                 mimeType: "audio/mpeg", description: "Commanding, deep", role: "Narrator" },
   { name: "Orion",               file: "/voices/orion.mp3",                mimeType: "audio/mpeg", description: "Clear, steady" },
-  { name: "Arcas",               file: "/voices/arcas.mp3",                mimeType: "audio/mpeg", description: "Measured", role: "Steward" },
+  { name: "Arcas",               file: "/voices/arcas.mp3",                mimeType: "audio/mpeg", description: "Measured" },
   { name: "Orpheus",             file: "/voices/orpheus.mp3",              mimeType: "audio/mpeg", description: "Warm", role: "Candidate" },
   { name: "Apollo",              file: "/voices/apollo.mp3",               mimeType: "audio/mpeg", description: "Bright, articulate", role: "Treas" },
-  { name: "Hermes",              file: "/voices/hermes.mp3",               mimeType: "audio/mpeg", description: "Smooth, resonant" },
+  { name: "Hermes",              file: "/voices/hermes.mp3",               mimeType: "audio/mpeg", description: "Smooth, resonant", role: "Chap" },
   { name: "Atlas",               file: "/voices/atlas.mp3",                mimeType: "audio/mpeg", description: "Steady, grounded" },
 ] as const;
 
