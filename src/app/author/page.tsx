@@ -45,6 +45,7 @@ export default function AuthorPage() {
   const [selectedName, setSelectedName] = useState<string>("");
   const [plainSource, setPlainSource] = useState<string>("");
   const [cipherSource, setCipherSource] = useState<string>("");
+  const [stylesSource, setStylesSource] = useState<string>("");
   const [savedPlainSource, setSavedPlainSource] = useState<string>("");
   const [savedCipherSource, setSavedCipherSource] = useState<string>("");
   const [status, setStatus] = useState<string>("");
@@ -89,12 +90,19 @@ export default function AuthorPage() {
       const data = (await res.json()) as {
         plainSource: string;
         cipherSource: string;
+        stylesSource?: string;
+        hasStyles?: boolean;
       };
       setPlainSource(data.plainSource);
       setCipherSource(data.cipherSource);
+      setStylesSource(data.stylesSource ?? "");
       setSavedPlainSource(data.plainSource);
       setSavedCipherSource(data.cipherSource);
-      setStatus(`Loaded ${name}`);
+      setStatus(
+        data.hasStyles
+          ? `Loaded ${name} (with styles sidecar)`
+          : `Loaded ${name}`,
+      );
       setStatusKind("info");
     } catch (err) {
       setStatus(`Failed to load pair: ${(err as Error).message}`);
@@ -311,6 +319,7 @@ export default function AuthorPage() {
         cipher={parsedCipher}
         validation={validation}
         dirty={dirty}
+        stylesSource={stylesSource}
       />
 
       <details
@@ -719,12 +728,14 @@ function ExportPanel({
   cipher,
   validation,
   dirty,
+  stylesSource,
 }: {
   pairName: string;
   plain: DialogueDocument | null;
   cipher: DialogueDocument | null;
   validation: PairValidationResult | null;
   dirty: boolean;
+  stylesSource: string;
 }) {
   const [passphrase, setPassphrase] = useState("");
   const [confirmPassphrase, setConfirmPassphrase] = useState("");
@@ -777,10 +788,29 @@ function ExportPanel({
     setBusy(true);
     setStatus("");
     try {
-      const { doc } = await buildFromDialogue(plain, cipher, {
+      // Parse the optional styles sidecar. Malformed JSON is a loud
+      // failure — we'd rather block the build than silently drop styles.
+      let styles: import("@/lib/styles").StylesFile | undefined;
+      if (stylesSource.trim()) {
+        try {
+          const parsed = JSON.parse(stylesSource);
+          if (parsed && parsed.version === 1 && Array.isArray(parsed.styles)) {
+            styles = parsed;
+          } else {
+            throw new Error(
+              "styles file must be { version: 1, styles: [...] }",
+            );
+          }
+        } catch (err) {
+          throw new Error(`styles file invalid: ${(err as Error).message}`);
+        }
+      }
+
+      const { doc, report } = await buildFromDialogue(plain, cipher, {
         jurisdiction: metadata.jurisdiction!,
         degree: metadata.degree!,
         ceremony: metadata.ceremony!,
+        styles,
       });
       const buf = await encryptMRAM(doc, passphrase);
       const name = pairName || "ritual";
@@ -797,8 +827,12 @@ function ExportPanel({
         throw new Error(j.error || `HTTP ${res.status}`);
       }
       const saved = (await res.json()) as { path: string; bytes: number };
+      const stylesNote =
+        report.applied > 0 || report.dropped.length > 0
+          ? ` Styles: ${report.applied} applied, ${report.dropped.length} dropped.`
+          : "";
       setStatus(
-        `Encrypted ${doc.lines.length} lines across ${doc.sections.length} sections. Saved ${saved.bytes} bytes to ${saved.path}.`,
+        `Encrypted ${doc.lines.length} lines across ${doc.sections.length} sections. Saved ${saved.bytes} bytes to ${saved.path}.${stylesNote}`,
       );
       setStatusKind("ok");
       setPassphrase("");

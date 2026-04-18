@@ -35,6 +35,14 @@ export async function GET(request: Request) {
     ? fs.readFileSync(paths.cipherPath, "utf-8")
     : "";
 
+  // Optional styles sidecar — {name}-styles.json alongside the dialogue
+  // pair. Returned as raw source so the author page can parse and hand
+  // it to buildFromDialogue's styles opt.
+  const stylesPath = paths.plainPath.replace(/-dialogue\.md$/, "-styles.json");
+  const stylesSource = fs.existsSync(stylesPath)
+    ? fs.readFileSync(stylesPath, "utf-8")
+    : "";
+
   const validation =
     plainSource && cipherSource
       ? validatePair(plainSource, cipherSource)
@@ -44,10 +52,13 @@ export async function GET(request: Request) {
     name,
     plainSource,
     cipherSource,
+    stylesSource,
     hasPlain: !!plainSource,
     hasCipher: !!cipherSource,
+    hasStyles: !!stylesSource,
     plainPath: paths.plainPath,
     cipherPath: paths.cipherPath,
+    stylesPath,
     validation,
   });
 }
