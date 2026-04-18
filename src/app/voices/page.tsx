@@ -10,15 +10,11 @@ import {
   exportVoices,
   validateVoiceImport,
   importVoices,
+  purgeLegacyDefaultVoices,
   type LocalVoice,
 } from "@/lib/voice-storage";
 import { clearVoxtralVoicesCache, VOXTRAL_ROLE_OPTIONS } from "@/lib/tts-cloud";
 import { normalizeAudio, encodeWav } from "@/lib/audio-utils";
-import {
-  ensureDefaultVoices,
-  getDefaultVoiceNames,
-  resetDefaultVoiceRoles,
-} from "@/lib/default-voices";
 import { fetchApi } from "@/lib/api-fetch";
 
 // ============================================================
@@ -85,15 +81,10 @@ export default function VoicesPage() {
 
   const fetchVoices = useCallback(async () => {
     try {
-      // Auto-load default voices on first visit
-      await ensureDefaultVoices();
+      // Purge any legacy default voices left over from older app builds.
+      await purgeLegacyDefaultVoices();
       const localVoices = await listVoices();
-      // Sort: user voices (createdAt > 0) first, then defaults (createdAt === 0)
-      setVoices(localVoices.sort((a, b) => {
-        if (a.createdAt === 0 && b.createdAt !== 0) return 1;
-        if (a.createdAt !== 0 && b.createdAt === 0) return -1;
-        return b.createdAt - a.createdAt;
-      }));
+      setVoices(localVoices.sort((a, b) => b.createdAt - a.createdAt));
     } catch {
       // IndexedDB not available
     } finally {
@@ -691,22 +682,6 @@ export default function VoicesPage() {
             </span>
           </h2>
           <div className="flex items-center gap-2">
-            <button
-              onClick={async () => {
-                const { changed } = await resetDefaultVoiceRoles();
-                clearVoxtralVoicesCache();
-                await fetchVoices();
-                setSuccess(
-                  changed > 0
-                    ? `Reset ${changed} default voice role${changed === 1 ? "" : "s"} to shipped defaults.`
-                    : "Default voice roles already match shipped defaults.",
-                );
-              }}
-              className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-sm font-medium transition-colors"
-              title="Reset default character voices to their shipped role assignments. Does not touch your recorded voices."
-            >
-              Reset Defaults
-            </button>
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={importing}

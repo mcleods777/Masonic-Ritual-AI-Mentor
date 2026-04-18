@@ -651,26 +651,26 @@ export async function speakKokoroAsRole(
  * officer role groups round-robin style.
  */
 
-import { listVoices, type LocalVoice } from "./voice-storage";
-import { ensureDefaultVoices } from "./default-voices";
+import {
+  listVoices,
+  purgeLegacyDefaultVoices,
+  type LocalVoice,
+} from "./voice-storage";
 
 /** Cached local voice profiles — loaded once per session from IndexedDB. */
 let localVoicesCache: LocalVoice[] | null = null;
 let localVoicesFetchPromise: Promise<LocalVoice[]> | null = null;
-let defaultsEnsured = false;
 
-/** Load and cache local voices from IndexedDB. Ensures defaults are loaded first. */
+/** Load and cache local voices from IndexedDB. */
 async function getLocalVoices(): Promise<LocalVoice[]> {
   if (localVoicesCache) return localVoicesCache;
   if (localVoicesFetchPromise) return localVoicesFetchPromise;
 
   localVoicesFetchPromise = (async () => {
     try {
-      // Ensure default voices are in IndexedDB before reading
-      if (!defaultsEnsured) {
-        await ensureDefaultVoices();
-        defaultsEnsured = true;
-      }
+      // One-shot purge of legacy default voices from older app builds.
+      // No-op for fresh installs and for any browser that already ran it.
+      await purgeLegacyDefaultVoices();
       const voices = await listVoices();
       localVoicesCache = voices;
       return voices;
@@ -764,14 +764,13 @@ async function getRefAudioForRole(role: string): Promise<string | undefined> {
   const voices = await getLocalVoices();
   if (voices.length === 0) return undefined;
 
-  // Check for a voice explicitly assigned to this role group.
-  // Prefer user-recorded voices (createdAt > 0) over defaults (createdAt === 0).
+  // Check for a voice explicitly assigned to this role group. Every voice
+  // in storage is now user-recorded (default voices were removed) so the
+  // first match wins.
   const rolesInGroup = group >= 0 ? VOXTRAL_ROLE_GROUPS[group] : [];
-  const matchingVoices = voices.filter(
+  const assigned = voices.find(
     (v) => v.role && rolesInGroup.includes(v.role)
   );
-  const assigned =
-    matchingVoices.find((v) => v.createdAt > 0) || matchingVoices[0];
 
   if (assigned) return assigned.audioBase64;
 
@@ -794,11 +793,10 @@ export async function hasLocalVoices(): Promise<boolean> {
  * otherwise. Used by speakAsRole() to let a Brother's own recording
  * override the current engine (e.g. Gemini) on a per-role basis.
  *
- * Deliberate exclusion: default shipped voices (createdAt === 0) do NOT
- * override the active engine. Every default ships with a role assignment,
- * so treating any role assignment as an override would silently redirect
- * every role to Voxtral for fresh Gemini users. Only user-recorded voices
- * (createdAt > 0) signal "I explicitly want this clone here."
+ * The legacy default-voice exclusion (createdAt > 0) is gone because the
+ * default-voice system was removed. Every voice in storage is now a
+ * deliberate user recording, so any role assignment is treated as an
+ * explicit "play my clone here" signal regardless of the active engine.
  */
 export async function getUserRecordedRefAudioForRole(
   role: string
@@ -808,7 +806,7 @@ export async function getUserRecordedRefAudioForRole(
   const rolesInGroup = VOXTRAL_ROLE_GROUPS[group];
   const voices = await getLocalVoices();
   const match = voices.find(
-    (v) => v.createdAt > 0 && v.role && rolesInGroup.includes(v.role)
+    (v) => v.role && rolesInGroup.includes(v.role)
   );
   return match?.audioBase64;
 }
