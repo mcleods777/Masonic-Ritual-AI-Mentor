@@ -961,13 +961,17 @@ export function getGeminiVoiceForRole(role: string): string {
  *   v1: initial release — raw PCM bytes served as audio/mpeg (broken —
  *       browser played as garbled/robotic audio without WAV header)
  *   v2: server wraps PCM in 44-byte WAV/RIFF header → audio/wav
+ *   v3: client patches the WAV header sizes to match the actual blob
+ *       length (fixes ERR_REQUEST_RANGE_NOT_SATISFIABLE on Chromium when
+ *       the streaming sentinel dataSize 0x7FFFFFFE was cached as-is and
+ *       the audio element tried to range-fetch beyond the blob's true end)
  */
 async function geminiCacheKey(
   text: string,
   style: string | undefined,
   voice: string
 ): Promise<string> {
-  const KEY_VERSION = "v2";
+  const KEY_VERSION = "v3";
   const material = `${KEY_VERSION}\x00${text}\x00${style ?? ""}\x00${voice}`;
   const bytes = new TextEncoder().encode(material);
   const hash = await crypto.subtle.digest("SHA-256", bytes);
@@ -979,6 +983,38 @@ async function geminiCacheKey(
 function base64ToBlob(b64: string, mimeType: string): Blob {
   const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
   return new Blob([bytes], { type: mimeType });
+}
+
+/**
+ * Server streams audio with a sentinel WAV dataSize (0x7FFFFFFE ~= 2 GB)
+ * because the total length isn't known when the header is written. Once we
+ * have the full blob client-side, rewrite the RIFF chunk size (offset 4)
+ * and data chunk size (offset 40) to the real byte counts. Without this
+ * fix, browsers parse the inflated dataSize, issue Range requests beyond
+ * the actual blob length, and fail with ERR_REQUEST_RANGE_NOT_SATISFIABLE
+ * — observed on Chromium playback of blob: URLs.
+ *
+ * Safe no-op for non-WAV blobs (other engines, unknown formats).
+ */
+async function patchStreamingWavSize(blob: Blob): Promise<Blob> {
+  const buffer = await blob.arrayBuffer();
+  const totalBytes = buffer.byteLength;
+  if (totalBytes < 44) return blob;
+
+  const view = new DataView(buffer);
+  // 0x52494646 = "RIFF" (big-endian read of magic bytes)
+  // 0x57415645 = "WAVE"
+  if (view.getUint32(0, false) !== 0x52494646) return blob;
+  if (view.getUint32(8, false) !== 0x57415645) return blob;
+
+  const dataSize = totalBytes - 44;
+  const patched = new ArrayBuffer(totalBytes);
+  new Uint8Array(patched).set(new Uint8Array(buffer));
+  const pView = new DataView(patched);
+  pView.setUint32(4, totalBytes - 8, true);  // RIFF chunk size
+  pView.setUint32(40, dataSize, true);       // data chunk size
+
+  return new Blob([patched], { type: blob.type || "audio/wav" });
 }
 
 async function blobToBase64(blob: Blob): Promise<string> {
@@ -1066,7 +1102,8 @@ export async function speakGemini(
     throw new Error("Gemini TTS failed after retries");
   }
 
-  const blob = await resp.blob();
+  const rawBlob = await resp.blob();
+  const blob = await patchStreamingWavSize(rawBlob);
 
   // Cache before playback so a re-request during the same rehearsal hits.
   // Fire-and-forget: the playback doesn't wait on the write.
@@ -1123,7 +1160,8 @@ export async function prefetchGeminiLine(
       body: JSON.stringify({ text, style, voice }),
     });
     if (!resp.ok) return "error";
-    const blob = await resp.blob();
+    const rawBlob = await resp.blob();
+    const blob = await patchStreamingWavSize(rawBlob);
     const audioBase64 = await blobToBase64(blob);
     await putCachedAudio({
       key: cacheKey,
