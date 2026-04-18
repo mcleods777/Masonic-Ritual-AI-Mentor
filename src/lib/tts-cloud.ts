@@ -965,13 +965,18 @@ export function getGeminiVoiceForRole(role: string): string {
  *       length (fixes ERR_REQUEST_RANGE_NOT_SATISFIABLE on Chromium when
  *       the streaming sentinel dataSize 0x7FFFFFFE was cached as-is and
  *       the audio element tried to range-fetch beyond the blob's true end)
+ *   v4: server reverted from streamGenerateContent to batch generateContent
+ *       — the streaming + chunked-transfer combo broke blob playback in
+ *       Chromium even with patched WAV headers. v3 cache entries had
+ *       client-patched headers but the batch flow produces different
+ *       byte layouts, so invalidate.
  */
 async function geminiCacheKey(
   text: string,
   style: string | undefined,
   voice: string
 ): Promise<string> {
-  const KEY_VERSION = "v3";
+  const KEY_VERSION = "v4";
   const material = `${KEY_VERSION}\x00${text}\x00${style ?? ""}\x00${voice}`;
   const bytes = new TextEncoder().encode(material);
   const hash = await crypto.subtle.digest("SHA-256", bytes);
