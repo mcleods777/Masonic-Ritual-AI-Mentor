@@ -23,8 +23,18 @@ import {
   looksLikeEmail,
   signMagicLinkToken,
 } from "@/lib/auth";
+import { rateLimit, getClientIp } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
+
+// Rate limits: protect allowlisted pilot addresses from inbox bombing and
+// slow down casual abuse before Resend's own quotas kick in. Picked to be
+// invisible to legitimate use (a Brother clicking "resend link" once or
+// twice) while blocking scripted hammering.
+const IP_LIMIT = 5;            // requests per IP
+const IP_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const EMAIL_LIMIT = 3;         // requests per email
+const EMAIL_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 
 function getBaseUrl(req: NextRequest): string {
   const envUrl = process.env.MAGIC_LINK_BASE_URL;
@@ -75,6 +85,38 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { error: "Please enter a valid email address." },
       { status: 400 },
+    );
+  }
+
+  // Per-IP rate limit first (cheap, blocks scripted attackers before we
+  // even normalize the email).
+  const ip = getClientIp(req);
+  const ipCheck = rateLimit(`magic-link:ip:${ip}`, IP_LIMIT, IP_WINDOW_MS);
+  if (!ipCheck.allowed) {
+    return NextResponse.json(
+      { error: "Too many sign-in requests. Please try again later." },
+      {
+        status: 429,
+        headers: { "Retry-After": String(ipCheck.retryAfterSeconds) },
+      },
+    );
+  }
+
+  // Per-email rate limit. Same generic copy regardless of whether the
+  // email is allowlisted (no enumeration via error timing).
+  const normalizedEmail = email.toLowerCase();
+  const emailCheck = rateLimit(
+    `magic-link:email:${normalizedEmail}`,
+    EMAIL_LIMIT,
+    EMAIL_WINDOW_MS,
+  );
+  if (!emailCheck.allowed) {
+    return NextResponse.json(
+      { error: "Too many sign-in requests. Please try again later." },
+      {
+        status: 429,
+        headers: { "Retry-After": String(emailCheck.retryAfterSeconds) },
+      },
     );
   }
 
