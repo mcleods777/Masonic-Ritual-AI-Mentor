@@ -20,20 +20,29 @@ import {
   type LocalVoice,
 } from "./voice-storage";
 
-/** Default voice definitions — character voices first, then Aura-2. */
+/**
+ * Default voice definitions — character voices first, then Aura-2.
+ *
+ * `version` is optional. Bump it when the underlying audio file at `/voices/...`
+ * is replaced with a better recording: existing installs will re-download and
+ * overwrite, preserving any role the user assigned. Omit = version 1.
+ */
 const DEFAULT_VOICES = [
-  { name: "Crazy German",       file: "/voices/crazy-german.wav",       mimeType: "audio/wav",  description: "German accent, theatrical" },
-  { name: "Jebidiah",            file: "/voices/jebidiah.wav",           mimeType: "audio/wav",  description: "Rustic, backwoods" },
-  { name: "Old Man",             file: "/voices/old-man.wav",            mimeType: "audio/wav",  description: "Weathered, aged" },
-  { name: "Scottish Man",        file: "/voices/scottish-man.wav",       mimeType: "audio/wav",  description: "Scottish brogue" },
-  { name: "Southern Gentleman",  file: "/voices/southern-gentleman.wav", mimeType: "audio/wav",  description: "Southern drawl, genteel" },
-  { name: "Zeus",                file: "/voices/zeus.mp3",               mimeType: "audio/mpeg", description: "Commanding, deep" },
-  { name: "Orion",               file: "/voices/orion.mp3",              mimeType: "audio/mpeg", description: "Clear, steady" },
-  { name: "Arcas",               file: "/voices/arcas.mp3",              mimeType: "audio/mpeg", description: "Measured" },
-  { name: "Orpheus",             file: "/voices/orpheus.mp3",            mimeType: "audio/mpeg", description: "Warm" },
-  { name: "Apollo",              file: "/voices/apollo.mp3",             mimeType: "audio/mpeg", description: "Bright, articulate" },
-  { name: "Hermes",              file: "/voices/hermes.mp3",             mimeType: "audio/mpeg", description: "Smooth, resonant" },
-  { name: "Atlas",               file: "/voices/atlas.mp3",              mimeType: "audio/mpeg", description: "Steady, grounded" },
+  { name: "Normal Shannon",      file: "/voices/normal-shannon.wav",       mimeType: "audio/wav",  description: "Shannon, natural delivery",  duration: 10 },
+  { name: "Shannon South African", file: "/voices/shannon-south-african.wav", mimeType: "audio/wav", description: "Shannon, South African accent", duration: 6 },
+  { name: "Sith Lord Shannon",   file: "/voices/sith-lord-shannon.wav",    mimeType: "audio/wav",  description: "Shannon, commanding Sith tone", duration: 7 },
+  { name: "Crazy German",        file: "/voices/crazy-german.wav",         mimeType: "audio/wav",  description: "German accent, theatrical" },
+  { name: "Jebidiah",            file: "/voices/jebidiah.wav",             mimeType: "audio/wav",  description: "Rustic, backwoods" },
+  { name: "Old Man",             file: "/voices/old-man.wav",              mimeType: "audio/wav",  description: "Weathered, aged" },
+  { name: "Scottish Man",        file: "/voices/scottish-man.wav",         mimeType: "audio/wav",  description: "Scottish brogue" },
+  { name: "Southern Gentleman",  file: "/voices/southern-gentleman.wav",   mimeType: "audio/wav",  description: "Southern drawl, genteel" },
+  { name: "Zeus",                file: "/voices/zeus.mp3",                 mimeType: "audio/mpeg", description: "Commanding, deep" },
+  { name: "Orion",               file: "/voices/orion.mp3",                mimeType: "audio/mpeg", description: "Clear, steady" },
+  { name: "Arcas",               file: "/voices/arcas.mp3",                mimeType: "audio/mpeg", description: "Measured" },
+  { name: "Orpheus",             file: "/voices/orpheus.mp3",              mimeType: "audio/mpeg", description: "Warm" },
+  { name: "Apollo",              file: "/voices/apollo.mp3",               mimeType: "audio/mpeg", description: "Bright, articulate" },
+  { name: "Hermes",              file: "/voices/hermes.mp3",               mimeType: "audio/mpeg", description: "Smooth, resonant" },
+  { name: "Atlas",               file: "/voices/atlas.mp3",                mimeType: "audio/mpeg", description: "Steady, grounded" },
 ] as const;
 
 /** Stable id for a default voice, by name. */
@@ -69,31 +78,59 @@ async function fetchAsBase64(url: string): Promise<string> {
 export async function ensureDefaultVoices(): Promise<{
   loaded: number;
   skipped: number;
+  refreshed: number;
 }> {
   const existing = await listVoices();
-  // Dedupe by id (not name) so a renamed default is not re-created on next visit.
-  const existingIds = new Set(existing.map((v) => v.id));
+  // Index by id so a renamed default is not re-created on next visit, and
+  // version comparison can find the stored entry for a given default.
+  const existingById = new Map(existing.map((v) => [v.id, v]));
 
   let loaded = 0;
   let skipped = 0;
+  let refreshed = 0;
 
   for (const def of DEFAULT_VOICES) {
-    if (existingIds.has(defaultVoiceId(def.name))) {
-      skipped++;
+    const id = defaultVoiceId(def.name);
+    const stored = existingById.get(id);
+    const canonicalVersion = "version" in def ? (def.version as number) : 1;
+
+    if (stored) {
+      const storedVersion = stored.version ?? 1;
+      if (storedVersion >= canonicalVersion) {
+        skipped++;
+        continue;
+      }
+      // Stored version is stale — re-fetch audio and overwrite, preserving
+      // the user's role assignment and any rename.
+      try {
+        const audioBase64 = await fetchAsBase64(def.file);
+        const refreshedVoice: LocalVoice = {
+          ...stored,
+          audioBase64,
+          mimeType: def.mimeType,
+          duration: "duration" in def ? (def.duration as number) : stored.duration,
+          version: canonicalVersion,
+        };
+        await saveVoice(refreshedVoice);
+        refreshed++;
+      } catch (err) {
+        console.warn(`Failed to refresh default voice ${def.name}:`, err);
+      }
       continue;
     }
 
     try {
       const audioBase64 = await fetchAsBase64(def.file);
       const voice: LocalVoice = {
-        id: defaultVoiceId(def.name),
+        id,
         name: def.name,
         audioBase64,
         mimeType: def.mimeType,
-        duration: 5,
+        duration: "duration" in def ? (def.duration as number) : 5,
         // role intentionally omitted — defaults ship unassigned so the
         // round-robin fallback handles role → voice mapping.
         createdAt: 0, // epoch = default voice, distinguishes from user-recorded
+        version: canonicalVersion,
       };
       await saveVoice(voice);
       loaded++;
@@ -102,7 +139,7 @@ export async function ensureDefaultVoices(): Promise<{
     }
   }
 
-  return { loaded, skipped };
+  return { loaded, skipped, refreshed };
 }
 
 /** Get the list of default voice names (for UI to mark them). */

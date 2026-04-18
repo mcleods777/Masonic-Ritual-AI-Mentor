@@ -23,6 +23,13 @@ export interface LocalVoice {
   /** Role assignment (optional — e.g. "WM", "SW") */
   role?: string;
   createdAt: number;
+  /**
+   * Default-voice audio version. Only set on default voices. When the
+   * shipped DEFAULT_VOICES entry has a higher version than what's stored,
+   * ensureDefaultVoices() re-fetches the audio and overwrites, preserving
+   * user-assigned role. User-recorded voices leave this undefined.
+   */
+  version?: number;
 }
 
 // ============================================================
