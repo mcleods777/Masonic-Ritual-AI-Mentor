@@ -1077,7 +1077,7 @@ export async function speakGemini(
       const audioBase64 = await blobToBase64(blob);
       await putCachedAudio({
         key: cacheKey,
-        mimeType: blob.type || "audio/mpeg",
+        mimeType: blob.type || "audio/wav",
         audioBase64,
         createdAt: Date.now(),
       });

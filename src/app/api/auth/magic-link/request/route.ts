@@ -104,7 +104,7 @@ export async function POST(req: NextRequest) {
 
   // Per-email rate limit. Same generic copy regardless of whether the
   // email is allowlisted (no enumeration via error timing).
-  const normalizedEmail = email.toLowerCase();
+  const normalizedEmail = email.trim().toLowerCase();
   const emailCheck = rateLimit(
     `magic-link:email:${normalizedEmail}`,
     EMAIL_LIMIT,
@@ -121,14 +121,23 @@ export async function POST(req: NextRequest) {
   }
 
   // Enumeration-resistant path: always return the same message whether or
-  // not the email is on the allowlist. The work below only runs for
-  // allowlisted emails.
+  // not the email is on the allowlist. Both branches also do comparable
+  // work so response timing doesn't leak allowlist membership — signing a
+  // throwaway JWT takes the same ~ms whether the email will actually be
+  // sent or not. The Resend call itself is the remaining asymmetry; at
+  // pilot scale (5 Brothers) timing analysis of a ~100ms Resend round-trip
+  // is impractical but not impossible, which is acceptable for the threat
+  // model here.
   const genericOk = NextResponse.json({
     ok: true,
     message: "If your email is on the pilot list, a sign-in link is on its way.",
   });
 
   if (!isEmailAllowed(email)) {
+    // Sign a throwaway token so non-allowlisted requests don't return in
+    // sub-ms (which would otherwise be a trivial timing oracle). The token
+    // is discarded — no email is ever sent.
+    await signMagicLinkToken(normalizedEmail);
     return genericOk;
   }
 
@@ -140,13 +149,13 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const token = await signMagicLinkToken(email);
+    const token = await signMagicLinkToken(normalizedEmail);
     const link = `${getBaseUrl(req)}/api/auth/magic-link/verify?t=${encodeURIComponent(token)}`;
 
     const resend = new Resend(apiKey);
     const { error } = await resend.emails.send({
       from: fromAddress,
-      to: email,
+      to: normalizedEmail,
       subject: "Your sign-in link",
       html: renderEmailHtml(link),
       text: renderEmailText(link),

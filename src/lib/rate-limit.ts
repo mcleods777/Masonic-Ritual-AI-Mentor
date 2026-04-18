@@ -73,9 +73,21 @@ export function __resetRateLimitForTests(): void {
 }
 
 export function getClientIp(req: Request): string {
-  const xff = req.headers.get("x-forwarded-for");
-  if (xff) return xff.split(",")[0].trim();
+  // Vercel sets x-vercel-forwarded-for and x-real-ip at its edge; both are
+  // trustworthy because the function only ever sees requests that landed
+  // through Vercel's ingress. x-forwarded-for is attacker-controllable: an
+  // attacker can send "x-forwarded-for: fake" and Vercel appends the real
+  // IP to it — taking the FIRST value would pick the attacker's string and
+  // reset the rate-limit bucket per spoofed IP. So we fall back to the
+  // RIGHTMOST XFF entry (the one Vercel itself added) as a last resort.
+  const vercelFwd = req.headers.get("x-vercel-forwarded-for");
+  if (vercelFwd) return vercelFwd.split(",")[0].trim();
   const real = req.headers.get("x-real-ip");
   if (real) return real.trim();
+  const xff = req.headers.get("x-forwarded-for");
+  if (xff) {
+    const parts = xff.split(",");
+    return parts[parts.length - 1].trim();
+  }
   return "unknown";
 }

@@ -97,10 +97,16 @@ export default function GeminiPreloadPanel({
     );
     abortRef.current = abort;
 
-    done.then(() => {
-      setPreloadState((curr) => (curr === "aborted" ? "aborted" : "done"));
-      abortRef.current = null;
-    });
+    done
+      .then(() => {
+        setPreloadState((curr) => (curr === "aborted" ? "aborted" : "done"));
+      })
+      .catch(() => {
+        setPreloadState("aborted");
+      })
+      .finally(() => {
+        abortRef.current = null;
+      });
   }, [sections]);
 
   const cancelPreload = useCallback(() => {
