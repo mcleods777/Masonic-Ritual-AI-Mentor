@@ -1065,6 +1065,95 @@ export async function speakGeminiAsRole(
   });
 }
 
+/**
+ * Prefetch and cache a single Gemini TTS rendering without playing it.
+ * Cache hit: returns immediately. Cache miss: fetches, caches, returns.
+ * Errors are swallowed — prefetch is best-effort; a failed prefetch just
+ * means the user eats the cold-cache latency on that line.
+ */
+export async function prefetchGeminiLine(
+  text: string,
+  role: string,
+  style?: string
+): Promise<"hit" | "fetched" | "error"> {
+  const voice = getGeminiVoiceForRole(role);
+  const cacheKey = await geminiCacheKey(text, style, voice);
+
+  const hit = await getCachedAudio(cacheKey);
+  if (hit) return "hit";
+
+  try {
+    const resp = await fetchApi("/api/tts/gemini", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, style, voice }),
+    });
+    if (!resp.ok) return "error";
+    const blob = await resp.blob();
+    const audioBase64 = await blobToBase64(blob);
+    await putCachedAudio({
+      key: cacheKey,
+      mimeType: blob.type || "audio/wav",
+      audioBase64,
+      createdAt: Date.now(),
+    });
+    return "fetched";
+  } catch {
+    return "error";
+  }
+}
+
+/**
+ * Progress callback for batch prefetch. Called after each line finishes.
+ */
+export interface PrefetchProgress {
+  index: number;
+  total: number;
+  result: "hit" | "fetched" | "error" | "skipped";
+  aborted?: boolean;
+}
+
+/**
+ * Preload Gemini audio for an entire ritual. Iterates lines serially
+ * with a small delay between fetches to respect the paid-tier rate
+ * limits. Cache hits are free and fast; only uncached lines actually
+ * hit the network.
+ *
+ * Returns a controller that callers can abort() to stop the preload
+ * (e.g. when the user starts rehearsing before the preload finishes).
+ */
+export function preloadGeminiRitual(
+  lines: { text: string; role: string | null; style?: string }[],
+  onProgress?: (p: PrefetchProgress) => void,
+  delayMs: number = 250
+): { abort: () => void; done: Promise<void> } {
+  let aborted = false;
+  const abort = () => {
+    aborted = true;
+  };
+
+  const done = (async () => {
+    for (let i = 0; i < lines.length; i++) {
+      if (aborted) {
+        onProgress?.({ index: i, total: lines.length, result: "skipped", aborted: true });
+        return;
+      }
+      const line = lines[i];
+      if (!line.role || !line.text.trim()) {
+        onProgress?.({ index: i, total: lines.length, result: "skipped" });
+        continue;
+      }
+      const result = await prefetchGeminiLine(line.text, line.role, line.style);
+      onProgress?.({ index: i, total: lines.length, result });
+      if (result === "fetched" && i < lines.length - 1) {
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+  })();
+
+  return { abort, done };
+}
+
 // ============================================================
 // Engine availability
 // ============================================================

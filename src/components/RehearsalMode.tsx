@@ -26,7 +26,8 @@ import {
   type RoleVoiceProfile,
 } from "@/lib/text-to-speech";
 import { playGavelKnocks, countGavelMarks, warmAudioContext } from "@/lib/gavel-sound";
-import { VOXTRAL_ROLE_OPTIONS } from "@/lib/tts-cloud";
+import { VOXTRAL_ROLE_OPTIONS, preloadGeminiRitual, type PrefetchProgress } from "@/lib/tts-cloud";
+import { getTTSEngine } from "@/lib/text-to-speech";
 import {
   decideLineAction,
   planComparisonAction,
@@ -89,6 +90,14 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   const [feedbackVoice, setFeedbackVoice] = useState<string>("Narrator");
   const [ttsToast, setTtsToast] = useState<string | null>(null);
   const [autoStop, setAutoStop] = useState(true);
+
+  // Gemini TTS preload state. Populates the IndexedDB audioCache for every
+  // line so rehearsal plays from cache with zero cold-start latency.
+  const [preloadState, setPreloadState] = useState<
+    "idle" | "running" | "done" | "aborted"
+  >("idle");
+  const [preloadProgress, setPreloadProgress] = useState<PrefetchProgress | null>(null);
+  const preloadAbortRef = useRef<(() => void) | null>(null);
 
   const engineRef = useRef<STTEngine | null>(null);
   const sttProviderRef = useRef<STTProvider>(sttProvider);
@@ -208,6 +217,42 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
     // Advance will be triggered by effect
   }, []);
 
+  // Preload Gemini TTS audio for every spoken line in the ritual into
+  // the IndexedDB audioCache. After this completes, every rehearsal
+  // line plays from cache with zero network latency.
+  //
+  // Only makes sense when the Gemini engine is selected — other
+  // engines don't use the same cache. Safe to abort mid-preload.
+  const startPreload = useCallback(() => {
+    const spokenLines = sections
+      .filter((s) => s.speaker && cleanRitualText(s.text).length > 0)
+      .map((s) => ({
+        text: cleanRitualText(s.text),
+        role: s.speaker,
+        style: s.style,
+      }));
+
+    setPreloadState("running");
+    setPreloadProgress({ index: 0, total: spokenLines.length, result: "skipped" });
+
+    const { abort, done } = preloadGeminiRitual(
+      spokenLines,
+      (p) => setPreloadProgress(p),
+      250, // 250ms between fetches — gentle with the rate limit even on paid tier
+    );
+    preloadAbortRef.current = abort;
+
+    done.then(() => {
+      setPreloadState((curr) => (curr === "aborted" ? "aborted" : "done"));
+      preloadAbortRef.current = null;
+    });
+  }, [sections]);
+
+  const cancelPreload = useCallback(() => {
+    preloadAbortRef.current?.();
+    setPreloadState("aborted");
+  }, []);
+
   // Internal advance — walks through lines with a generation guard.
   // Only the matching generation is allowed to continue; a new call
   // to advanceToLine() bumps the generation so any old chain exits.
@@ -254,7 +299,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
         for (let attempt = 0; attempt < 2 && !spoken; attempt++) {
           if (stale()) return;
           try {
-            await speakAsRole(cleanText, section.speaker, voiceMapRef.current);
+            await speakAsRole(cleanText, section.speaker, voiceMapRef.current, section.style);
             spoken = true;
             // Check if a fallback was used (primary engine failed but browser worked)
             const fallbackMsg = getLastTTSError();
@@ -650,7 +695,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
         if (cleanText) {
           setRehearsalState("ai-speaking");
           try {
-            await speakAsRole(cleanText, section.speaker, voiceMapRef.current);
+            await speakAsRole(cleanText, section.speaker, voiceMapRef.current, section.style);
           } catch {
             /* ignore */
           }
@@ -688,7 +733,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
 
       if (section.speaker) {
         try {
-          await speakAsRole(cleanText, section.speaker, voiceMapRef.current);
+          await speakAsRole(cleanText, section.speaker, voiceMapRef.current, section.style);
         } catch {
           try { await speak(cleanText); } catch { /* ignore */ }
         }
@@ -941,6 +986,70 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
                   </p>
                 )}
               </div>
+
+              {/* Gemini preload panel — only shown when Gemini is selected. */}
+              {getTTSEngine() === "gemini" && (
+                <div className="mt-6 p-4 bg-zinc-900 border border-zinc-800 rounded-lg">
+                  <div className="flex items-center justify-between gap-3 mb-2">
+                    <div>
+                      <div className="text-sm font-semibold text-zinc-200">
+                        Gemini audio preload
+                      </div>
+                      <div className="text-xs text-zinc-500 mt-0.5">
+                        Pre-renders every line into the local cache so rehearsal
+                        plays with zero latency. Takes ~2-3 minutes for a full
+                        ritual. Cached lines are free on replay.
+                      </div>
+                    </div>
+                    {preloadState === "idle" && (
+                      <button
+                        onClick={startPreload}
+                        className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-amber-300 rounded-md text-sm font-medium transition-colors whitespace-nowrap"
+                      >
+                        Preload audio
+                      </button>
+                    )}
+                    {preloadState === "running" && (
+                      <button
+                        onClick={cancelPreload}
+                        className="px-4 py-2 bg-zinc-800 hover:bg-red-900 text-red-300 rounded-md text-sm font-medium transition-colors whitespace-nowrap"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                    {preloadState === "done" && (
+                      <span className="px-3 py-1.5 bg-emerald-900/40 text-emerald-300 rounded-md text-xs font-medium">
+                        ✓ Cached
+                      </span>
+                    )}
+                    {preloadState === "aborted" && (
+                      <button
+                        onClick={startPreload}
+                        className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-amber-300 rounded-md text-sm font-medium transition-colors whitespace-nowrap"
+                      >
+                        Resume preload
+                      </button>
+                    )}
+                  </div>
+                  {preloadProgress && preloadState === "running" && (
+                    <div className="mt-2">
+                      <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-amber-500 transition-all"
+                          style={{
+                            width: `${Math.round(
+                              (preloadProgress.index / Math.max(preloadProgress.total, 1)) * 100,
+                            )}%`,
+                          }}
+                        />
+                      </div>
+                      <div className="text-xs text-zinc-500 mt-1">
+                        {preloadProgress.index} / {preloadProgress.total} lines
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>

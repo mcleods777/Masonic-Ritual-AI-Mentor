@@ -65,3 +65,4 @@ files/
 .claude/skills/gstack/.agents/
 .claude/skills/gstack/.factory/
 .gstack/
+.env.vercel-temp

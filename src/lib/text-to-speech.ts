@@ -401,12 +401,19 @@ export async function speak(
 
 /**
  * Speak text as a specific officer role using the current engine.
- * Falls back to Google Cloud → Browser if the primary engine fails.
+ * Falls back through Voxtral → Google Cloud → Browser if the primary
+ * engine fails.
+ *
+ * The `style` param is an optional Gemini 3.1 Flash TTS audio tag
+ * ("gravely", "reverently", etc.) — consumed only by the Gemini engine
+ * and silently ignored by every other engine. Source: `section.style`
+ * populated from the .mram file via mramToSections().
  */
 export async function speakAsRole(
   text: string,
   role: string,
-  voiceMap?: Map<string, RoleVoiceProfile>
+  voiceMap?: Map<string, RoleVoiceProfile>,
+  style?: string,
 ): Promise<void> {
   const primary = () => {
     switch (currentEngine) {
@@ -415,7 +422,7 @@ export async function speakAsRole(
       case "deepgram": return speakDeepgramAsRole(text, role);
       case "kokoro": return speakKokoroAsRole(text, role);
       case "voxtral": return speakVoxtralAsRole(text, role);
-      case "gemini": return speakGeminiAsRole(text, role);
+      case "gemini": return speakGeminiAsRole(text, role, style);
       default: {
         const profile = voiceMap?.get(role) || getVoiceForRole(role);
         return speakBrowser(text, {

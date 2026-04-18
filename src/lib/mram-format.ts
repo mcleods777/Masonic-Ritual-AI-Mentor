@@ -260,6 +260,8 @@ export interface MRAMRitualSection {
   order: number;
   gavels: number;
   action: string | null;
+  /** Gemini 3.1 Flash TTS audio tag (v2+ .mram files). Undefined on v1. */
+  style?: string;
 }
 
 export function mramToSections(doc: MRAMDocument): MRAMRitualSection[] {
@@ -275,6 +277,7 @@ export function mramToSections(doc: MRAMDocument): MRAMRitualSection[] {
     order: index,
     gavels: line.gavels,
     action: line.action,
+    ...(line.style ? { style: line.style } : {}),
   }));
 }
 
