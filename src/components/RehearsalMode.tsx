@@ -827,6 +827,70 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   // RENDER
   // ============================================================
 
+  // Gemini preload panel — reusable JSX, rendered on both the setup screen
+  // and the active rehearsal screen so the user can trigger a preload at
+  // any time during a session (not just before Start Rehearsal).
+  const preloadPanel = currentTTSEngine === "gemini" ? (
+    <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-lg">
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <div>
+          <div className="text-sm font-semibold text-zinc-200">
+            Gemini audio preload
+          </div>
+          <div className="text-xs text-zinc-500 mt-0.5">
+            Pre-renders every line into the local cache so rehearsal plays with zero latency. Takes ~2-3 minutes for a full ritual. Cached lines are free on replay.
+          </div>
+        </div>
+        {preloadState === "idle" && (
+          <button
+            onClick={startPreload}
+            className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-amber-300 rounded-md text-sm font-medium transition-colors whitespace-nowrap"
+          >
+            Preload audio
+          </button>
+        )}
+        {preloadState === "running" && (
+          <button
+            onClick={cancelPreload}
+            className="px-4 py-2 bg-zinc-800 hover:bg-red-900 text-red-300 rounded-md text-sm font-medium transition-colors whitespace-nowrap"
+          >
+            Cancel
+          </button>
+        )}
+        {preloadState === "done" && (
+          <span className="px-3 py-1.5 bg-emerald-900/40 text-emerald-300 rounded-md text-xs font-medium">
+            ✓ Cached
+          </span>
+        )}
+        {preloadState === "aborted" && (
+          <button
+            onClick={startPreload}
+            className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-amber-300 rounded-md text-sm font-medium transition-colors whitespace-nowrap"
+          >
+            Resume preload
+          </button>
+        )}
+      </div>
+      {preloadProgress && preloadState === "running" && (
+        <div className="mt-2">
+          <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-amber-500 transition-all"
+              style={{
+                width: `${Math.round(
+                  (preloadProgress.index / Math.max(preloadProgress.total, 1)) * 100,
+                )}%`,
+              }}
+            />
+          </div>
+          <div className="text-xs text-zinc-500 mt-1">
+            {preloadProgress.index} / {preloadProgress.total} lines
+          </div>
+        </div>
+      )}
+    </div>
+  ) : null;
+
   // Setup: pick a role
   if (rehearsalState === "setup") {
     return (
@@ -1001,69 +1065,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
                 )}
               </div>
 
-              {/* Gemini preload panel — only shown when Gemini is selected. */}
-              {currentTTSEngine === "gemini" && (
-                <div className="mt-6 p-4 bg-zinc-900 border border-zinc-800 rounded-lg">
-                  <div className="flex items-center justify-between gap-3 mb-2">
-                    <div>
-                      <div className="text-sm font-semibold text-zinc-200">
-                        Gemini audio preload
-                      </div>
-                      <div className="text-xs text-zinc-500 mt-0.5">
-                        Pre-renders every line into the local cache so rehearsal
-                        plays with zero latency. Takes ~2-3 minutes for a full
-                        ritual. Cached lines are free on replay.
-                      </div>
-                    </div>
-                    {preloadState === "idle" && (
-                      <button
-                        onClick={startPreload}
-                        className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-amber-300 rounded-md text-sm font-medium transition-colors whitespace-nowrap"
-                      >
-                        Preload audio
-                      </button>
-                    )}
-                    {preloadState === "running" && (
-                      <button
-                        onClick={cancelPreload}
-                        className="px-4 py-2 bg-zinc-800 hover:bg-red-900 text-red-300 rounded-md text-sm font-medium transition-colors whitespace-nowrap"
-                      >
-                        Cancel
-                      </button>
-                    )}
-                    {preloadState === "done" && (
-                      <span className="px-3 py-1.5 bg-emerald-900/40 text-emerald-300 rounded-md text-xs font-medium">
-                        ✓ Cached
-                      </span>
-                    )}
-                    {preloadState === "aborted" && (
-                      <button
-                        onClick={startPreload}
-                        className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-amber-300 rounded-md text-sm font-medium transition-colors whitespace-nowrap"
-                      >
-                        Resume preload
-                      </button>
-                    )}
-                  </div>
-                  {preloadProgress && preloadState === "running" && (
-                    <div className="mt-2">
-                      <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-amber-500 transition-all"
-                          style={{
-                            width: `${Math.round(
-                              (preloadProgress.index / Math.max(preloadProgress.total, 1)) * 100,
-                            )}%`,
-                          }}
-                        />
-                      </div>
-                      <div className="text-xs text-zinc-500 mt-1">
-                        {preloadProgress.index} / {preloadProgress.total} lines
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
+              {preloadPanel && <div className="mt-6">{preloadPanel}</div>}
             </div>
           )}
         </div>
@@ -1167,6 +1169,10 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   // Active rehearsal (ai-speaking, user-turn, listening, transcribing, checking)
   return (
     <div className="space-y-4">
+      {/* Gemini preload panel — persistent during active rehearsal so the
+          user can kick off a preload or check progress any time. */}
+      {preloadPanel}
+
       {/* TTS fallback toast */}
       {ttsToast && (
         <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3 flex items-center justify-between">
