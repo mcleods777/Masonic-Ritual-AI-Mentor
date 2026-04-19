@@ -486,10 +486,32 @@ Per-line Opus bytes are cached at `~/.cache/masonic-mram-audio/` so interrupted 
 ### Convenience wrapper — all 3 EA rituals
 
 ```bash
-GOOGLE_GEMINI_API_KEY=... npx tsx scripts/bake-ea-rituals.ts
+GOOGLE_GEMINI_API_KEY=... npx tsx scripts/bake-ea-rituals.ts \
+  [--on-fallback=ask|continue|abort]
 ```
 
 Runs ea-opening, ea-initiation, and ea-closing back-to-back with a single passphrase prompt. Use `BAKE_SKIP=ea-closing` to exclude specific rituals.
+
+### Handling Gemini quota drops mid-bake
+
+If the preferred Gemini model (`gemini-3.1-flash-tts-preview`) runs out of daily quota while you're baking, the script detects the tier drop and asks what to do:
+
+```
+⚠  Quality-tier drop detected at line 47 (WM).
+   Preferred: gemini-3.1-flash-tts-preview
+   Served by: gemini-2.5-flash-preview-tts
+   ...
+   Continue with lower-quality fallback? [y/N]
+```
+
+- **Press N (default):** abort with exit code 2. The contaminated cache entry is deleted. Re-run after midnight PT — premium-tier lines cache-hit, only the triggering line and everything after it re-renders on the preferred tier. Uniform premium bake, minimum rework.
+- **Press Y:** continue with mixed-tier audio. Accept that quality varies line-to-line.
+
+Override the prompt with `--on-fallback=continue` (never prompt, always keep going) or `--on-fallback=abort` (never prompt, always halt).
+
+### Full bake workflow reference
+
+**For the complete reference** — every CLI flag, every environment variable, cache semantics, tier-drop handling, resume guarantees, exit codes, and typical workflows — see `docs/BAKE-WORKFLOW.md` in the repository.
 
 Share the `.mram` file with lodge members. They'll need the passphrase to open it.
 

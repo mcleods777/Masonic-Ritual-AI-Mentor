@@ -205,6 +205,8 @@ GOOGLE_GEMINI_API_KEY=... npx tsx scripts/bake-ea-rituals.ts [--on-fallback=ask|
 
 Runs ea-opening, ea-initiation, and ea-closing back-to-back with a single passphrase prompt. Skips any ritual whose source dialogue files aren't present. Use `BAKE_SKIP=ea-closing` to exclude specific rituals. `--on-fallback` is passed through to each child build — if you choose abort (or the default prompt picks abort), the wrapper halts the whole sequence rather than producing a degraded second/third ritual. Total wall time ~25-30 minutes when the cache is cold; near-instant when fully cached.
 
+**Full reference:** [`docs/BAKE-WORKFLOW.md`](./docs/BAKE-WORKFLOW.md) is the canonical doc for the bake pipeline — every CLI flag, every environment variable, cache semantics, tier-drop handling, resume guarantees, exit codes, and typical workflows. When in doubt, look there first.
+
 Legacy `build-mram.ts` (single-file paired format) still works for older ritual sources.
 
 ---
