@@ -163,6 +163,14 @@ Requirements:
 
 Per-line Opus bytes are cached at `~/.cache/masonic-mram-audio/` so interrupted runs resume cleanly. A 150-line ritual takes ~13 minutes end-to-end when the full chain is available.
 
+**Convenience wrapper for the full EA degree:**
+
+```bash
+GOOGLE_GEMINI_API_KEY=... npx tsx scripts/bake-ea-rituals.ts
+```
+
+Runs ea-opening, ea-initiation, and ea-closing back-to-back with a single passphrase prompt. Skips any ritual whose source dialogue files aren't present. Use `BAKE_SKIP=ea-closing` to exclude specific rituals. Total wall time ~25-30 minutes when the cache is cold; near-instant when fully cached.
+
 Legacy `build-mram.ts` (single-file paired format) still works for older ritual sources.
 
 ---
@@ -270,6 +278,7 @@ rituals/                                  # Local-only — ritual source files (
 scripts/
 ├── build-mram.ts                        # CLI: build .mram files from paired markdown
 ├── build-mram-from-dialogue.ts          # CLI: build .mram from dialogue + cipher + styles + optional pre-rendered Gemini audio
+├── bake-ea-rituals.ts                   # CLI: bake all 3 EA rituals back-to-back with one passphrase prompt
 ├── render-gemini-audio.ts               # Opus rendering pipeline (Gemini SSE → ffmpeg → cache)
 └── benchmark-tts.ts                     # TTS engine benchmark (TTFB + total response time)
 ```
