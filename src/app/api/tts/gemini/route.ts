@@ -209,30 +209,45 @@ export async function POST(request: NextRequest) {
   }
 
   const decoder = new TextDecoder();
+  let rawAccumulated = ""; // for diagnostic logging if no audio extracted
   let sseBuffer = "";
   const pcmChunks: Buffer[] = [];
   let mimeType = "audio/L16;codec=pcm;rate=24000";
+  let eventsParsed = 0;
+  let eventsWithCandidates = 0;
+  let eventsWithInlineData = 0;
 
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      sseBuffer += decoder.decode(value, { stream: true });
+      const chunk = decoder.decode(value, { stream: true });
+      rawAccumulated += chunk;
+      sseBuffer += chunk;
 
-      const events = sseBuffer.split("\n\n");
+      // Try both \n\n (LF) and \r\n\r\n (CRLF) event separators. Google's
+      // SSE has been seen to switch between them across model versions.
+      const events = sseBuffer.split(/\r?\n\r?\n/);
       sseBuffer = events.pop() || "";
 
       for (const event of events) {
-        const dataLine = event.split("\n").find((l) => l.startsWith("data: "));
+        eventsParsed++;
+        // Match data: lines whether prefixed with single or double newline,
+        // and tolerate the colon being followed by 0+ spaces.
+        const dataLine = event
+          .split(/\r?\n/)
+          .find((l) => /^data:\s*/.test(l));
         if (!dataLine) continue;
-        const jsonStr = dataLine.slice(6).trim();
+        const jsonStr = dataLine.replace(/^data:\s*/, "").trim();
         if (!jsonStr || jsonStr === "[DONE]") continue;
 
         try {
           const parsed = JSON.parse(jsonStr) as GeminiChunk;
+          if (parsed.candidates?.length) eventsWithCandidates++;
           const part = parsed.candidates?.[0]?.content?.parts?.[0];
           const audioB64 = part?.inlineData?.data;
           if (!audioB64) continue;
+          eventsWithInlineData++;
           if (part?.inlineData?.mimeType) mimeType = part.inlineData.mimeType;
           pcmChunks.push(Buffer.from(audioB64, "base64"));
         } catch {
@@ -249,7 +264,16 @@ export async function POST(request: NextRequest) {
   }
 
   if (pcmChunks.length === 0) {
-    console.error(`Gemini TTS: ${servedBy} returned no audio in stream`);
+    // Diagnostic: log the first 800 chars of the raw response so we can
+    // see what Google actually sent. This will appear in Vercel logs
+    // when audio extraction fails — critical for diagnosing format drift.
+    const sample = rawAccumulated.slice(0, 800);
+    console.error(
+      `Gemini TTS: ${servedBy} returned 200 but no audio. ` +
+        `events=${eventsParsed} withCandidates=${eventsWithCandidates} withInlineData=${eventsWithInlineData} ` +
+        `bufferRemaining=${sseBuffer.length} totalRaw=${rawAccumulated.length}. ` +
+        `Sample (first 800 chars): ${sample}`,
+    );
     return NextResponse.json(
       { error: "Gemini TTS returned no audio data" },
       { status: 502 },
