@@ -87,11 +87,12 @@ recognition.
 
 Any of seven text-to-speech engines can read the ritual aloud:
 
-- **Google Gemini 3.1 Flash TTS** *(default)* — Google's newest expressive
-  voice model. Per-officer male voices with prompt-driven direction
-  (gravely, reverent, commanding). When the daily quota fills up, the
-  app silently falls through to two older Gemini models so playback
-  keeps working.
+- **Google Gemini 3.1 Flash TTS** *(default)* — Google's newest
+  expressive voice model. Released April 15, 2026 — three days before
+  this email — and already wired in here. Per-officer male voices with
+  prompt-driven direction (gravely, reverent, commanding). When the
+  daily quota fills up, the app silently falls through to two older
+  Gemini models so playback keeps working.
 - **Mistral Voxtral** — supports **zero-shot voice cloning**. Record a
   short sample of a brother speaking and the app will read *his*
   officer's lines in *his* voice. No paid "voice clone" tier required.
@@ -133,13 +134,16 @@ is fine for a shopping list — it is not fine for the gravitas of an
 obligation or the cadence of a lecture.
 
 - **Google Gemini 3.1 Flash TTS** (now shipping as the app's default).
-  It accepts inline *audio tags* — short bracketed directions like
-  `[slow, solemn]` or `[whispered]` — that steer style, pace, and
-  emotion at any point mid-sentence. That means the ritual text itself
-  can pre-mark the cadence shifts the work already calls for, and the
-  voice engine will honor them. It currently sits at the top of the
-  Artificial Analysis TTS quality leaderboard (Elo 1,211), supports
-  70+ languages, and watermarks every clip with SynthID.
+  Google released this model on April 15, 2026 — three days before
+  this email went out. Our pilot is one of the very first real-world
+  uses of it. It accepts inline *audio tags* — short bracketed
+  directions like `[slow, solemn]` or `[whispered]` — that steer
+  style, pace, and emotion at any point mid-sentence. That means the
+  ritual text itself can pre-mark the cadence shifts the work already
+  calls for, and the voice engine will honor them. It currently sits
+  at the top of the Artificial Analysis TTS quality leaderboard
+  (Elo 1,211), supports 70+ languages, and watermarks every clip
+  with SynthID.
 - **Microsoft Azure Dragon HD / Neural HD 2.5** (rolling out early-to-mid
   2026 — not yet wired in). Microsoft's new HD line is LLM-based: the
   model reads the *meaning* of each line and adjusts emotional tone
