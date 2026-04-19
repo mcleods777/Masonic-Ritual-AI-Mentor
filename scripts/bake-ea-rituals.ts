@@ -30,9 +30,10 @@ import * as path from "node:path";
 import { spawn } from "node:child_process";
 
 const RITUALS = [
-  { slug: "ea-opening",    label: "EA Opening" },
-  { slug: "ea-initiation", label: "EA Initiation (longest — ~13 min)" },
-  { slug: "ea-closing",    label: "EA Closing" },
+  { slug: "ea-opening",     label: "EA Opening" },
+  { slug: "ea-initiation",  label: "EA Initiation (longest — ~13 min)" },
+  { slug: "ea-explanatory", label: "EA Explanatory Lecture" },
+  { slug: "ea-closing",     label: "EA Closing" },
 ];
 
 async function readPassphrase(): Promise<string> {

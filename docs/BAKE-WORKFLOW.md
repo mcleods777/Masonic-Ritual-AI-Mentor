@@ -50,6 +50,7 @@ rituals/
 ├── {slug}-dialogue.md          # plain English, YAML frontmatter required
 ├── {slug}-dialogue-cipher.md   # cipher/abbreviated, no frontmatter
 ├── {slug}-styles.json          # OPTIONAL — per-line Gemini style tags
+├── {slug}-voice-cast.json      # OPTIONAL — director's-notes preamble per role
 └── {slug}.mram                 # OUTPUT — built artifact
 ```
 
@@ -65,7 +66,83 @@ ceremony: Opening on the First Degree
 ---
 ```
 
-**Styles sidecar is optional.** Format: `{ "version": 1, "styles": [...] }`. Each entry maps a line (by content hash) to a Gemini prompt-direction string like `gravely` or `reverently`. If the sidecar is missing, the ritual builds fine with no style direction.
+**Styles sidecar is optional.** Format: `{ "version": 1, "styles": [...] }`. Each entry maps a line (by content hash) to a Gemini prompt-direction string. Supports both single-word tags (`gravely`) and multi-clause directives (`solemnly, with slight tremor`) — lowercase letters, spaces, commas, hyphens, apostrophes allowed, up to 80 chars. If the sidecar is missing, the ritual builds fine with no style direction.
+
+**Voice-cast sidecar is optional but high-impact.** Format: `{ "version": 1, "scene": "...", "roles": { "WM": { "profile": "...", "style": "...", "pacing": "...", "accent": "...", "other": "..." }, ... } }`. When present, the bake prepends a structured director's-notes preamble to every line that role speaks:
+
+```
+AUDIO PROFILE: {profile}
+THE SCENE: {scene}
+
+DIRECTOR'S NOTES
+Style: {style}
+Pacing: {pacing}
+Accent: {accent}
+Notes: {other}
+
+TRANSCRIPT
+[inline style] {line text}
+```
+
+This pins each role's character across every line — Gemini holds a much more consistent performance with measured gravitas on the Worshipful Master, crisp officiousness on the Junior Deacon, etc. — than it does with just a single `[gravely]` tag per line. The preamble lives at bake time only; the runtime `/api/tts/gemini` route keeps its lightweight single-tag format for any uncached-line fallback.
+
+**The cache key incorporates the preamble.** Editing a role's card in `{slug}-voice-cast.json` invalidates just the lines that role speaks — other roles' cache entries remain valid. The cache key version (`v2`) bumps automatically; old entries from before the preamble feature miss cleanly and re-render on next bake.
+
+**Starter template.** `rituals/` is gitignored so no checked-in example file lives there. Copy this template, save it as `rituals/{slug}-voice-cast.json`, and edit to taste. Role codes must match the canonical MRAM role IDs (not the dialogue-file speaker labels) — the canonical set is `WM`, `SW`, `JW`, `SD`, `JD`, `Sec`, `Trs`, `Tyl`, `Ch`, `Vchr`, `ALL`, `C`, `SS`, `JS` (see `ROLE_MAP` in `src/lib/dialogue-to-mram.ts`).
+
+```json
+{
+  "version": 1,
+  "scene": "A lodge of Entered Apprentices opening in deep of night. Low lamplight, officers at their stations, brethren rapt. Nothing theatrical, nothing hurried.",
+  "roles": {
+    "WM": {
+      "profile": "The Worshipful Master — seasoned mason, late 50s. Holds the authority of the East.",
+      "style": "Measured, authoritative. Slight gravitas, never theatrical.",
+      "pacing": "Deliberate. A small pause after each formal phrase.",
+      "accent": "Educated American, hint of old East Coast.",
+      "other": "Speaks as one who has said these words a thousand times and still means them."
+    },
+    "SW": {
+      "profile": "The Senior Warden — the Master's second, steward of the column in the West.",
+      "style": "Clear, measured, slightly warmer than the Master. Less distance, same weight.",
+      "pacing": "Steady. Responsive to the Master — answers land squarely after the question settles.",
+      "accent": "Educated American, neutral."
+    },
+    "JW": {
+      "profile": "The Junior Warden — watches over the craft at refreshment, station in the South.",
+      "style": "Steady, mid-register. A shade lighter than Senior Warden but still formal.",
+      "pacing": "Even-tempered.",
+      "accent": "Educated American, neutral."
+    },
+    "SD": {
+      "profile": "The Senior Deacon — attends the Master, carries his orders.",
+      "style": "Smooth, warm, slightly brighter. The messenger between East and West.",
+      "pacing": "Responsive, prompt. Announces without delay but never rushed.",
+      "accent": "Educated American, neutral."
+    },
+    "JD": {
+      "profile": "The Junior Deacon — guards the inner door, attends the Wardens.",
+      "style": "Crisp, distinct, firm.",
+      "pacing": "Brisk but formal. No mumbling, no trailing off.",
+      "accent": "Educated American, neutral."
+    },
+    "Ch": {
+      "profile": "The Chaplain — the lodge's voice in prayer.",
+      "style": "Reverent, quiet weight. The room drops into stillness when he speaks.",
+      "pacing": "Slow. Long breaths between phrases.",
+      "accent": "Educated American, softer register."
+    },
+    "Tyl": {
+      "profile": "The Tyler — guards the outer door. Veteran of many lodges.",
+      "style": "Laid-back, resonant. Older, a little gravelly.",
+      "pacing": "Unhurried. Speaks when spoken to.",
+      "accent": "Educated American, perhaps a trace of the old South or Midwest."
+    }
+  }
+}
+```
+
+Every field is optional — fill in what you know, leave the rest out. Author effort scales with how many roles speak substantively in the ritual. Expected shape: 5-10 minutes to draft a cast file per ritual once you have the template.
 
 ---
 

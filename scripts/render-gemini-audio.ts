@@ -40,8 +40,14 @@ const CACHE_DIR = path.join(
 );
 
 /** Cache format version. Bump when we change the Opus encoding params
- *  so old cached entries miss instead of replaying stale audio. */
-const CACHE_KEY_VERSION = "v1";
+ *  or the prompt-assembly rules so old cached entries miss instead of
+ *  replaying stale audio.
+ *  - v1: initial (text, style, voice) → [style] text
+ *  - v2: adds optional director's-notes preamble in the prompt.
+ *        Cache key incorporates the preamble so changes in the
+ *        voice-cast sidecar invalidate just the affected lines.
+ */
+const CACHE_KEY_VERSION = "v2";
 
 // ============================================================
 // Types
@@ -79,17 +85,24 @@ export interface RenderProgress {
  * Caches to ~/.cache/masonic-mram-audio/{sha256}.opus so re-runs skip the
  * Gemini API entirely. Safe to interrupt with Ctrl-C and resume — each
  * line's cache entry lands atomically or not at all.
+ *
+ * Optional `preamble` is the director's-notes block built by
+ * voice-cast.ts. When provided, it's prepended to the prompt before
+ * the `[style] text` segment AND hashed into the cache key so any
+ * change to a role's character card invalidates just the lines that
+ * role speaks.
  */
 export async function renderLineAudio(
   text: string,
   style: string | undefined,
   voice: string,
   options: RenderOptions,
+  preamble: string = "",
 ): Promise<Buffer> {
   const cacheDir = options.cacheDir ?? CACHE_DIR;
   fs.mkdirSync(cacheDir, { recursive: true });
 
-  const cacheKey = computeCacheKey(text, style, voice);
+  const cacheKey = computeCacheKey(text, style, voice, preamble);
   const cachePath = path.join(cacheDir, `${cacheKey}.opus`);
 
   if (fs.existsSync(cachePath)) {
@@ -110,6 +123,7 @@ export async function renderLineAudio(
         voice,
         models,
         options.apiKey,
+        preamble,
       );
       const opus = await encodeWavToOpus(wav);
 
@@ -175,8 +189,10 @@ async function callGeminiWithFallback(
   voice: string,
   models: string[],
   apiKey: string,
+  preamble: string = "",
 ): Promise<{ wav: Buffer; model: string }> {
-  const prompt = style ? `[${style}] ${text}` : text;
+  const inlineStyle = style ? `[${style}] ` : "";
+  const prompt = `${preamble}${inlineStyle}${text}`;
   const body = JSON.stringify({
     contents: [{ parts: [{ text: prompt }] }],
     generationConfig: {
@@ -326,8 +342,13 @@ async function encodeWavToOpus(wav: Buffer): Promise<Buffer> {
 // Cache key + WAV helpers
 // ============================================================
 
-function computeCacheKey(text: string, style: string | undefined, voice: string): string {
-  const material = `${CACHE_KEY_VERSION}\x00${text}\x00${style ?? ""}\x00${voice}`;
+function computeCacheKey(
+  text: string,
+  style: string | undefined,
+  voice: string,
+  preamble: string = "",
+): string {
+  const material = `${CACHE_KEY_VERSION}\x00${text}\x00${style ?? ""}\x00${voice}\x00${preamble}`;
   return crypto.createHash("sha256").update(material).digest("hex");
 }
 

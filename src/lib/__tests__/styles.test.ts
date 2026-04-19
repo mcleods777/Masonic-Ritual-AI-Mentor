@@ -22,8 +22,17 @@ describe("STYLE_TAG_PATTERN — Gemini TTS audio tag validation", () => {
     expect(STYLE_TAG_PATTERN.test("grand-fatherly")).toBe(true);
   });
 
-  it("rejects multi-word emotional descriptions", () => {
-    expect(STYLE_TAG_PATTERN.test("grave, binding oath")).toBe(false);
+  it("accepts multi-clause directive styles (Tier 1 relaxation)", () => {
+    expect(STYLE_TAG_PATTERN.test("grave, binding oath")).toBe(true);
+    expect(STYLE_TAG_PATTERN.test("solemnly, with slight tremor")).toBe(true);
+    expect(STYLE_TAG_PATTERN.test("commanding, each word clipped")).toBe(true);
+    expect(
+      STYLE_TAG_PATTERN.test("reverent, with a long pause before the final phrase"),
+    ).toBe(true);
+  });
+
+  it("accepts apostrophes (don't, won't, etc. in directive text)", () => {
+    expect(STYLE_TAG_PATTERN.test("as if you don't quite believe it")).toBe(true);
   });
 
   it("rejects uppercase", () => {
@@ -31,23 +40,32 @@ describe("STYLE_TAG_PATTERN — Gemini TTS audio tag validation", () => {
     expect(STYLE_TAG_PATTERN.test("GRAVELY")).toBe(false);
   });
 
-  it("rejects tags starting with space or hyphen", () => {
+  it("rejects tags starting with space, comma, or hyphen", () => {
     expect(STYLE_TAG_PATTERN.test(" gravely")).toBe(false);
     expect(STYLE_TAG_PATTERN.test("-gravely")).toBe(false);
+    expect(STYLE_TAG_PATTERN.test(",gravely")).toBe(false);
   });
 
-  it("rejects tags longer than 31 chars", () => {
-    expect(STYLE_TAG_PATTERN.test("a".repeat(32))).toBe(false);
+  it("rejects tags longer than 80 chars", () => {
+    expect(STYLE_TAG_PATTERN.test("a".repeat(80))).toBe(true);
+    expect(STYLE_TAG_PATTERN.test("a".repeat(81))).toBe(false);
   });
 
   it("rejects empty string", () => {
     expect(STYLE_TAG_PATTERN.test("")).toBe(false);
   });
 
-  it("rejects strings with digits or special chars", () => {
+  it("rejects strings with digits or special chars that could break the bracket prompt", () => {
     expect(STYLE_TAG_PATTERN.test("grave1")).toBe(false);
     expect(STYLE_TAG_PATTERN.test("grave!")).toBe(false);
     expect(STYLE_TAG_PATTERN.test("grave_ly")).toBe(false);
+    // Explicitly rejected: anything that could collide with bracket prompt
+    // format (other brackets, quotes, semicolons, backticks, newlines).
+    expect(STYLE_TAG_PATTERN.test("grave [with]")).toBe(false);
+    expect(STYLE_TAG_PATTERN.test('grave "tone"')).toBe(false);
+    expect(STYLE_TAG_PATTERN.test("grave;tone")).toBe(false);
+    expect(STYLE_TAG_PATTERN.test("grave`tone")).toBe(false);
+    expect(STYLE_TAG_PATTERN.test("grave\ntone")).toBe(false);
   });
 });
 

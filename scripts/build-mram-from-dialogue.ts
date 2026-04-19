@@ -44,6 +44,11 @@ import { buildFromDialogue } from "../src/lib/dialogue-to-mram";
 import type { MRAMDocument } from "../src/lib/mram-format";
 import { GEMINI_ROLE_VOICES, getGeminiVoiceForRole } from "../src/lib/tts-cloud";
 import { renderLineAudio, deleteCacheEntry } from "./render-gemini-audio";
+import {
+  buildPreamble,
+  validateVoiceCast,
+  type VoiceCastFile,
+} from "../src/lib/voice-cast";
 
 // ============================================================
 // Encryption (Node crypto — binary layout matches Web Crypto
@@ -303,6 +308,35 @@ async function main() {
     }
   }
 
+  // Optional: ingest voice-cast director's-notes preamble from
+  // `{prefix}-voice-cast.json` sidecar. Only consumed when --with-audio
+  // is set (preamble is a bake-time quality boost; runtime playback
+  // keeps the lightweight single-tag format).
+  let voiceCast: VoiceCastFile | undefined;
+  const voiceCastInferred = plainPath.replace(/-dialogue\.md$/, "-voice-cast.json");
+  if (fs.existsSync(voiceCastInferred)) {
+    try {
+      const raw = fs.readFileSync(voiceCastInferred, "utf-8");
+      const parsed = JSON.parse(raw);
+      const validated = validateVoiceCast(parsed);
+      if (validated.ok) {
+        voiceCast = validated.value;
+        const roleCount = Object.keys(voiceCast.roles).length;
+        console.error(
+          `Reading ${voiceCastInferred}... (${roleCount} role card(s)${voiceCast.scene ? " + scene" : ""})`,
+        );
+      } else {
+        console.error(
+          `Warning: ${voiceCastInferred}: ${validated.error}. Skipping preamble.`,
+        );
+      }
+    } catch (err) {
+      console.error(
+        `Warning: failed to read ${voiceCastInferred}: ${(err as Error).message}. Skipping preamble.`,
+      );
+    }
+  }
+
   console.error("Pairing and building MRAMDocument...");
   const { doc, report } = await buildFromDialogue(plain, cipher, {
     jurisdiction: metadata.jurisdiction!,
@@ -326,7 +360,7 @@ async function main() {
   console.error(`  Roles:    ${Object.keys(doc.roles).join(", ")}`);
 
   if (withAudio) {
-    await bakeAudioIntoDoc(doc, fallbackMode);
+    await bakeAudioIntoDoc(doc, fallbackMode, voiceCast);
   }
 
   console.error("Encrypting...");
@@ -357,6 +391,7 @@ async function main() {
 async function bakeAudioIntoDoc(
   doc: MRAMDocument,
   fallbackMode: FallbackMode,
+  voiceCast: VoiceCastFile | undefined,
 ): Promise<void> {
   const apiKey = process.env.GOOGLE_GEMINI_API_KEY!;
 
@@ -367,6 +402,21 @@ async function bakeAudioIntoDoc(
   // only for roles where the voice doesn't match anymore.
   doc.metadata.voiceCast = { ...GEMINI_ROLE_VOICES };
   doc.metadata.audioFormat = "opus-32k-mono";
+
+  // Precompute each role's preamble once. Every spoken line for that
+  // role uses the same preamble, so we'd otherwise rebuild the same
+  // string 50+ times. Cache is cheap and avoids per-line string churn.
+  const preambleByRole: Record<string, string> = {};
+  const rolesWithPreamble: string[] = [];
+  if (voiceCast) {
+    for (const role of Object.keys(voiceCast.roles)) {
+      const preamble = buildPreamble(voiceCast, role);
+      if (preamble) {
+        preambleByRole[role] = preamble;
+        rolesWithPreamble.push(role);
+      }
+    }
+  }
 
   // Preferred model is the first entry of the fallback chain — either
   // the env override (GEMINI_TTS_MODELS, first comma-separated value)
@@ -384,7 +434,19 @@ async function bakeAudioIntoDoc(
   console.error(`  Preferred model: ${preferredModel}`);
   console.error(`  Fallback chain: 3.1-flash → 2.5-flash → 2.5-pro`);
   console.error(`  On all-models-429: sleep until midnight PT, auto-resume`);
-  console.error(`  On quality-tier drop: ${fallbackMode} (--on-fallback=${fallbackMode})\n`);
+  console.error(`  On quality-tier drop: ${fallbackMode} (--on-fallback=${fallbackMode})`);
+  if (rolesWithPreamble.length > 0) {
+    console.error(
+      `  Voice-cast preamble: ${rolesWithPreamble.length} role(s) — ${rolesWithPreamble.join(", ")}`,
+    );
+  } else if (voiceCast) {
+    console.error(`  Voice-cast loaded but contained no usable role cards.`);
+  } else {
+    console.error(
+      `  Voice-cast: none (drop a {slug}-voice-cast.json next to the dialogue for richer delivery)`,
+    );
+  }
+  console.error("");
 
   const startTime = Date.now();
   let rendered = 0;
@@ -411,8 +473,14 @@ async function bakeAudioIntoDoc(
     // leave a single degraded line cached that silently hits on re-run.
     let thisLineCacheKey: string | undefined;
 
+    const preamble = preambleByRole[line.role] ?? "";
+
     try {
-      const opus = await renderLineAudio(cleanText, line.style, voice, {
+      const opus = await renderLineAudio(
+        cleanText,
+        line.style,
+        voice,
+        {
         apiKey,
         onProgress: (event) => {
           if (event.status === "cache-hit") {
@@ -441,7 +509,9 @@ async function bakeAudioIntoDoc(
             );
           }
         },
-      });
+      },
+        preamble,
+      );
 
       line.audio = opus.toString("base64");
 

@@ -7,21 +7,33 @@
  *   [gravely] You will say I, your name, and repeat after me: ...
  *   I will always hail, [slowly] forever conceal, [pause] and never reveal
  *
- * 200+ tags are documented (emotional states, pacing, delivery styles).
- * The Suggest Styles author tool constrains Claude's suggestions to a
- * narrow set: lowercase, single word or short phrase, hyphen and space
- * allowed, max 30 chars. This rejects multi-word emotional descriptions
- * ("grave, binding oath") that the tag model can't interpret.
+ * 200+ tags are documented (emotional states, pacing, delivery styles),
+ * but Google's own guidance is that any single-word-or-short-phrase
+ * descriptor inside brackets works — `[sarcastically, one painfully
+ * slow word at a time]` is a valid (and effective) direction. The old
+ * regex only accepted single-word lowercase tags (~5% of Gemini's
+ * expressive surface area); this relaxed version allows multi-clause
+ * directive styles like "solemnly, with slight tremor" while still
+ * rejecting anything that could break the bracket prompt format
+ * (newlines, other brackets, quotes, backticks, semicolons).
  *
- * See: https://ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-tts-preview
+ * See: https://ai.google.dev/gemini-api/docs/speech-generation
  */
 
 /**
  * Single source of truth for style tag validation. Import this in any
  * author code path that saves a style, and in the dialogue-to-mram
  * ingestion path that reads `{ritual}-styles.json`.
+ *
+ * Allowed: lowercase letters, spaces, commas, hyphens, apostrophes.
+ * Must start with a lowercase letter. Max 80 chars — comfortably fits
+ * "reverent, with a long pause before the final phrase" (50 chars)
+ * and similar multi-clause directives.
+ *
+ * Rejected: uppercase (prevents ALL-CAPS SHOUTING tokens sneaking in),
+ * digits, underscores, brackets, quotes, newlines, any other punctuation.
  */
-export const STYLE_TAG_PATTERN = /^[a-z][a-z -]{0,30}$/;
+export const STYLE_TAG_PATTERN = /^[a-z][a-z ,'-]{0,79}$/;
 
 /**
  * Validate a style tag against STYLE_TAG_PATTERN. Returns true if the

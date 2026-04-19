@@ -71,19 +71,25 @@ function getProvider(): {
 
 const SYSTEM_PROMPT = `You suggest Google Gemini 3.1 Flash TTS audio tags for Masonic ritual lines.
 
-Gemini tags are bracket-wrapped single words that direct expressive delivery: [gravely], [reverently], [hushed], [warmly], [slowly].
+Gemini tags are bracket-wrapped directives that steer expressive delivery. Simple forms:
+  [gravely]   [reverently]   [hushed]   [warmly]   [slowly]
+Richer multi-clause forms (preferred when the line has dramatic shape):
+  [solemnly, with slight tremor]
+  [commanding, each word clipped]
+  [reverent, with a long pause before the final phrase]
+  [grave, binding oath]
 
 Rules:
-- Return exactly ONE tag. Lowercase. Single word or short phrase (hyphen/space allowed). Max 30 chars.
-- No brackets in your reply — just the word.
-- No commas. No multi-word emotional descriptions.
-- Prefer this whitelist when it fits: ${RITUAL_STYLE_WHITELIST.join(", ")}.
-  If none fit, pick a single descriptive word (e.g. "grandfatherly", "steady").
-- Consider the speaker's role and the line's emotional weight.
-- If the line is a mundane procedural statement ("Brother Senior Warden, have you anything..."), pick "neutral".
-- For binding oaths, judgments, or solemn declarations, prefer "gravely", "solemnly", or "binding".
-- For prayers and invocations, prefer "reverently" or "prayerful".
-- For greetings and warm passages, "warmly" or "brotherly".`;
+- Return exactly ONE directive. Lowercase. Letters, spaces, commas, hyphens, apostrophes allowed. Max 80 chars.
+- No brackets in your reply — just the directive text.
+- Prefer this whitelist for single-word tags when it fits: ${RITUAL_STYLE_WHITELIST.join(", ")}.
+- For lines with clear emotional shape (weight → pause → release, or build → climax), prefer a short multi-clause directive that names that shape. Keep it grounded — no theatrical descriptions.
+- For mundane procedural statements ("Brother Senior Warden, have you anything..."), pick "neutral".
+- For binding oaths, judgments, or solemn declarations, prefer "gravely", "solemnly", "binding", or a multi-clause like "grave, measured, binding".
+- For prayers and invocations, prefer "reverently", "prayerful", or "reverent, low in register".
+- For greetings and warm passages, "warmly" or "brotherly, open".
+- REGISTER: Masonic ritual. Dignified, weighted, never theatrical. No [crying], [gasping], [laughing], [shouting], or any interjection-style tag — those break the ritual register.
+- Consider the speaker's role and the line's emotional weight.`;
 
 function buildUserPrompt(line: SuggestRequestLine): string {
   const before = line.neighbors.slice(0, 2).filter(Boolean).join("\n");
