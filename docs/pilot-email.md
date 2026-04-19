@@ -33,24 +33,39 @@ themselves around the symbol as it moves.
 
 ![Masonic Ritual Mentor landing page](./install-guide-images/03-landing-desktop.png)
 
-That is not a gimmick. The page is a live demo of a brand-new open-source
-text layout standard called **Pretext**, released just days ago by an
-engineer at Midjourney. Pretext is the first practical way to get that
-kind of organic, obstacle-aware text flow on the open web, and our landing
-page is one of the earliest real-world uses of it outside the author's own
-demos.
+That is not a gimmick — and it is not something you have seen on a
+website before, because until now it could not be done. For the entire
+thirty-year history of the web, text has been trapped inside rectangles.
+Paragraphs wrap around the invisible edges of a box, full stop. A narrow
+CSS feature added around 2014 (`shape-outside`) let a paragraph hug the
+edge of *one* static image, but nothing more — no multiple obstacles, no
+moving obstacles, no real reflow.
 
-If you want the background, there's a short YouTube explainer on what
-Pretext is and why it matters:
+The page is a live demo of a brand-new open-source text layout standard
+called **Pretext**, released just days ago by an engineer at Midjourney.
+Pretext is the first practical way to get real, dynamic, multi-obstacle
+text reflow on the open web — text that genuinely recalculates its
+shape in real time as objects drift, resize, or appear. It unlocks an
+entire category of layout that was previously impossible outside of
+print: magazine-grade typography, interactive fiction, games with
+diegetic text, data-viz with inline narrative. Our landing page is one
+of the earliest real-world uses of it outside the author's own demos.
+
+Short YouTube explainer on what Pretext is and why it matters:
 
 https://youtu.be/CUAuy5SWJcw?si=0WRv_QF8yfhyaYKn
 
-And a write-up in VentureBeat:
+Write-up in VentureBeat:
 
 https://venturebeat.com/technology/midjourney-engineer-debuts-new-vibe-coded-open-source-standard-pretext-to
 
-I mention it because a few brothers have asked, "Why does the front page
-feel different from a normal website?" — that's why.
+Full transparency: no brother asked me to put this on the front page. I
+put it there as a flex. When I first read about Pretext, I wanted to
+see if I could get it running inside the app within the hour — and I
+was frankly amazed when I could. It has no bearing on the rehearsal
+feature itself. It is there because it is beautiful, it is new, and
+our lodge's pilot page gets to be one of the first places on the open
+web to show it off.
 
 ## Under the hood — why this app is unique
 
@@ -107,6 +122,36 @@ expected text character-by-character. It runs five layers:
 After the diff, a large language model (Llama 3.3 70B via Groq) generates
 a short spoken coaching response — brief, contextual, and streamed to
 you as you listen.
+
+### Why Gemini is now the default voice — and what's still coming
+
+Today's default voice engine fixes the one thing earlier text-to-speech
+still got wrong for ritual work: *delivery.* A flat, evenly-paced reading
+is fine for a shopping list — it is not fine for the gravitas of an
+obligation or the cadence of a lecture.
+
+- **Google Gemini 3.1 Flash TTS** (now shipping as the app's default).
+  It accepts inline *audio tags* — short bracketed directions like
+  `[slow, solemn]` or `[whispered]` — that steer style, pace, and
+  emotion at any point mid-sentence. That means the ritual text itself
+  can pre-mark the cadence shifts the work already calls for, and the
+  voice engine will honor them. It currently sits at the top of the
+  Artificial Analysis TTS quality leaderboard (Elo 1,211), supports
+  70+ languages, and watermarks every clip with SynthID.
+- **Microsoft Azure Dragon HD / Neural HD 2.5** (rolling out early-to-mid
+  2026 — not yet wired in). Microsoft's new HD line is LLM-based: the
+  model reads the *meaning* of each line and adjusts emotional tone
+  automatically — measured pause at a solemn passage, lift at a welcome,
+  weight at a charge — without any manual markup at all. A unified model
+  covering 700+ voices, with wider availability and a significant price
+  drop arriving in March 2026. We will add it to the seven-engine
+  dropdown when the public API lands.
+
+Gemini is live in the dropdown today and serves as the playback engine
+for every officer line by default. Voxtral, ElevenLabs, Deepgram, Google
+Cloud, Kokoro, and the browser engine are still selectable as
+alternatives or fallbacks — the ritual will *sound* like ritual either
+way.
 
 ## Your data — what leaves your device, and what doesn't
 
@@ -230,6 +275,39 @@ Why that matters for this pilot:
 If you want to poke around, start with the **README** at the top of the
 repository page — that is the plain-English summary — and the **`docs/`
 folder**, where the written materials live.
+
+### The license — AGPL, and why it matters
+
+The code is published under the **GNU Affero General Public License,
+version 3** (AGPL-3.0). That is a deliberate choice, and it protects
+the brothers who use this app. In plain terms:
+
+- **Free of charge, free to use, free to study, free to modify, free to
+  share.** Any brother, any lodge, any jurisdiction is welcome to take
+  a copy.
+- **It cannot be taken back.** Once the code is published under AGPL,
+  no future owner — not me, not a company that might buy the project,
+  not anyone — can relicense it as closed, proprietary software. The
+  freedom is locked in.
+- **Modifications stay open.** If another person or organization takes
+  this code, changes it, and runs it on their own server for brothers
+  to use, AGPL requires them to publish their modifications under the
+  same license. There is no way to fork the app, quietly add tracking
+  or advertising, and keep those changes private.
+- **No warranty.** Standard for open-source licenses — the software is
+  provided as-is.
+
+The practical upshot for our lodge: the app you install today cannot
+become a closed, proprietary product trying to extract fees or data
+from brothers. If I ever became unable to maintain it, the code would
+remain available for someone else to take up. If another jurisdiction
+likes it, they can adopt it, and their improvements flow back to
+everyone.
+
+AGPL is the same license that covers Mastodon and Nextcloud — the
+established, privacy-respecting open-source projects in that space. The
+full license text is in the repository as `LICENSE`, or you can read it
+at [gnu.org/licenses/agpl-3.0.html](https://www.gnu.org/licenses/agpl-3.0.html).
 
 ## The pilot URL
 
