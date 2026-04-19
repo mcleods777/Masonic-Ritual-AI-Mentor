@@ -970,13 +970,17 @@ export function getGeminiVoiceForRole(role: string): string {
  *       Chromium even with patched WAV headers. v3 cache entries had
  *       client-patched headers but the batch flow produces different
  *       byte layouts, so invalidate.
+ *   v5: preview TTS models 404 on batch generateContent — only the
+ *       streamGenerateContent endpoint is exposed for them. Server now
+ *       buffers the SSE stream into a complete WAV and returns it as a
+ *       normal Content-Length response. Client gets a clean blob.
  */
 async function geminiCacheKey(
   text: string,
   style: string | undefined,
   voice: string
 ): Promise<string> {
-  const KEY_VERSION = "v4";
+  const KEY_VERSION = "v5";
   const material = `${KEY_VERSION}\x00${text}\x00${style ?? ""}\x00${voice}`;
   const bytes = new TextEncoder().encode(material);
   const hash = await crypto.subtle.digest("SHA-256", bytes);

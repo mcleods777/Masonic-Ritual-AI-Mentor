@@ -47,14 +47,15 @@ function getGeminiModels(): string[] {
 }
 
 function geminiEndpoint(model: string): string {
-  // Batch generateContent (not streaming). The streaming endpoint with
-  // chunked HTTP transfer-encoding produced WAV blobs that Chromium
-  // refused to play with ERR_REQUEST_RANGE_NOT_SATISFIABLE — patching
-  // the WAV header sizes client-side did not fix it. Batch returns a
-  // proper Content-Length response with a correct WAV header server-
-  // side, which plays cleanly. Cost: 2-5s/line first-time vs ~0.7s
-  // streamed. Preload covers the latency for full-ritual rehearsal.
-  return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+  // Use streamGenerateContent + SSE — preview TTS models only expose this
+  // endpoint (batch generateContent returns 404). Server-side, we buffer
+  // the entire SSE stream into a complete WAV before returning to the
+  // client as a single Content-Length response (NOT chunked transfer).
+  // That avoids the Chromium ERR_REQUEST_RANGE_NOT_SATISFIABLE bug where
+  // chunked-transfer audio blobs failed to play even with corrected WAV
+  // headers. Cost is the same 2-5s as batch since we're buffering anyway.
+  // Preload covers the latency for full-ritual rehearsal.
+  return `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`;
 }
 
 // Eng-review + CSO finding: cap input text length on paid AI endpoints.
@@ -149,14 +150,17 @@ export async function POST(request: NextRequest) {
       break;
     }
 
-    if (r.status === 429) {
+    // 429 = quota exhausted on this model. 404 = model name not recognized
+    // by the API (Google rotates preview models silently). Both: try the
+    // next model in the chain.
+    if (r.status === 429 || r.status === 404) {
       lastQuotaError = {
         model,
         status: r.status,
         body: await r.text(),
       };
       console.warn(
-        `Gemini TTS: ${model} returned 429, trying next model in fallback chain`,
+        `Gemini TTS: ${model} returned ${r.status}, trying next model in fallback chain`,
       );
       continue;
     }
@@ -182,11 +186,19 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Batch response: parse JSON, extract base64 PCM, wrap in a WAV/RIFF
-  // header with the REAL data size, return as a single buffer with proper
-  // Content-Length. No streaming. No chunked transfer-encoding. No
-  // sentinel header sizes for the audio element to choke on.
-  interface GeminiBatchResp {
+  // SSE stream: read all events server-side, accumulate PCM bytes from
+  // each event's inlineData.data, then build a single complete WAV with
+  // accurate dataSize and return as a normal Content-Length response.
+  // No client-visible streaming. No chunked transfer.
+  const reader = resp.body?.getReader();
+  if (!reader) {
+    return NextResponse.json(
+      { error: "No response body from Gemini" },
+      { status: 502 },
+    );
+  }
+
+  interface GeminiChunk {
     candidates?: Array<{
       content?: {
         parts?: Array<{
@@ -196,30 +208,56 @@ export async function POST(request: NextRequest) {
     }>;
   }
 
-  let parsed: GeminiBatchResp;
+  const decoder = new TextDecoder();
+  let sseBuffer = "";
+  const pcmChunks: Buffer[] = [];
+  let mimeType = "audio/L16;codec=pcm;rate=24000";
+
   try {
-    parsed = (await resp.json()) as GeminiBatchResp;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      sseBuffer += decoder.decode(value, { stream: true });
+
+      const events = sseBuffer.split("\n\n");
+      sseBuffer = events.pop() || "";
+
+      for (const event of events) {
+        const dataLine = event.split("\n").find((l) => l.startsWith("data: "));
+        if (!dataLine) continue;
+        const jsonStr = dataLine.slice(6).trim();
+        if (!jsonStr || jsonStr === "[DONE]") continue;
+
+        try {
+          const parsed = JSON.parse(jsonStr) as GeminiChunk;
+          const part = parsed.candidates?.[0]?.content?.parts?.[0];
+          const audioB64 = part?.inlineData?.data;
+          if (!audioB64) continue;
+          if (part?.inlineData?.mimeType) mimeType = part.inlineData.mimeType;
+          pcmChunks.push(Buffer.from(audioB64, "base64"));
+        } catch {
+          // Malformed SSE event — skip.
+        }
+      }
+    }
   } catch (err) {
-    console.error("Gemini TTS: failed to parse batch response:", err);
+    console.error("Gemini TTS SSE read error:", err);
     return NextResponse.json(
-      { error: "Gemini TTS returned malformed response" },
+      { error: "Gemini TTS stream interrupted" },
       { status: 502 },
     );
   }
 
-  const part = parsed.candidates?.[0]?.content?.parts?.[0];
-  const audioB64 = part?.inlineData?.data;
-  if (!audioB64) {
-    console.error(`Gemini TTS: ${servedBy} returned no audio in candidates`);
+  if (pcmChunks.length === 0) {
+    console.error(`Gemini TTS: ${servedBy} returned no audio in stream`);
     return NextResponse.json(
       { error: "Gemini TTS returned no audio data" },
       { status: 502 },
     );
   }
 
-  const mimeType = part?.inlineData?.mimeType ?? "audio/L16;codec=pcm;rate=24000";
+  const pcm = Buffer.concat(pcmChunks);
   const sampleRate = parseSampleRate(mimeType);
-  const pcm = Buffer.from(audioB64, "base64");
   const header = buildWavHeader(sampleRate, 1, 16, pcm.length);
   const wav = Buffer.concat([Buffer.from(header), pcm]);
 
