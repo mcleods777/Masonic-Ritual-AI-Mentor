@@ -7,26 +7,29 @@ through P4 (nice-to-have). Completed items move to the bottom section.
 
 ### Fallback plan if `gemini-3.1-flash-tts-preview` is pulled or renamed
 **Priority:** P3
-**What:** Document and stub a runbook for what happens if Google renames,
-rate-limits, or deprecates the `gemini-3.1-flash-tts-preview` endpoint.
+**What:** Write a short runbook for what happens if Google fully removes
+or breaking-changes all three Gemini TTS preview models (3.1-flash,
+2.5-flash, 2.5-pro). Most of the original concern shipped 2026-04-18 —
+this TODO is now about the long-tail what-if.
 
-**Why:** Model was released 2026-04-15 (preview tier). Preview models get
-renamed, throttled, or pulled with modest notice. If this happens mid-pilot,
-the Gemini engine returns 404 and styled rituals lose expression. Per
-eng-review decision 13A, the rehearsal runtime will show a user-visible
-error banner on styled lines when Gemini fails — so the app degrades
-gracefully, but the author needs to know what happened.
+**Status update (2026-04-18):**
+- ✅ 3-model fallback chain shipped in `src/app/api/tts/gemini/route.ts`
+  via `getGeminiModels()` — returns `[3.1-flash, 2.5-flash, 2.5-pro]` and
+  the route silently retries on 429 or 404 across all three.
+- ✅ Hot-swap via env var: `GEMINI_TTS_MODELS` (comma-separated) overrides
+  the chain at runtime so ops can re-order or swap in new model IDs
+  without a deploy.
+- ⏳ Still no user-visible error banner (eng-review decision 13A) — when
+  all three Gemini models fail, the client falls through to Voxtral
+  silently. A banner that says "Gemini TTS is degraded, falling back" on
+  styled lines is still on the wishlist.
+- ⏳ Still no published runbook for "all three models gone." Today's
+  fallback chain buys headroom but not coverage if Google retires the
+  whole preview lineup at once.
 
-**Pros:** A 5-minute runbook saves hours of debugging during a live pilot
-outage. Low cost now, high cost later if we need it.
-
-**Cons:** Google's preview-model lifecycle is opaque — we can't fully
-predict what breaks.
-
-**Context:** Model ID pinned in `src/app/api/tts/gemini/route.ts` as
-`GEMINI_MODEL`. Simplest fix path when this fires: add a `GEMINI_TTS_MODEL`
-env var so ops can swap the model ID without a deploy. Ship the env var
-only when needed, not preemptively.
+**Why:** The remaining gaps are low-frequency, high-context items.
+Documentation only. Trigger if Google announces deprecation of the
+2.5-flash preview line.
 
 **Depends on / blocked by:** nothing — documentation / runbook only.
 
@@ -62,26 +65,62 @@ page patterns cover the save flow. Add a "Suggest Styles" button next to
 
 ---
 
-### Voxtral fallback + error banner + prefetch + streaming
+### Voxtral fallback + error banner + automatic next-line prefetch
 **Priority:** P2
-**What:** Ship the polish decisions from eng-review that aren't yet wired:
-  - 2A/13A: rehearsal runtime catches Gemini errors, falls back to Voxtral
-    silently on unstyled lines, shows an error banner on styled lines.
-  - 11A: stream audio from `/api/tts/gemini` instead of blob-at-end.
-  - 12A: prefetch line N+1 while N plays, aborts on pause/seek.
+**What:** Three remaining polish items from the original eng-review:
+  - 2A/13A: error banner on styled lines when Gemini falls back to
+    Voxtral. Today the fallback is silent — Brother hears Voxtral and
+    doesn't know why.
+  - 12A: automatic prefetch of line N+1 while N plays (cancels on
+    pause/seek). The current preload button covers the bulk case but
+    on a cold cache during live rehearsal there's still a gap.
 
-**Why:** These are the difference between "Gemini works" and "Gemini feels
-next-level." Cold-cache latency on a 10s Obligation line is currently
-~3s without streaming + prefetch.
+**Status update (2026-04-18):**
+- ✅ Voxtral fallback works (chain: Gemini all 3 models → Voxtral → Google
+  Cloud → browser). Voxtral now has 15 default character voices in the
+  pool to draw from when Brother hasn't recorded their own.
+- ✅ Streaming attempted via `streamGenerateContent` SSE. Reverted to
+  server-side SSE buffering (route reads stream, builds complete WAV with
+  Content-Length, returns single response) because Chromium choked on
+  chunked-transfer audio blobs with `ERR_REQUEST_RANGE_NOT_SATISFIABLE`.
+  Tradeoff: no user-visible streaming benefit (~2-5s/line first-time)
+  but reliable playback. Preload button covers the rehearsal case by
+  caching every line into IndexedDB before the session starts.
+- ⏳ Error banner: not started.
+- ⏳ Automatic next-line prefetch: not started. Preload covers it for
+  prepared rehearsals; needed for cold-cache live use.
 
-**Pros:** User experience lands at the quality bar promised by the design.
+**Why:** Banner closes a confusion gap (silent fallback feels broken).
+Auto-prefetch closes the cold-cache latency gap during ad-hoc practice.
 
-**Cons:** Prefetch logic lives in RehearsalMode and is the most complex
-piece. Streaming requires swapping `generateContent` for `streamGenerateContent`
-in the Gemini route.
+**Depends on / blocked by:** nothing.
 
-**Context:** v1 ships functional but without the streaming/prefetch polish.
-This TODO tracks the polish pass.
+---
+
+### Skip Voxtral in fallback chain when no user-recorded voices exist
+**Priority:** P3
+**What:** When `speakAsRole` enters the fallback chain (Gemini → Voxtral
+→ Google Cloud → Browser) and there are zero user-recorded voices in
+IndexedDB, skip the Voxtral attempt and go straight to Google Cloud.
+
+**Why:** Today, Voxtral fires even when Brother hasn't recorded any
+voices. With the 15 default voices restored as a pool, this is fine for
+playback. But before the user records anything, every Voxtral fallback
+adds ~500ms of latency before delivering the same outcome a faster
+fallback would give. Skipping when the pool is empty of user voices
+trims the dead-end latency.
+
+**Pros:** Faster perceived recovery from a Gemini failure. No user-
+visible behavior change (audio sounds the same).
+
+**Cons:** Tiny gain (~500ms) on a rare path (only fires when all 3
+Gemini models 429). Adds a conditional in the fallback path.
+
+**Context:** Discussed during the post-ship debug session 2026-04-18
+after default voices were repurposed. The optimization assumes "user
+hasn't recorded" means "Voxtral has nothing personalized to add" — which
+is true today but might change if we add other Voxtral-specific
+features.
 
 **Depends on / blocked by:** nothing.
 
