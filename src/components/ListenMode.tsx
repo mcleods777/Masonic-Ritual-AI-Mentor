@@ -126,7 +126,7 @@ export default function ListenMode({ sections }: ListenModeProps) {
             for (let attempt = 0; attempt < 2 && !spoken; attempt++) {
               if (stale()) return;
               try {
-                await speakAsRole(cleanText, section.speaker, voiceMapRef.current, section.style);
+                await speakAsRole(cleanText, section.speaker, voiceMapRef.current, section.style, section.audio);
                 spoken = true;
               } catch (err) {
                 // Don't retry if this was an intentional abort (user tapped a different line)
@@ -216,7 +216,7 @@ export default function ListenMode({ sections }: ListenModeProps) {
           const cleanText = cleanRitualText(section.text);
           if (cleanText) {
             try {
-              await speakAsRole(cleanText, section.speaker, voiceMapRef.current, section.style);
+              await speakAsRole(cleanText, section.speaker, voiceMapRef.current, section.style, section.audio);
             } catch {
               /* ignore */
             }

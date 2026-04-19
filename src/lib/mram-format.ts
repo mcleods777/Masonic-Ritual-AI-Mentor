@@ -2,11 +2,13 @@
  * .mram (Masonic Ritual AI Mentor) file format.
  *
  * A single encrypted file that bundles both cipher text (abbreviated/encoded)
- * and plain text for each line of a ritual ceremony.
+ * and plain text for each line of a ritual ceremony. v3+ also optionally
+ * embeds pre-rendered Gemini TTS audio (Opus-encoded) per line so Brothers
+ * on-device don't need to call the Gemini API at all.
  *
  * File structure on disk (binary):
  *   [4 bytes] Magic: "MRAM"
- *   [1 byte]  Version (currently 1)
+ *   [1 byte]  Version (currently 3)
  *   [16 bytes] Salt (for PBKDF2 key derivation)
  *   [12 bytes] IV (for AES-256-GCM)
  *   [rest]    Ciphertext (AES-256-GCM encrypted JSON payload)
@@ -32,6 +34,22 @@ export interface MRAMMetadata {
   degree: string;
   ceremony: string;
   checksum: string; // SHA-256 of JSON.stringify(lines)
+  /**
+   * Voice cast used when audio was baked into the file (v3+).
+   * Keys are role codes ("WM", "SW", ...), values are Gemini prebuilt
+   * voice names ("Alnilam", "Charon", ...). When present, the client
+   * playback path uses MRAMLine.audio directly and skips the Gemini
+   * API call entirely. If the user picks a different engine or a
+   * different voice cast at runtime, the embedded audio is ignored
+   * and the existing IndexedDB cache + API path handles it.
+   */
+  voiceCast?: Record<string, string>;
+  /**
+   * Codec identifier for the bytes in MRAMLine.audio. Currently only
+   * "opus-32k-mono" is emitted by the build script. Reserved for future
+   * codecs (e.g., "mp3-64k-mono") without breaking old readers.
+   */
+  audioFormat?: "opus-32k-mono";
 }
 
 export interface MRAMSection {
@@ -56,6 +74,20 @@ export interface MRAMLine {
    * Present in FORMAT_VERSION 2+ files only.
    */
   style?: string;
+  /**
+   * Optional pre-rendered audio for this line, Opus-encoded and
+   * base64-serialized. Baked at build time by scripts/build-mram-
+   * from-dialogue.ts via `--with-audio`. Audio was rendered with the
+   * voice named by metadata.voiceCast[this.role] and the style above.
+   *
+   * When this field is present and the user is playing with the Gemini
+   * engine + no per-role Voxtral override, the client plays these bytes
+   * directly — zero API call, zero network roundtrip. When absent, the
+   * existing /api/tts/gemini + IndexedDB cache path handles the line.
+   *
+   * Present in FORMAT_VERSION 3+ files only.
+   */
+  audio?: string;
 }
 
 // ============================================================
@@ -63,8 +95,11 @@ export interface MRAMLine {
 // ============================================================
 
 const MAGIC = new Uint8Array([0x4D, 0x52, 0x41, 0x4D]); // "MRAM"
-const FORMAT_VERSION = 2; // v1 files decrypt fine (style field undefined); v2 adds MRAMLine.style
-const SUPPORTED_VERSIONS = [1, 2];
+// v1 files decrypt fine (style + audio fields are optional)
+// v2 adds MRAMLine.style
+// v3 adds MRAMLine.audio + metadata.voiceCast + metadata.audioFormat
+const FORMAT_VERSION = 3;
+const SUPPORTED_VERSIONS = [1, 2, 3];
 const SALT_LENGTH = 16;
 const IV_LENGTH = 12;
 const PBKDF2_ITERATIONS = 310_000; // OWASP 2023 recommended minimum
@@ -262,6 +297,8 @@ export interface MRAMRitualSection {
   action: string | null;
   /** Gemini 3.1 Flash TTS audio tag (v2+ .mram files). Undefined on v1. */
   style?: string;
+  /** Pre-rendered Opus audio for this line, base64 (v3+ files). */
+  audio?: string;
 }
 
 export function mramToSections(doc: MRAMDocument): MRAMRitualSection[] {
@@ -278,6 +315,7 @@ export function mramToSections(doc: MRAMDocument): MRAMRitualSection[] {
     gavels: line.gavels,
     action: line.action,
     ...(line.style ? { style: line.style } : {}),
+    ...(line.audio ? { audio: line.audio } : {}),
   }));
 }
 

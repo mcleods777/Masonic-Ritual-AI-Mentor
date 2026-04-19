@@ -257,7 +257,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
         for (let attempt = 0; attempt < 2 && !spoken; attempt++) {
           if (stale()) return;
           try {
-            await speakAsRole(cleanText, section.speaker, voiceMapRef.current, section.style);
+            await speakAsRole(cleanText, section.speaker, voiceMapRef.current, section.style, section.audio);
             spoken = true;
             // Check if a fallback was used (primary engine failed but browser worked)
             const fallbackMsg = getLastTTSError();
@@ -653,7 +653,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
         if (cleanText) {
           setRehearsalState("ai-speaking");
           try {
-            await speakAsRole(cleanText, section.speaker, voiceMapRef.current, section.style);
+            await speakAsRole(cleanText, section.speaker, voiceMapRef.current, section.style, section.audio);
           } catch {
             /* ignore */
           }
@@ -691,7 +691,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
 
       if (section.speaker) {
         try {
-          await speakAsRole(cleanText, section.speaker, voiceMapRef.current, section.style);
+          await speakAsRole(cleanText, section.speaker, voiceMapRef.current, section.style, section.audio);
         } catch {
           try { await speak(cleanText); } catch { /* ignore */ }
         }

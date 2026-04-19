@@ -132,21 +132,38 @@ Ritual files use the `.mram` (Masonic Ritual AI Mentor) encrypted format. Each f
 
 ### Building .mram Files
 
+Two build scripts. `build-mram-from-dialogue.ts` is the current recommended path:
+
 ```bash
-npx tsx scripts/build-mram.ts <input.md> <output.mram> [passphrase]
+npx tsx scripts/build-mram-from-dialogue.ts \
+  rituals/{prefix}-dialogue.md \
+  rituals/{prefix}-dialogue-cipher.md \
+  rituals/{prefix}.mram
 ```
 
-Input format: a markdown file where each spoken line appears twice — cipher first, then plain:
+It reads two parallel dialogue files (plain + cipher) with matching speaker structure, plus an optional `{prefix}-styles.json` sidecar with per-line Gemini style tags. Passphrase is prompted interactively (never accepted on the command line).
 
-```markdown
-### Section Title
+**With pre-rendered audio (recommended for pilot distribution):**
 
-WM: * Bro. S.W., p. t. s. y. t. a. p. a. M.
-WM: * Brother Senior Warden, proceed to satisfy yourself that all present are Masons.
-
-SW: * Bros. S. & J.D., p. t. s. y. t. a. p. a. M.
-SW: * Brothers Senior & Junior Deacons, proceed to satisfy yourselves that all present are Masons.
+```bash
+GOOGLE_GEMINI_API_KEY=... \
+npx tsx scripts/build-mram-from-dialogue.ts \
+  rituals/ea-initiation-dialogue.md \
+  rituals/ea-initiation-dialogue-cipher.md \
+  rituals/ea-initiation.mram \
+  --with-audio
 ```
+
+`--with-audio` renders every spoken line to Opus (32 kbps mono) via Gemini 3.1 Flash TTS using the canonical `GEMINI_ROLE_VOICES` cast, and embeds the audio in the encrypted .mram payload. At playback time, the client plays these bytes directly — **zero Gemini API calls per Brother per rehearsal, ever**. File grows from ~50 KB to ~6 MB per ritual.
+
+Requirements:
+- `ffmpeg` in PATH (for Opus encoding)
+- `GOOGLE_GEMINI_API_KEY` env var
+- Your own quota (the script uses the same 3-model fallback chain as the app: 3.1-flash → 2.5-flash → 2.5-pro; on all-models-429 it sleeps until midnight PT and auto-resumes)
+
+Per-line Opus bytes are cached at `~/.cache/masonic-mram-audio/` so interrupted runs resume cleanly. A 150-line ritual takes ~13 minutes end-to-end when the full chain is available.
+
+Legacy `build-mram.ts` (single-file paired format) still works for older ritual sources.
 
 ---
 
@@ -252,7 +269,8 @@ rituals/                                  # Local-only — ritual source files (
 
 scripts/
 ├── build-mram.ts                        # CLI: build .mram files from paired markdown
-├── build-mram-from-dialogue.ts          # CLI: build .mram from dialogue + cipher + styles
+├── build-mram-from-dialogue.ts          # CLI: build .mram from dialogue + cipher + styles + optional pre-rendered Gemini audio
+├── render-gemini-audio.ts               # Opus rendering pipeline (Gemini SSE → ffmpeg → cache)
 └── benchmark-tts.ts                     # TTS engine benchmark (TTFB + total response time)
 ```
 

@@ -14,7 +14,12 @@
  *
  * Usage:
  *   npx tsx scripts/build-mram-from-dialogue.ts \
- *     <plain.md> <cipher.md> <output.mram>
+ *     <plain.md> <cipher.md> <output.mram> [--with-audio]
+ *
+ * With --with-audio: render every spoken line to Opus via Gemini TTS
+ * using the canonical GEMINI_ROLE_VOICES cast, embed the audio bytes
+ * inside the encrypted .mram payload. On-device playback skips the API
+ * entirely. Requires ffmpeg in PATH and GOOGLE_GEMINI_API_KEY env var.
  *
  * The passphrase is read interactively with echo disabled. It is NEVER
  * accepted on the command line (that would leak it to shell history and
@@ -26,6 +31,8 @@ import * as crypto from "node:crypto";
 import { parseDialogue } from "../src/lib/dialogue-format";
 import { buildFromDialogue } from "../src/lib/dialogue-to-mram";
 import type { MRAMDocument } from "../src/lib/mram-format";
+import { GEMINI_ROLE_VOICES, getGeminiVoiceForRole } from "../src/lib/tts-cloud";
+import { renderLineAudio } from "./render-gemini-audio";
 
 // ============================================================
 // Encryption (Node crypto — binary layout matches Web Crypto
@@ -33,7 +40,11 @@ import type { MRAMDocument } from "../src/lib/mram-format";
 // ============================================================
 
 const MAGIC = Buffer.from("MRAM", "ascii");
-const FORMAT_VERSION = 1;
+// v3 binary header. Old v1 and v2 files still decode fine (new fields
+// are all optional). v3 adds metadata.voiceCast + metadata.audioFormat
+// + MRAMLine.audio. Written always now, regardless of --with-audio,
+// so the header byte always matches the latest schema.
+const FORMAT_VERSION = 3;
 const SALT_LENGTH = 16;
 const IV_LENGTH = 12;
 const PBKDF2_ITERATIONS = 310_000;
@@ -137,20 +148,33 @@ async function promptPassphrase(): Promise<string> {
 }
 
 async function main() {
-  const args = process.argv.slice(2);
+  const rawArgs = process.argv.slice(2);
+  const withAudio = rawArgs.includes("--with-audio");
+  const positional = rawArgs.filter((a) => !a.startsWith("--"));
 
-  if (args.length < 3 || args.length > 3) {
+  if (positional.length !== 3) {
     console.error(
       "Usage: npx tsx scripts/build-mram-from-dialogue.ts " +
-        "<plain.md> <cipher.md> <output.mram>",
+        "<plain.md> <cipher.md> <output.mram> [--with-audio]",
     );
     console.error(
       "Passphrase is read interactively (no echo) or from MRAM_PASSPHRASE env var.",
     );
+    console.error(
+      "--with-audio: render every line to Opus via Gemini TTS, embed in .mram.",
+    );
+    console.error(
+      "  Requires ffmpeg in PATH and GOOGLE_GEMINI_API_KEY env var.",
+    );
     process.exit(1);
   }
 
-  const [plainPath, cipherPath, outputPath] = args;
+  const [plainPath, cipherPath, outputPath] = positional;
+
+  if (withAudio && !process.env.GOOGLE_GEMINI_API_KEY) {
+    console.error("Error: --with-audio requires GOOGLE_GEMINI_API_KEY env var.");
+    process.exit(1);
+  }
 
   if (!fs.existsSync(plainPath)) {
     console.error(`Error: plain file not found: ${plainPath}`);
@@ -270,6 +294,10 @@ async function main() {
   console.error(`  Lines:    ${doc.lines.length}`);
   console.error(`  Roles:    ${Object.keys(doc.roles).join(", ")}`);
 
+  if (withAudio) {
+    await bakeAudioIntoDoc(doc);
+  }
+
   console.error("Encrypting...");
   const encrypted = encryptMRAMNode(doc, passphrase);
 
@@ -282,6 +310,111 @@ async function main() {
   console.error(`Wrote ${encrypted.length} bytes to ${outputPath}`);
   console.error(`Checksum: ${doc.metadata.checksum}`);
   console.error("Done.");
+}
+
+// ============================================================
+// Audio bake pipeline (--with-audio)
+// ============================================================
+
+/**
+ * Render Opus audio for every spoken line in the doc and embed as
+ * base64 on MRAMLine.audio. Captures the voice cast in metadata so
+ * the client can match (role → voice) at playback time. Cached per-line
+ * at ~/.cache/masonic-mram-audio so re-runs and resumed runs after quota
+ * hits don't re-burn API calls.
+ */
+async function bakeAudioIntoDoc(doc: MRAMDocument): Promise<void> {
+  const apiKey = process.env.GOOGLE_GEMINI_API_KEY!;
+
+  // Snapshot the canonical voice cast so playback knows exactly which
+  // voices were used at bake time. If the app's GEMINI_ROLE_VOICES map
+  // changes later (voice swap, new model), the audio stays tied to the
+  // voices it was rendered with — client falls through to network path
+  // only for roles where the voice doesn't match anymore.
+  doc.metadata.voiceCast = { ...GEMINI_ROLE_VOICES };
+  doc.metadata.audioFormat = "opus-32k-mono";
+
+  const spokenLines = doc.lines.filter((l) => l.role && l.plain.trim().length > 0);
+  const total = spokenLines.length;
+
+  console.error(`\nBaking audio for ${total} spoken lines...`);
+  console.error(`  Cache: ~/.cache/masonic-mram-audio/ (safe to interrupt + resume)`);
+  console.error(`  Fallback chain: 3.1-flash → 2.5-flash → 2.5-pro`);
+  console.error(`  On all-models-429: sleep until midnight PT, auto-resume\n`);
+
+  const startTime = Date.now();
+  let rendered = 0;
+  let cacheHits = 0;
+  let totalBytes = 0;
+
+  for (const line of spokenLines) {
+    const voice = getGeminiVoiceForRole(line.role);
+    const cleanText = line.plain.trim();
+    let statusLabel = "";
+
+    try {
+      const opus = await renderLineAudio(cleanText, line.style, voice, {
+        apiKey,
+        onProgress: (event) => {
+          if (event.status === "cache-hit") {
+            cacheHits++;
+            statusLabel = "cache";
+          } else if (event.status === "rendered") {
+            rendered++;
+            statusLabel = event.model ?? "rendered";
+            totalBytes += event.bytesOut ?? 0;
+          } else if (event.status === "waiting-for-quota-reset") {
+            const waitHrs = event.waitUntil
+              ? Math.ceil((event.waitUntil.getTime() - Date.now()) / 3_600_000)
+              : 0;
+            console.error(
+              `\n⏸  All Gemini models quota-exhausted. Sleeping ~${waitHrs}h until midnight PT.`,
+            );
+            console.error(
+              `   Cache is preserved. You can Ctrl-C and restart later instead of waiting.\n`,
+            );
+          }
+        },
+      });
+
+      line.audio = opus.toString("base64");
+
+      const done = spokenLines.indexOf(line) + 1;
+      const pct = Math.floor((done / total) * 100);
+      const elapsed = (Date.now() - startTime) / 1000;
+      const eta = elapsed > 0 && done > 0 ? Math.ceil((elapsed / done) * (total - done)) : 0;
+      process.stderr.write(
+        `\r  [${done.toString().padStart(3)}/${total}] ${pct.toString().padStart(3)}% ` +
+          `${line.role.padEnd(10)} (${statusLabel.padEnd(30)}) ` +
+          `ETA ${etaFormat(eta)}       `,
+      );
+    } catch (err) {
+      console.error(
+        `\n\nError rendering line ${line.id} (${line.role}): ${(err as Error).message}`,
+      );
+      console.error("The cache is preserved — fix the issue and re-run to resume.");
+      throw err;
+    }
+  }
+  process.stderr.write("\n\n");
+
+  console.error("Audio bake complete:");
+  console.error(`  Rendered via API:  ${rendered}`);
+  console.error(`  Cache hits:        ${cacheHits}`);
+  console.error(
+    `  Bytes added (pre-encrypt):  ${(totalBytes / 1024 / 1024).toFixed(2)} MB Opus`,
+  );
+  console.error(`  Voice cast: ${Object.entries(doc.metadata.voiceCast)
+    .map(([role, voice]) => `${role}=${voice}`)
+    .join(", ")}`);
+  console.error("");
+}
+
+function etaFormat(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}m${s.toString().padStart(2, "0")}s`;
 }
 
 // Only run CLI when executed directly, not when imported
