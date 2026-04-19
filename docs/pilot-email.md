@@ -123,33 +123,35 @@ After the diff, a large language model (Llama 3.3 70B via Groq) generates
 a short spoken coaching response — brief, contextual, and streamed to
 you as you listen.
 
-### Coming soon — expressive TTS from Google and Microsoft
+### Why Gemini is now the default voice — and what's still coming
 
-Two major new voice models land in the six-engine dropdown as the pilot
-progresses. Both fix the one thing today's text-to-speech still gets
-wrong for ritual work: *delivery.* A flat, evenly-paced reading is fine
-for a shopping list — it is not fine for the gravitas of an obligation
-or the cadence of a lecture.
+Today's default voice engine fixes the one thing earlier text-to-speech
+still got wrong for ritual work: *delivery.* A flat, evenly-paced reading
+is fine for a shopping list — it is not fine for the gravitas of an
+obligation or the cadence of a lecture.
 
-- **Google Gemini 3.1 Flash TTS** (released April 2026). It accepts
-  inline *audio tags* — short bracketed directions like `[slow, solemn]`
-  or `[whispered]` — that steer style, pace, and emotion at any point
-  mid-sentence. That means the ritual text itself can pre-mark the
-  cadence shifts the work already calls for, and the voice engine will
-  honor them. It currently sits at the top of the Artificial Analysis
-  TTS quality leaderboard (Elo 1,211), supports 70+ languages, and
-  watermarks every clip with SynthID.
+- **Google Gemini 3.1 Flash TTS** (now shipping as the app's default).
+  It accepts inline *audio tags* — short bracketed directions like
+  `[slow, solemn]` or `[whispered]` — that steer style, pace, and
+  emotion at any point mid-sentence. That means the ritual text itself
+  can pre-mark the cadence shifts the work already calls for, and the
+  voice engine will honor them. It currently sits at the top of the
+  Artificial Analysis TTS quality leaderboard (Elo 1,211), supports
+  70+ languages, and watermarks every clip with SynthID.
 - **Microsoft Azure Dragon HD / Neural HD 2.5** (rolling out early-to-mid
-  2026). Microsoft's new HD line is LLM-based: the model reads the
-  *meaning* of each line and adjusts emotional tone automatically —
-  measured pause at a solemn passage, lift at a welcome, weight at a
-  charge — without any manual markup at all. A unified model covering
-  700+ voices, with wider availability and a significant price drop
-  arriving in March 2026.
+  2026 — not yet wired in). Microsoft's new HD line is LLM-based: the
+  model reads the *meaning* of each line and adjusts emotional tone
+  automatically — measured pause at a solemn passage, lift at a welcome,
+  weight at a charge — without any manual markup at all. A unified model
+  covering 700+ voices, with wider availability and a significant price
+  drop arriving in March 2026. We will add it to the seven-engine
+  dropdown when the public API lands.
 
-Both slot into the existing six-engine architecture. You will simply
-see two new options appear in the voice-engine dropdown during the
-pilot, and the ritual will start to *sound* like ritual.
+Gemini is live in the dropdown today and serves as the playback engine
+for every officer line by default. Voxtral, ElevenLabs, Deepgram, Google
+Cloud, Kokoro, and the browser engine are still selectable as
+alternatives or fallbacks — the ritual will *sound* like ritual either
+way.
 
 ## Your data — what leaves your device, and what doesn't
 
