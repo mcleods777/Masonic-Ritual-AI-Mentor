@@ -59,12 +59,13 @@
 
 <p>When you speak, the app sends your audio to <strong>OpenAI Whisper-large-v3</strong> (running on Groq's hardware for near-instant response) with a vocabulary hint that primes the model for ritual terms — <em>Worshipful Master</em>, <em>Tyler</em>, <em>Jachin</em>, <em>Boaz</em>, <em>Fellowcraft</em>, and so on. If Whisper isn't reachable, it falls back automatically to your browser's built-in recognition.</p>
 
-<h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">Six voice engines, including voice cloning</h3>
+<h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">Seven voice engines, including expressive AI voices and voice cloning</h3>
 
-<p>Any of six text-to-speech engines can read the ritual aloud:</p>
+<p>Any of seven text-to-speech engines can read the ritual aloud:</p>
 
 <ul>
-  <li><strong>Mistral Voxtral</strong> (default) — supports <strong>zero-shot voice cloning</strong>. Record a short sample of a brother speaking and the app will read <em>his</em> officer's lines in <em>his</em> voice. No paid "voice clone" tier required.</li>
+  <li><strong>Google Gemini 3.1 Flash TTS</strong> <em>(default)</em> — Google's newest expressive voice model. Per-officer male voices with prompt-driven direction (gravely, reverent, commanding). When the daily quota fills up, the app silently falls through to two older Gemini models so playback keeps working.</li>
+  <li><strong>Mistral Voxtral</strong> — supports <strong>zero-shot voice cloning</strong>. Record a short sample of a brother speaking and the app will read <em>his</em> officer's lines in <em>his</em> voice. No paid "voice clone" tier required. Ships with 15 character voices in the pool as backup.</li>
   <li><strong>ElevenLabs</strong> — twelve distinct male voices, one per officer chair.</li>
   <li><strong>Google Cloud Neural2</strong> — per-role voice, pitch, and rate tuning so the Worshipful Master sounds deeper than the Tyler.</li>
   <li><strong>Deepgram Aura-2</strong> — seven mythologically-named voices (Zeus, Orion, Arcas, and so on).</li>
@@ -72,7 +73,7 @@
   <li><strong>Browser built-in</strong> — always works, even offline.</li>
 </ul>
 
-<p>If one cloud engine is down, the app automatically falls through to the next in the chain.</p>
+<p>If a cloud engine is down or rate-limited, the app automatically falls through the chain (Gemini → Voxtral → Google Cloud → browser) so you never hit a dead end during practice.</p>
 
 <h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">Five-layer feedback, not just text matching</h3>
 
