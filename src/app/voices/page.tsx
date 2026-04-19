@@ -13,7 +13,13 @@ import {
   type LocalVoice,
 } from "@/lib/voice-storage";
 import { ensureDefaultVoices, resetDefaultVoiceRoles } from "@/lib/default-voices";
-import { clearVoxtralVoicesCache, VOXTRAL_ROLE_OPTIONS } from "@/lib/tts-cloud";
+import {
+  clearVoxtralVoicesCache,
+  VOXTRAL_ROLE_OPTIONS,
+  roleToGroup,
+  preloadVoxtralForRole,
+} from "@/lib/tts-cloud";
+import { listDocuments, getDocumentSections } from "@/lib/storage";
 import { normalizeAudio, encodeWav } from "@/lib/audio-utils";
 import { fetchApi } from "@/lib/api-fetch";
 
@@ -83,6 +89,161 @@ export default function VoicesPage() {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const micAudioCtxRef = useRef<AudioContext | null>(null);
   const animFrameRef = useRef<number>(0);
+
+  // Per-voice prefetch progress. Kicks off when the user assigns a voice
+  // to a role — iterates every line in every loaded ritual that belongs
+  // to that role's group and pre-renders the Voxtral audio into the
+  // IndexedDB cache. Next rehearsal plays those lines instantly without
+  // hitting the API. See preloadVoxtralForRole in tts-cloud.ts.
+  interface PrefetchState {
+    status: "running" | "done" | "error";
+    cached: number;
+    total: number;
+    abort: () => void;
+  }
+  const [prefetchByVoice, setPrefetchByVoice] = useState<
+    Record<string, PrefetchState>
+  >({});
+  // Keep the live aborters outside render state so React strict-mode
+  // double-invokes and stale closures can't double-start or leak a
+  // prefetch.
+  const prefetchAbortersRef = useRef<Record<string, () => void>>({});
+
+  // ============================================================
+  // Voxtral prefetch — cache every line this voice will speak
+  // ============================================================
+
+  /**
+   * Gather every spoken line across all loaded rituals whose speaker
+   * maps to the same role group as the newly-assigned role. Returns
+   * sorted by ceremony order so the prefetch primes the first lines
+   * the user will hear before the later ones.
+   */
+  const gatherLinesForRoleGroup = useCallback(
+    async (
+      role: string,
+    ): Promise<{ text: string; order: number }[]> => {
+      const groupIdx = roleToGroup(role);
+      if (groupIdx < 0) return [];
+      const docs = await listDocuments();
+      const lines: { text: string; order: number }[] = [];
+      // Track a running ceremony counter across rituals so "order"
+      // stays monotonic — within one ritual the section.order already
+      // orders correctly, but we also want ritual 1 before ritual 2.
+      let ritualOffset = 0;
+      for (const doc of docs) {
+        const sections = await getDocumentSections(doc.id);
+        for (const section of sections) {
+          if (!section.speaker) continue;
+          if (roleToGroup(section.speaker) !== groupIdx) continue;
+          if (!section.text.trim()) continue;
+          lines.push({
+            text: section.text,
+            order: ritualOffset + section.order,
+          });
+        }
+        // Offset the next ritual beyond the end of this one so cross-
+        // ritual ordering is stable. `sections.length` is a cheap upper
+        // bound; exact max(order)+1 would be more correct but isn't
+        // worth another pass.
+        ritualOffset += sections.length + 1000;
+      }
+      return lines;
+    },
+    [],
+  );
+
+  /**
+   * Kick off (or reset) prefetch for a given voice after the user
+   * assigns it to a role. Aborts any in-flight prefetch for the same
+   * voice first. Silent no-op if no rituals are loaded or the role
+   * maps to nothing — the user will just eat cold-cache latency on
+   * the first rehearsal, same as before this feature existed.
+   */
+  const startPrefetchForVoice = useCallback(
+    async (voice: LocalVoice, role: string) => {
+      // Abort any existing prefetch for this voice (reassignment,
+      // re-assignment to same role, toggle off-and-on, etc).
+      const prev = prefetchAbortersRef.current[voice.id];
+      if (prev) prev();
+
+      const lines = await gatherLinesForRoleGroup(role);
+      if (lines.length === 0) {
+        // No matching lines. Clear any stale state for this voice so
+        // the UI doesn't show ghost progress from a prior ritual.
+        setPrefetchByVoice((s) => {
+          const next = { ...s };
+          delete next[voice.id];
+          return next;
+        });
+        return;
+      }
+
+      const { abort, done } = preloadVoxtralForRole(
+        lines,
+        voice.id,
+        voice.audioBase64,
+        (progress) => {
+          if (progress.aborted) return;
+          setPrefetchByVoice((s) => ({
+            ...s,
+            [voice.id]: {
+              status:
+                progress.index + 1 >= progress.total ? "done" : "running",
+              cached: progress.index + 1,
+              total: progress.total,
+              abort: prefetchAbortersRef.current[voice.id] ?? (() => {}),
+            },
+          }));
+        },
+      );
+      prefetchAbortersRef.current[voice.id] = abort;
+      setPrefetchByVoice((s) => ({
+        ...s,
+        [voice.id]: {
+          status: "running",
+          cached: 0,
+          total: lines.length,
+          abort,
+        },
+      }));
+
+      // Await completion so a thrown error can land in state. Progress
+      // callback handles success. Errors here are rare (we swallow per-
+      // line failures inside prefetchVoxtralLine).
+      done
+        .then(() => {
+          setPrefetchByVoice((s) => {
+            if (!s[voice.id]) return s;
+            return {
+              ...s,
+              [voice.id]: { ...s[voice.id], status: "done" },
+            };
+          });
+        })
+        .catch(() => {
+          setPrefetchByVoice((s) => ({
+            ...s,
+            [voice.id]: {
+              status: "error",
+              cached: s[voice.id]?.cached ?? 0,
+              total: lines.length,
+              abort,
+            },
+          }));
+        });
+    },
+    [gatherLinesForRoleGroup],
+  );
+
+  // Abort any in-flight prefetches on unmount so we don't leak promises
+  // or keep hitting the API after the user navigates away.
+  useEffect(() => {
+    const aborters = prefetchAbortersRef.current;
+    return () => {
+      for (const abort of Object.values(aborters)) abort();
+    };
+  }, []);
 
   // ============================================================
   // Load voices from IndexedDB
@@ -869,6 +1030,22 @@ export default function VoicesPage() {
                       await assignVoiceRole(voice.id, role);
                       clearVoxtralVoicesCache();
                       fetchVoices();
+                      // Kick off prefetch for every line this voice
+                      // will speak, in ceremony order. If role was
+                      // cleared (round-robin), abort any in-flight
+                      // prefetch for this voice.
+                      if (role) {
+                        startPrefetchForVoice(voice, role);
+                      } else {
+                        const abort =
+                          prefetchAbortersRef.current[voice.id];
+                        if (abort) abort();
+                        setPrefetchByVoice((s) => {
+                          const next = { ...s };
+                          delete next[voice.id];
+                          return next;
+                        });
+                      }
                     }}
                     className="flex-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-300 text-sm focus:outline-none focus:border-amber-500 cursor-pointer"
                   >
@@ -898,6 +1075,52 @@ export default function VoicesPage() {
                     {testingVoiceId === voice.id ? "Playing..." : "Test"}
                   </button>
                 </div>
+
+                {/* Prefetch progress: appears the moment a role is
+                    assigned and this voice starts caching lines. Tiny
+                    so it never overwhelms the card; disappears when
+                    the voice is unassigned. */}
+                {prefetchByVoice[voice.id] && (
+                  <div className="mt-2 flex items-center gap-2 text-xs">
+                    {prefetchByVoice[voice.id].status === "running" && (
+                      <>
+                        <div className="w-3 h-3 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+                        <span className="text-zinc-400">
+                          Caching for rehearsal:{" "}
+                          <span className="text-amber-400">
+                            {prefetchByVoice[voice.id].cached}/
+                            {prefetchByVoice[voice.id].total}
+                          </span>
+                        </span>
+                      </>
+                    )}
+                    {prefetchByVoice[voice.id].status === "done" && (
+                      <>
+                        <svg
+                          className="w-3 h-3 text-green-400"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={3}
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M5 13l4 4L19 7"
+                          />
+                        </svg>
+                        <span className="text-zinc-500">
+                          Cached for instant playback ({prefetchByVoice[voice.id].total} lines)
+                        </span>
+                      </>
+                    )}
+                    {prefetchByVoice[voice.id].status === "error" && (
+                      <span className="text-red-400">
+                        Prefetch error — first rehearsal may be slow. Reassign to retry.
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>
