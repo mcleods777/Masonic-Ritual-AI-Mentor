@@ -651,26 +651,28 @@ export async function speakKokoroAsRole(
  * officer role groups round-robin style.
  */
 
-import {
-  listVoices,
-  purgeLegacyDefaultVoices,
-  type LocalVoice,
-} from "./voice-storage";
+import { listVoices, type LocalVoice } from "./voice-storage";
+import { ensureDefaultVoices } from "./default-voices";
 
 /** Cached local voice profiles — loaded once per session from IndexedDB. */
 let localVoicesCache: LocalVoice[] | null = null;
 let localVoicesFetchPromise: Promise<LocalVoice[]> | null = null;
+let defaultsEnsured = false;
 
-/** Load and cache local voices from IndexedDB. */
+/** Load and cache local voices from IndexedDB. Ensures the 15 default Voxtral
+ *  voices are present in IndexedDB on first read so the Voxtral fallback
+ *  always has something to play. Defaults ship UNASSIGNED — they sit in the
+ *  pool for round-robin selection until the user assigns one to a role. */
 async function getLocalVoices(): Promise<LocalVoice[]> {
   if (localVoicesCache) return localVoicesCache;
   if (localVoicesFetchPromise) return localVoicesFetchPromise;
 
   localVoicesFetchPromise = (async () => {
     try {
-      // One-shot purge of legacy default voices from older app builds.
-      // No-op for fresh installs and for any browser that already ran it.
-      await purgeLegacyDefaultVoices();
+      if (!defaultsEnsured) {
+        await ensureDefaultVoices();
+        defaultsEnsured = true;
+      }
       const voices = await listVoices();
       localVoicesCache = voices;
       return voices;

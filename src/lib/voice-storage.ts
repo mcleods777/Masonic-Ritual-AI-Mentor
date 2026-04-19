@@ -177,43 +177,6 @@ export async function deleteVoice(id: string): Promise<void> {
   });
 }
 
-/**
- * One-shot migration: delete legacy default voices (id starts with "default-")
- * from IndexedDB. Marks completion in localStorage so it runs at most once
- * per browser. Safe to call repeatedly.
- *
- * Background: the app used to ship 15 preset Voxtral voices that loaded into
- * IndexedDB on first visit and pre-assigned themselves to officer roles. We
- * removed the default-voices system in favor of Gemini-by-default with
- * user-recorded Voxtral as a per-role override. Existing browsers still have
- * those 15 voices sitting around — this purges them so the Voices page is
- * clean and no stale role assignments leak Voxtral playback into Gemini mode.
- */
-const PURGE_LEGACY_DEFAULTS_MARKER = "voice-defaults-purged-v1";
-
-export async function purgeLegacyDefaultVoices(): Promise<{ purged: number }> {
-  if (typeof window === "undefined") return { purged: 0 };
-  if (window.localStorage.getItem(PURGE_LEGACY_DEFAULTS_MARKER)) {
-    return { purged: 0 };
-  }
-  try {
-    const voices = await listVoices();
-    const legacy = voices.filter((v) => v.id.startsWith("default-"));
-    for (const v of legacy) {
-      await deleteVoice(v.id);
-    }
-    window.localStorage.setItem(
-      PURGE_LEGACY_DEFAULTS_MARKER,
-      String(Date.now())
-    );
-    return { purged: legacy.length };
-  } catch {
-    // IndexedDB unavailable, in private mode, or quota — leave the marker
-    // unset so we retry on a future load when conditions allow.
-    return { purged: 0 };
-  }
-}
-
 /** Update role assignment for a voice. */
 export async function assignVoiceRole(
   id: string,
