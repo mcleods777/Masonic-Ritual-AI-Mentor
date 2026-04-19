@@ -786,10 +786,20 @@ export default function VoicesPage() {
                       <>
                         <p className="text-zinc-200 font-medium truncate">
                           {voice.name}
+                          {voice.createdAt === 0 && (
+                            <span className="ml-2 align-middle text-[10px] uppercase tracking-wider text-amber-500/80 bg-amber-500/10 px-1.5 py-0.5 rounded">
+                              Default
+                            </span>
+                          )}
                         </p>
                         <p className="text-xs text-zinc-500">
-                          {voice.duration}s &middot;{" "}
-                          {new Date(voice.createdAt).toLocaleDateString()}
+                          {voice.duration}s
+                          {voice.createdAt > 0 && (
+                            <>
+                              {" "}&middot;{" "}
+                              {new Date(voice.createdAt).toLocaleDateString()}
+                            </>
+                          )}
                         </p>
                       </>
                     )}
