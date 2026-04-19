@@ -165,13 +165,37 @@ Requirements:
 
 Per-line Opus bytes are cached at `~/.cache/masonic-mram-audio/` so interrupted runs resume cleanly. A 150-line ritual takes ~13 minutes end-to-end when the full chain is available.
 
+**Quality-tier consistency (`--on-fallback`):** If 3.1-flash runs out of quota mid-ritual, the bake normally falls back to the 2.5-flash / 2.5-pro tier silently. Mixing tiers inside one ritual produces audibly inconsistent voice quality line-to-line, so the build script detects the first fallback and acts based on `--on-fallback`:
+
+```bash
+# Default: prompt once on first fallback (interactive)
+npx tsx scripts/build-mram-from-dialogue.ts <plain> <cipher> <out> --with-audio
+
+# Abort immediately on any fallback (exit code 2, cache preserved)
+npx tsx scripts/build-mram-from-dialogue.ts <plain> <cipher> <out> --with-audio --on-fallback=abort
+
+# Keep going on the lower tier without prompting (good for CI)
+npx tsx scripts/build-mram-from-dialogue.ts <plain> <cipher> <out> --with-audio --on-fallback=continue
+```
+
+The final summary prints a per-model tally so you can see exactly how many lines each model served:
+
+```
+Audio bake complete:
+  Rendered via API:  150
+    Per-model breakdown:
+      gemini-3.1-flash-tts-preview        120 lines  (preferred)
+      gemini-2.5-flash-preview-tts         30 lines  (fallback)
+  Cache hits:        0
+```
+
 **Convenience wrapper for the full EA degree:**
 
 ```bash
-GOOGLE_GEMINI_API_KEY=... npx tsx scripts/bake-ea-rituals.ts
+GOOGLE_GEMINI_API_KEY=... npx tsx scripts/bake-ea-rituals.ts [--on-fallback=ask|continue|abort]
 ```
 
-Runs ea-opening, ea-initiation, and ea-closing back-to-back with a single passphrase prompt. Skips any ritual whose source dialogue files aren't present. Use `BAKE_SKIP=ea-closing` to exclude specific rituals. Total wall time ~25-30 minutes when the cache is cold; near-instant when fully cached.
+Runs ea-opening, ea-initiation, and ea-closing back-to-back with a single passphrase prompt. Skips any ritual whose source dialogue files aren't present. Use `BAKE_SKIP=ea-closing` to exclude specific rituals. `--on-fallback` is passed through to each child build — if you choose abort (or the default prompt picks abort), the wrapper halts the whole sequence rather than producing a degraded second/third ritual. Total wall time ~25-30 minutes when the cache is cold; near-instant when fully cached.
 
 Legacy `build-mram.ts` (single-file paired format) still works for older ritual sources.
 

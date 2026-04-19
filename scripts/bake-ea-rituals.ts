@@ -8,11 +8,18 @@
  * single passphrase for all three. Resume-safe via the render cache.
  *
  * Usage:
- *   GOOGLE_GEMINI_API_KEY=... npx tsx scripts/bake-ea-rituals.ts
+ *   GOOGLE_GEMINI_API_KEY=... npx tsx scripts/bake-ea-rituals.ts \
+ *     [--on-fallback=ask|continue|abort]
  *
  * Total time when cache is cold: ~25-30 minutes wall clock (ea-opening
  * ~4 min + ea-initiation ~13 min + ea-closing ~4 min, plus quota-reset
  * pauses if 3.1-flash caps out mid-run).
+ *
+ * --on-fallback is passed through to each child build subprocess. The
+ * default "ask" will prompt if the preferred model (3.1-flash) runs
+ * out of quota mid-ritual; choosing abort stops the whole wrapper (one
+ * ritual aborting stops the rest since mixing tiers across rituals is
+ * the same consistency problem as mixing within a ritual).
  *
  * Skip individual rituals by setting BAKE_SKIP (comma-separated):
  *   BAKE_SKIP=ea-closing GOOGLE_GEMINI_API_KEY=... npx tsx scripts/bake-ea-rituals.ts
@@ -76,12 +83,20 @@ async function readPassphrase(): Promise<string> {
   });
 }
 
-function runBuild(slug: string, passphrase: string): Promise<void> {
+function runBuild(
+  slug: string,
+  passphrase: string,
+  fallbackFlag: string,
+): Promise<void> {
   const plainPath = path.join("rituals", `${slug}-dialogue.md`);
   const cipherPath = path.join("rituals", `${slug}-dialogue-cipher.md`);
   const outputPath = path.join("rituals", `${slug}.mram`);
 
   return new Promise((resolve, reject) => {
+    // stdin is inherited (not ignored) so the child's interactive
+    // fallback prompt can read our keypress. The child reads the
+    // passphrase from MRAM_PASSPHRASE instead of stdin, so the prompt
+    // is the only thing that ever asks for input.
     const proc = spawn(
       "npx",
       [
@@ -91,9 +106,10 @@ function runBuild(slug: string, passphrase: string): Promise<void> {
         cipherPath,
         outputPath,
         "--with-audio",
+        fallbackFlag,
       ],
       {
-        stdio: ["ignore", "inherit", "inherit"],
+        stdio: ["inherit", "inherit", "inherit"],
         env: { ...process.env, MRAM_PASSPHRASE: passphrase },
       },
     );
@@ -111,6 +127,19 @@ async function main() {
     console.error("Error: GOOGLE_GEMINI_API_KEY env var is required.");
     console.error(
       "Set it via: export GOOGLE_GEMINI_API_KEY=AIza... (or prepend inline)",
+    );
+    process.exit(1);
+  }
+
+  // Pass through --on-fallback to each child build. Default "ask" so
+  // the user controls quality-tier consistency across all three rituals
+  // with a single prompt on the first fallback.
+  const fallbackArg = process.argv.slice(2).find((a) => a.startsWith("--on-fallback="));
+  const fallbackFlag = fallbackArg ?? "--on-fallback=ask";
+  const fallbackValue = fallbackFlag.slice("--on-fallback=".length);
+  if (!["ask", "continue", "abort"].includes(fallbackValue)) {
+    console.error(
+      `Error: invalid ${fallbackFlag}. Must be one of: ask, continue, abort.`,
     );
     process.exit(1);
   }
@@ -152,6 +181,7 @@ async function main() {
   console.error("");
   console.error("You'll be prompted for the passphrase once. Same one used for all three.");
   console.error("Cache at ~/.cache/masonic-mram-audio/ is preserved — safe to Ctrl-C and resume.");
+  console.error(`Fallback policy: ${fallbackValue} (${fallbackFlag})`);
   console.error("");
 
   const passphrase = await readPassphrase();
@@ -167,9 +197,22 @@ async function main() {
     console.error(`  Baking ${slug}.mram — ${label}`);
     console.error(`${"═".repeat(67)}\n`);
     try {
-      await runBuild(slug, passphrase);
+      await runBuild(slug, passphrase, fallbackFlag);
     } catch (err) {
-      console.error(`\nFailed on ${slug}: ${(err as Error).message}`);
+      const msg = (err as Error).message;
+      console.error(`\nFailed on ${slug}: ${msg}`);
+      // Exit code 2 from child = user chose abort (or --on-fallback=abort)
+      // on a quality-tier drop. Propagate that specific signal clearly —
+      // it's not really a "failure," it's user intent.
+      if (msg.includes("exited 2")) {
+        console.error(
+          "Child aborted on quality-tier drop. Cache is preserved —",
+        );
+        console.error(
+          "re-run after midnight PT for a uniform premium bake across all rituals.",
+        );
+        process.exit(2);
+      }
       console.error("Cache is preserved. Fix the issue and re-run.");
       process.exit(1);
     }

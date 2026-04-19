@@ -14,12 +14,23 @@
  *
  * Usage:
  *   npx tsx scripts/build-mram-from-dialogue.ts \
- *     <plain.md> <cipher.md> <output.mram> [--with-audio]
+ *     <plain.md> <cipher.md> <output.mram> [--with-audio] \
+ *     [--on-fallback=ask|continue|abort]
  *
  * With --with-audio: render every spoken line to Opus via Gemini TTS
  * using the canonical GEMINI_ROLE_VOICES cast, embed the audio bytes
  * inside the encrypted .mram payload. On-device playback skips the API
  * entirely. Requires ffmpeg in PATH and GOOGLE_GEMINI_API_KEY env var.
+ *
+ * --on-fallback controls what happens the FIRST time the preferred
+ * Gemini model (3.1-flash) hits its daily quota and the bake falls
+ * back to a lower-quality tier (2.5-flash or 2.5-pro). Mixing tiers
+ * mid-ritual produces audibly inconsistent voice quality line-to-line,
+ * so the default ("ask") pauses and prompts you to keep going or
+ * abort and retry after midnight PT for a uniform premium bake.
+ *   ask      — prompt once on first fallback (default, interactive)
+ *   continue — silently continue, just log a warning (good for CI)
+ *   abort    — exit with code 2 on first fallback, cache preserved
  *
  * The passphrase is read interactively with echo disabled. It is NEVER
  * accepted on the command line (that would leak it to shell history and
@@ -147,15 +158,29 @@ async function promptPassphrase(): Promise<string> {
   });
 }
 
+type FallbackMode = "ask" | "continue" | "abort";
+
+function parseFallbackMode(args: string[]): FallbackMode {
+  const flag = args.find((a) => a.startsWith("--on-fallback="));
+  if (!flag) return "ask";
+  const value = flag.slice("--on-fallback=".length);
+  if (value === "ask" || value === "continue" || value === "abort") return value;
+  throw new Error(
+    `Invalid --on-fallback=${value}. Must be one of: ask, continue, abort.`,
+  );
+}
+
 async function main() {
   const rawArgs = process.argv.slice(2);
   const withAudio = rawArgs.includes("--with-audio");
+  const fallbackMode = parseFallbackMode(rawArgs);
   const positional = rawArgs.filter((a) => !a.startsWith("--"));
 
   if (positional.length !== 3) {
     console.error(
       "Usage: npx tsx scripts/build-mram-from-dialogue.ts " +
-        "<plain.md> <cipher.md> <output.mram> [--with-audio]",
+        "<plain.md> <cipher.md> <output.mram> [--with-audio] " +
+        "[--on-fallback=ask|continue|abort]",
     );
     console.error(
       "Passphrase is read interactively (no echo) or from MRAM_PASSPHRASE env var.",
@@ -165,6 +190,12 @@ async function main() {
     );
     console.error(
       "  Requires ffmpeg in PATH and GOOGLE_GEMINI_API_KEY env var.",
+    );
+    console.error(
+      "--on-fallback=ask (default): prompt once if 3.1-flash quota exhausts mid-bake.",
+    );
+    console.error(
+      "  continue = keep going silently; abort = exit with code 2 on first fallback.",
     );
     process.exit(1);
   }
@@ -295,7 +326,7 @@ async function main() {
   console.error(`  Roles:    ${Object.keys(doc.roles).join(", ")}`);
 
   if (withAudio) {
-    await bakeAudioIntoDoc(doc);
+    await bakeAudioIntoDoc(doc, fallbackMode);
   }
 
   console.error("Encrypting...");
@@ -323,7 +354,10 @@ async function main() {
  * at ~/.cache/masonic-mram-audio so re-runs and resumed runs after quota
  * hits don't re-burn API calls.
  */
-async function bakeAudioIntoDoc(doc: MRAMDocument): Promise<void> {
+async function bakeAudioIntoDoc(
+  doc: MRAMDocument,
+  fallbackMode: FallbackMode,
+): Promise<void> {
   const apiKey = process.env.GOOGLE_GEMINI_API_KEY!;
 
   // Snapshot the canonical voice cast so playback knows exactly which
@@ -334,23 +368,42 @@ async function bakeAudioIntoDoc(doc: MRAMDocument): Promise<void> {
   doc.metadata.voiceCast = { ...GEMINI_ROLE_VOICES };
   doc.metadata.audioFormat = "opus-32k-mono";
 
+  // Preferred model is the first entry of the fallback chain — either
+  // the env override (GEMINI_TTS_MODELS, first comma-separated value)
+  // or the hardcoded 3.1-flash default. Any rendered line that used a
+  // different model is a quality-drop event worth surfacing.
+  const preferredModel =
+    process.env.GEMINI_TTS_MODELS?.split(",")[0]?.trim() ||
+    "gemini-3.1-flash-tts-preview";
+
   const spokenLines = doc.lines.filter((l) => l.role && l.plain.trim().length > 0);
   const total = spokenLines.length;
 
   console.error(`\nBaking audio for ${total} spoken lines...`);
   console.error(`  Cache: ~/.cache/masonic-mram-audio/ (safe to interrupt + resume)`);
+  console.error(`  Preferred model: ${preferredModel}`);
   console.error(`  Fallback chain: 3.1-flash → 2.5-flash → 2.5-pro`);
-  console.error(`  On all-models-429: sleep until midnight PT, auto-resume\n`);
+  console.error(`  On all-models-429: sleep until midnight PT, auto-resume`);
+  console.error(`  On quality-tier drop: ${fallbackMode} (--on-fallback=${fallbackMode})\n`);
 
   const startTime = Date.now();
   let rendered = 0;
   let cacheHits = 0;
   let totalBytes = 0;
+  // Tally of which models actually served each line. Populated only on
+  // `rendered` events (cache hits don't report a model since the cached
+  // file has no provenance). Prints at the end as a quality breakdown.
+  const modelTally: Record<string, number> = {};
+  // Set once the user has made a go/no-go call on fallback, so we don't
+  // prompt (or log the warning banner) repeatedly for every subsequent
+  // fallback line. A single decision covers the rest of the run.
+  let fallbackResolved = false;
 
   for (const line of spokenLines) {
     const voice = getGeminiVoiceForRole(line.role);
     const cleanText = line.plain.trim();
     let statusLabel = "";
+    let thisLineModel: string | undefined;
 
     try {
       const opus = await renderLineAudio(cleanText, line.style, voice, {
@@ -363,10 +416,16 @@ async function bakeAudioIntoDoc(doc: MRAMDocument): Promise<void> {
             rendered++;
             statusLabel = event.model ?? "rendered";
             totalBytes += event.bytesOut ?? 0;
+            thisLineModel = event.model;
+            const key = event.model ?? "unknown";
+            modelTally[key] = (modelTally[key] ?? 0) + 1;
           } else if (event.status === "waiting-for-quota-reset") {
             const waitHrs = event.waitUntil
               ? Math.ceil((event.waitUntil.getTime() - Date.now()) / 3_600_000)
               : 0;
+            // Clear the progress line before printing the multi-line
+            // banner so it doesn't get visually glued to the progress bar.
+            process.stderr.write("\r" + " ".repeat(80) + "\r");
             console.error(
               `\n⏸  All Gemini models quota-exhausted. Sleeping ~${waitHrs}h until midnight PT.`,
             );
@@ -378,6 +437,69 @@ async function bakeAudioIntoDoc(doc: MRAMDocument): Promise<void> {
       });
 
       line.audio = opus.toString("base64");
+
+      // Quality-drop detection: this line was served by something other
+      // than the preferred model. If we haven't already resolved the
+      // fallback decision for this run, do it now (log warning + maybe
+      // prompt). After resolution, subsequent fallback lines are silent
+      // — they still tally but don't interrupt the progress bar.
+      if (
+        thisLineModel &&
+        thisLineModel !== preferredModel &&
+        !fallbackResolved
+      ) {
+        // Clear the in-progress line so the banner reads cleanly.
+        process.stderr.write("\r" + " ".repeat(80) + "\r");
+        console.error("");
+        console.error(
+          `⚠  Quality-tier drop detected at line ${line.id} (${line.role}).`,
+        );
+        console.error(`   Preferred: ${preferredModel}`);
+        console.error(`   Served by: ${thisLineModel}`);
+        console.error(
+          `   The preferred model's daily quota is exhausted. Remaining lines`,
+        );
+        console.error(
+          `   will continue on fallback tiers until you abort + retry after`,
+        );
+        console.error(`   midnight PT for a uniform premium bake.`);
+        console.error("");
+
+        if (fallbackMode === "abort") {
+          console.error(
+            `   --on-fallback=abort set. Halting now. Cache is preserved —`,
+          );
+          console.error(
+            `   re-run after midnight PT to finish the bake on the preferred model.`,
+          );
+          console.error("");
+          process.exit(2);
+        }
+
+        if (fallbackMode === "ask") {
+          const choice = await promptFallbackChoice();
+          if (choice === "abort") {
+            console.error(
+              `   Aborting. Cache is preserved — re-run after midnight PT for`,
+            );
+            console.error(`   a uniform premium bake.`);
+            console.error("");
+            process.exit(2);
+          }
+          console.error(
+            `   Continuing with mixed-tier bake. Will not prompt again this run.`,
+          );
+          console.error("");
+        } else {
+          // continue mode
+          console.error(
+            `   --on-fallback=continue set. Proceeding silently on fallback tier.`,
+          );
+          console.error("");
+        }
+
+        fallbackResolved = true;
+      }
 
       const done = spokenLines.indexOf(line) + 1;
       const pct = Math.floor((done / total) * 100);
@@ -400,6 +522,16 @@ async function bakeAudioIntoDoc(doc: MRAMDocument): Promise<void> {
 
   console.error("Audio bake complete:");
   console.error(`  Rendered via API:  ${rendered}`);
+  if (Object.keys(modelTally).length > 0) {
+    console.error(`    Per-model breakdown:`);
+    const sorted = Object.entries(modelTally).sort((a, b) => b[1] - a[1]);
+    for (const [model, count] of sorted) {
+      const tier = model === preferredModel ? "(preferred)" : "(fallback)";
+      console.error(
+        `      ${model.padEnd(35)} ${count.toString().padStart(3)} lines  ${tier}`,
+      );
+    }
+  }
   console.error(`  Cache hits:        ${cacheHits}`);
   console.error(
     `  Bytes added (pre-encrypt):  ${(totalBytes / 1024 / 1024).toFixed(2)} MB Opus`,
@@ -408,6 +540,40 @@ async function bakeAudioIntoDoc(doc: MRAMDocument): Promise<void> {
     .map(([role, voice]) => `${role}=${voice}`)
     .join(", ")}`);
   console.error("");
+}
+
+/**
+ * One-shot y/N prompt for the quality-drop confirmation. Uses raw-mode
+ * stdin (same pattern as promptPassphrase) so a single keystroke decides
+ * without needing Enter. In non-TTY environments (piped stdin, CI) this
+ * defaults to abort — running on fallback quality silently isn't what
+ * a user wanted when they picked the default.
+ */
+async function promptFallbackChoice(): Promise<"continue" | "abort"> {
+  if (!process.stdin.isTTY) {
+    console.error(
+      `   stdin is not a TTY — defaulting to abort. Re-run with --on-fallback=continue`,
+    );
+    console.error(`   to keep going on the fallback tier in non-interactive environments.`);
+    return "abort";
+  }
+
+  process.stderr.write(`   Continue with lower-quality fallback? [y/N] `);
+  process.stdin.setRawMode(true);
+  process.stdin.resume();
+  process.stdin.setEncoding("utf-8");
+
+  return new Promise((resolve) => {
+    const onData = (chunk: string) => {
+      const ch = chunk[0] ?? "";
+      process.stdin.setRawMode(false);
+      process.stdin.pause();
+      process.stdin.removeListener("data", onData);
+      process.stderr.write(ch + "\n");
+      resolve(ch === "y" || ch === "Y" ? "continue" : "abort");
+    };
+    process.stdin.on("data", onData);
+  });
 }
 
 function etaFormat(seconds: number): string {
