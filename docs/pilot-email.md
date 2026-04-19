@@ -66,14 +66,19 @@ hint that primes the model for ritual terms — *Worshipful Master*,
 reachable, it falls back automatically to your browser's built-in
 recognition.
 
-### Six voice engines, including voice cloning
+### Seven voice engines, including expressive AI voices and voice cloning
 
-Any of six text-to-speech engines can read the ritual aloud:
+Any of seven text-to-speech engines can read the ritual aloud:
 
-- **Mistral Voxtral** (default) — supports **zero-shot voice cloning**.
-  Record a short sample of a brother speaking and the app will read
-  *his* officer's lines in *his* voice. No paid "voice clone" tier
-  required.
+- **Google Gemini 3.1 Flash TTS** *(default)* — Google's newest expressive
+  voice model. Per-officer male voices with prompt-driven direction
+  (gravely, reverent, commanding). When the daily quota fills up, the
+  app silently falls through to two older Gemini models so playback
+  keeps working.
+- **Mistral Voxtral** — supports **zero-shot voice cloning**. Record a
+  short sample of a brother speaking and the app will read *his*
+  officer's lines in *his* voice. No paid "voice clone" tier required.
+  Ships with 15 character voices in the pool as backup.
 - **ElevenLabs** — twelve distinct male voices, one per officer chair.
 - **Google Cloud Neural2** — per-role voice, pitch, and rate tuning so
   the Worshipful Master sounds deeper than the Tyler.
@@ -82,8 +87,9 @@ Any of six text-to-speech engines can read the ritual aloud:
 - **Kokoro** — a self-hosted option with no cloud dependency.
 - **Browser built-in** — always works, even offline.
 
-If one cloud engine is down, the app automatically falls through to the
-next in the chain.
+If a cloud engine is down or rate-limited, the app automatically falls
+through the chain (Gemini → Voxtral → Google Cloud → browser) so you
+never hit a dead end during practice.
 
 ### Five-layer feedback, not just text matching
 

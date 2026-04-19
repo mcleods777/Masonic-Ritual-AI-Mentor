@@ -74,16 +74,19 @@ Hear the full ceremony read aloud with a unique AI voice for each officer. The s
 ### Progress Tracking
 Track your accuracy over time, see trends, identify persistent trouble spots, and celebrate streaks.
 
-### Voice AI (6 TTS Engines)
+### Voice AI (7 TTS Engines)
 
 | Engine | Type | Voices | Cost |
 |--------|------|--------|------|
-| **Voxtral (Mistral)** | Cloud + voice cloning | Clone any voice from 3s audio | ~$0.016/1K chars |
+| **Gemini 3.1 Flash TTS** *(default)* | Cloud, expressive | Per-role male voices (Alnilam, Charon, Algenib, Fenrir, etc.) with prompt-tag direction | Preview pricing |
+| **Voxtral (Mistral)** | Cloud + voice cloning | Clone any voice from 3s audio; 15 default character voices ship in the pool | ~$0.016/1K chars |
 | **ElevenLabs** | Cloud | 10 distinct male voices | Premium |
 | **Deepgram Aura-2** | Cloud | 7 distinct voices (Zeus, Orion, etc.) | Pay-per-use |
 | **Google Cloud TTS** | Cloud | Neural2 voices with pitch control | Pay-per-use |
 | **Kokoro** | Self-hosted | Multiple voices, free | Free (self-hosted) |
 | **Browser** | Built-in | Pitch/rate differentiation | Free |
+
+Gemini is the default engine. When Gemini hits its preview-tier daily quota, the route silently falls back across `gemini-3.1-flash-tts-preview` → `gemini-2.5-flash-preview-tts` → `gemini-2.5-pro-preview-tts`. If all three Gemini models are throttled, the client falls back to Voxtral (drawing from the 15 default character voices) → Google Cloud Neural2 → browser TTS.
 
 Each engine maps distinct voices to Masonic officer roles:
 
@@ -112,8 +115,10 @@ Each engine maps distinct voices to Masonic officer roles:
 - Voice recordings stored locally in IndexedDB, only sent with TTS requests
 - API keys stay server-side (Next.js API routes)
 - Anthropic does not train on API data
-- No user accounts or tracking
 - .mram file is never stored — only re-encrypted data
+- **Pilot allowlist + magic-link auth** — only emails on `LODGE_ALLOWLIST` get sign-in links; no passwords, no accounts beyond a session cookie
+- **Per-IP and per-email rate limiting** on magic-link issuance (5/hr per IP, 3/hr per email) using `x-vercel-forwarded-for` for trustworthy IP attribution
+- **Strict CSP + security headers** on every response (`X-Frame-Options: DENY`, `frame-ancestors 'none'`, locked `Permissions-Policy`, HSTS preload)
 
 ---
 
@@ -153,7 +158,7 @@ SW: * Brothers Senior & Junior Deacons, proceed to satisfy yourselves that all p
 | Styling | Tailwind CSS v4 |
 | AI Feedback | Llama 3.3 on Groq (streaming) |
 | Speech-to-Text | Groq Whisper (server-side) + Browser Web Speech API |
-| Text-to-Speech | Voxtral, ElevenLabs, Deepgram Aura-2, Google Cloud TTS, Kokoro, Browser |
+| Text-to-Speech | Gemini 3.1 Flash TTS (default), Voxtral, ElevenLabs, Deepgram Aura-2, Google Cloud TTS, Kokoro, Browser |
 | Voice Cloning | Voxtral (Mistral) via ref_audio zero-shot cloning |
 | Text Comparison | jsdiff + Double Metaphone + Levenshtein distance |
 | Ritual Format | .mram encrypted binary (AES-256-GCM + PBKDF2) |
@@ -169,9 +174,20 @@ SW: * Brothers Senior & Junior Deacons, proceed to satisfy yourselves that all p
 src/
 ├── app/
 │   ├── api/
+│   │   ├── auth/magic-link/
+│   │   │   ├── request/route.ts         # Issue magic-link (per-IP/per-email rate limit)
+│   │   │   └── verify/route.ts          # Verify token, set session cookie
+│   │   ├── author/                      # Local-only ritual review tool API
+│   │   │   ├── _guard.ts                # Loopback / dev-only access guard
+│   │   │   ├── list/route.ts            # List dialogue + cipher pairs in rituals/
+│   │   │   ├── pair/route.ts            # GET/POST a plain+cipher pair with validation
+│   │   │   ├── mram/route.ts            # Build encrypted .mram from a pair
+│   │   │   ├── pair/route.ts            # Atomic write-back + re-validation
+│   │   │   └── suggest-styles/route.ts  # Per-line LLM style suggestions
 │   │   ├── rehearsal-feedback/route.ts  # Llama 3.3 streaming feedback
 │   │   ├── transcribe/route.ts          # Groq Whisper STT proxy
 │   │   └── tts/
+│   │       ├── gemini/route.ts          # Gemini 3.1 Flash TTS — default engine, 3-model fallback chain
 │   │       ├── voxtral/
 │   │       │   ├── route.ts             # Voxtral TTS proxy (voice_id or ref_audio)
 │   │       │   ├── voices/route.ts      # List/create Mistral voice profiles
@@ -182,34 +198,43 @@ src/
 │   │       ├── google/route.ts          # Google Cloud TTS proxy
 │   │       ├── kokoro/route.ts          # Kokoro self-hosted TTS proxy
 │   │       └── engines/route.ts         # TTS engine availability check
+│   ├── author/page.tsx                  # Local-only side-by-side ritual editor (dev-only)
 │   ├── voices/page.tsx                  # Voice recording & management
 │   ├── practice/page.tsx                # Practice mode (solo + rehearsal + listen)
 │   ├── progress/page.tsx                # Performance tracking dashboard
 │   ├── upload/page.tsx                  # .mram file upload page
 │   ├── walkthrough/page.tsx             # Visual how-it-works guide
+│   ├── signin/page.tsx                  # Magic-link sign-in page (pilot allowlist)
 │   ├── layout.tsx                       # Root layout with Navigation
 │   ├── page.tsx                         # Home page
 │   └── middleware.ts                    # Redirects / to landing page
 ├── components/
 │   ├── DiffDisplay.tsx                  # Color-coded word-by-word diff
 │   ├── DocumentUpload.tsx               # .mram file upload + passphrase entry
+│   ├── GeminiPreloadPanel.tsx           # Gemini per-ritual audio preload + cache probe
 │   ├── ListenMode.tsx                   # Full ceremony playback with TTS
 │   ├── Navigation.tsx                   # Mobile bottom bar + desktop top nav
 │   ├── PerformanceTracker.tsx           # Accuracy trends & streaks
 │   ├── PracticeMode.tsx                 # Solo section practice
 │   ├── RehearsalMode.tsx                # Call-and-response with AI voices
 │   └── TTSEngineSelector.tsx            # Voice engine selection dropdown
-├── middleware.ts                         # Root redirect to Pretext landing page
+├── middleware.ts                         # Root redirect + auth gate + CORS + shared-secret check
 └── lib/
-    ├── default-voices.ts                # Pre-baked Aura-2 voice loader (7 male voices)
-    ├── voice-storage.ts                 # IndexedDB storage + export/import for voice recordings
+    ├── auth.ts                          # JWT magic-link tokens + session cookie
+    ├── rate-limit.ts                    # In-memory sliding-window limiter (Vercel-trusted IP)
+    ├── default-voices.ts                # 15 default Voxtral voices (unassigned, fallback pool)
+    ├── voice-storage.ts                 # IndexedDB voices store + audioCache for Gemini output
     ├── audio-utils.ts                   # WAV encoding + audio normalization
-    ├── tts-cloud.ts                     # Cloud TTS engines + voice role mapping
-    ├── text-to-speech.ts                # TTS engine abstraction + routing
+    ├── tts-cloud.ts                     # Cloud TTS engines + voice role mapping + Gemini cache
+    ├── text-to-speech.ts                # TTS engine abstraction + routing (Gemini default)
     ├── speech-to-text.ts                # STT engines (Whisper + Browser)
     ├── text-comparison.ts               # 5-layer comparison pipeline
     ├── mram-format.ts                   # .mram encrypt/decrypt/conversion
-    ├── storage.ts                       # Encrypted IndexedDB (v3: + voices store)
+    ├── storage.ts                       # Encrypted IndexedDB (v4: + audioCache store)
+    ├── styles.ts                        # Per-line style tag schema (Gemini prompt-tags)
+    ├── dialogue-format.ts               # Parse paired plain+cipher dialogue files
+    ├── dialogue-to-mram.ts              # Compile dialogue + styles into MRAMDocument
+    ├── author-validation.ts             # Shared client/server validation for /author
     ├── performance-history.ts           # Practice session history tracking
     ├── document-parser.ts               # Role display names + text parsing
     └── gavel-sound.ts                   # Synthesized gavel knock via Web Audio
@@ -217,10 +242,17 @@ src/
 public/
 ├── landing.html                         # Pretext-powered interactive landing page
 ├── pretext.js                           # Vendored Pretext library (30KB)
-└── voices/                              # Pre-baked default voice samples (7 male Aura-2)
+└── voices/                              # 15 default Voxtral voices (8 character + 7 Aura-2)
+
+rituals/                                  # Local-only — ritual source files (.mram gitignored)
+├── {prefix}-dialogue.md                 # Plain-text dialogue
+├── {prefix}-dialogue-cipher.md          # Cipher-text dialogue (parallel structure)
+├── {prefix}-styles.json                 # Per-line Gemini style tags (optional)
+└── {prefix}.mram                        # Built encrypted artifact (local-only, never committed)
 
 scripts/
 ├── build-mram.ts                        # CLI: build .mram files from paired markdown
+├── build-mram-from-dialogue.ts          # CLI: build .mram from dialogue + cipher + styles
 └── benchmark-tts.ts                     # TTS engine benchmark (TTFB + total response time)
 ```
 
@@ -247,12 +279,20 @@ Add your API keys to `.env`:
 # Required — AI feedback + speech-to-text
 GROQ_API_KEY=                    # Llama 3.3 feedback + Whisper STT
 
-# Pick one or more TTS engines
+# TTS engines — Gemini is the default; rest are fallbacks or alternatives
+GOOGLE_GEMINI_API_KEY=           # Gemini 3.1 Flash TTS — default playback engine
+GEMINI_TTS_MODELS=               # Optional: comma-separated override of model fallback chain
 MISTRAL_API_KEY=                 # Voxtral — voice cloning, half-cost
 DEEPGRAM_API_KEY=                # Aura-2 — fast, natural
 ELEVENLABS_API_KEY=              # Premium — ultra-realistic
 GOOGLE_CLOUD_TTS_API_KEY=        # Neural2 voices
 KOKORO_TTS_URL=                  # Self-hosted, free
+
+# Pilot auth (optional — only set if running an allowlisted pilot)
+LODGE_ALLOWLIST=                 # Comma-separated emails allowed to sign in
+RESEND_API_KEY=                  # Email provider for magic-link delivery
+MAGIC_LINK_FROM_EMAIL=           # From: address for magic-link emails
+MAGIC_LINK_BASE_URL=             # Base URL for magic-link callbacks (defaults to request origin)
 ```
 
 ```bash
@@ -338,11 +378,13 @@ Shannon McLeod, a Freemason who got tired of practicing ritual by reading from a
 - **Feb-Mar 2026** — Added 6 TTS engines, rehearsal mode with multi-officer voices, voice cloning, listen mode, performance tracking.
 - **Mar 2026** — Switched AI feedback from Claude Haiku to Llama 3.3 on Groq (faster, free tier). Added Voxtral voice cloning. Reduced TTS latency with streaming.
 - **Apr 2026** — Design review (C+ → B+ design score), mobile-first redesign, voice export/import, TTS benchmark tooling, dead voice model cleanup. Pretext-powered interactive landing page with Masonic symbols and real-time text reflow. Pre-baked default voices (7 male Aura-2). Feedback voice selector in rehearsal mode.
+- **Apr 18, 2026** — Ritual review tool at `/author` (local-only side-by-side editor with shared client/server validation). Gemini 3.1 Flash TTS becomes the default engine, with a 3-model fallback chain inside the route (3.1-flash → 2.5-flash → 2.5-pro) so preview-tier daily caps don't break playback. Magic-link auth + pilot allowlist + per-IP / per-email rate limiting. Strict CSP and security headers. 15 default Voxtral character voices repurposed as the unassigned fallback pool — they sit there for the Voxtral fallback path and users can assign one to a role anytime.
 
 ### By the Numbers
 
-- **~169 commits** across the project
-- **67 automated tests** (Vitest)
-- **6 TTS engines** supported (Voxtral, Deepgram, ElevenLabs, Google, Kokoro, Browser)
+- **220 automated tests** (Vitest)
+- **7 TTS engines** supported (Gemini 3.1 Flash TTS as default, Voxtral, Deepgram, ElevenLabs, Google, Kokoro, Browser)
+- **3-model Gemini fallback chain** inside the route (3.1-flash → 2.5-flash → 2.5-pro)
 - **5-layer text comparison** (normalization, word diff, phonetic, fuzzy, scoring)
 - **0 user accounts required** — everything stays in your browser
+- **Magic-link auth + per-IP/per-email rate limiting** for the pilot allowlist
