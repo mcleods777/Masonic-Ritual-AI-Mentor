@@ -316,7 +316,8 @@
   <li>Your ritual file is encrypted. Without the password, it cannot be read.</li>
   <li>Decryption happens in your browser, on your device. The server never sees the decrypted ritual.</li>
   <li>The app never stores your ritual on any server, ever.</li>
-  <li>When the app reads lines aloud or evaluates what you've said, small pieces of text and audio are sent briefly to voice/AI services (Voxtral, Google, Deepgram, Groq). These services have no-retention policies — they do not save or train on the data.</li>
+  <li>When you speak a line and the app evaluates it, or if it needs to read a line with a cloud voice it hasn't played before, small pieces of text and audio are sent briefly to voice/AI services (Google Gemini, Voxtral, Groq). These services have no-retention policies — they do not save or train on the data.</li>
+  <li>For this pilot, most ritual audio is pre-rendered and embedded inside your <code>.mram</code> file. When the app plays a line from a baked file, no cloud service is called at all — the audio is already on your device.</li>
 </ul>
 
 <h2 style="font-family: Georgia, 'Times New Roman', serif; color: #8b6914; border-bottom: 1px solid #c9962c; padding-bottom: 6px; margin-top: 32px;">Troubleshooting</h2>

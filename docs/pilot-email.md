@@ -427,10 +427,14 @@ you load the `.mram` file there too.
 - Decryption happens in your browser, on your device. The server never
   sees the decrypted ritual.
 - The app never stores your ritual on any server, ever.
-- When the app reads lines aloud or evaluates what you've said, small
-  pieces of text and audio are sent briefly to voice/AI services
-  (Voxtral, Google, Deepgram, Groq). These services have no-retention
-  policies — they do not save or train on the data.
+- When you speak a line and the app evaluates it, or if it needs to read
+  a line with a cloud voice it hasn't played before, small pieces of text
+  and audio are sent briefly to voice/AI services (Google Gemini, Voxtral,
+  Groq). These services have no-retention policies — they do not save or
+  train on the data.
+- For this pilot, most ritual audio is pre-rendered and embedded inside
+  your `.mram` file. When the app plays a line from a baked file, no cloud
+  service is called at all — the audio is already on your device.
 
 ## Troubleshooting
 
