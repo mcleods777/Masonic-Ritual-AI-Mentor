@@ -10,9 +10,13 @@ import type { NextConfig } from "next";
 const CSP = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-  "style-src 'self' 'unsafe-inline'",
+  // fonts.googleapis.com hosts the @font-face stylesheet for Cinzel +
+  // Cormorant Garamond. Without it the layout falls back to system serifs
+  // and the Masonic visual identity is lost on every page.
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "img-src 'self' data: blob:",
-  "font-src 'self' data:",
+  // fonts.gstatic.com is where the actual .woff2 binaries live.
+  "font-src 'self' data: https://fonts.gstatic.com",
   "connect-src 'self' https://api.mistral.ai https://generativelanguage.googleapis.com https://texttospeech.googleapis.com https://api.resend.com",
   "media-src 'self' blob: data:",
   "worker-src 'self' blob:",
