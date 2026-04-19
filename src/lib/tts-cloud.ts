@@ -919,7 +919,7 @@ void _AUDIO_CACHE_STORE_UNUSED;
  * mapping accidentally used Kore, Zephyr, Aoede, Callirrhoe which are
  * all female voices. Fixed here.
  */
-const GEMINI_ROLE_VOICES: Record<string, string> = {
+export const GEMINI_ROLE_VOICES: Record<string, string> = {
   WM: "Alnilam",         // firm and strong — authority of the Master
   SW: "Charon",          // calm and professional — principal officer
   JW: "Puck",            // upbeat and lively — JW calls craft to refreshment
@@ -1048,9 +1048,21 @@ async function blobToBase64(blob: Blob): Promise<string> {
  */
 export async function speakGemini(
   text: string,
-  options: { style?: string; voice?: string } = {}
+  options: { style?: string; voice?: string; embeddedAudio?: string } = {}
 ): Promise<void> {
   const voice = options.voice ?? "Kore";
+
+  // Embedded-audio short-circuit: if the .mram had audio baked in for
+  // this line at build time (v3+ format), play those bytes directly.
+  // Zero API call, zero network roundtrip, instant playback. The audio
+  // was rendered with a specific (voice, style) combo at build time —
+  // callers only pass embeddedAudio when that combo still matches what
+  // we're speaking now (see speakGeminiAsRole voice-cast match check).
+  if (options.embeddedAudio) {
+    await playAudioBlob(base64ToBlob(options.embeddedAudio, "audio/ogg"));
+    return;
+  }
+
   const cacheKey = await geminiCacheKey(text, options.style, voice);
 
   // Cache hit: play from IndexedDB, no network call.
@@ -1139,11 +1151,13 @@ export async function speakGemini(
 export async function speakGeminiAsRole(
   text: string,
   role: string,
-  style?: string
+  style?: string,
+  embeddedAudio?: string,
 ): Promise<void> {
   return speakGemini(text, {
     voice: getGeminiVoiceForRole(role),
     style,
+    embeddedAudio,
   });
 }
 

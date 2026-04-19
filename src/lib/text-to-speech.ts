@@ -417,12 +417,20 @@ export async function speak(
  * ("gravely", "reverently", etc.) — consumed only by the Gemini engine
  * and silently ignored by every other engine. Source: `section.style`
  * populated from the .mram file via mramToSections().
+ *
+ * The `embeddedAudio` param is optional pre-rendered Opus audio baked
+ * into the .mram at build time (v3+ files). When present AND the user
+ * is playing with the Gemini engine (not overridden by a user-recorded
+ * Voxtral clone), the client plays these bytes directly — zero API call.
+ * When absent, the existing /api/tts/gemini + IndexedDB cache path
+ * handles the line. Source: `section.audio`.
  */
 export async function speakAsRole(
   text: string,
   role: string,
   voiceMap?: Map<string, RoleVoiceProfile>,
   style?: string,
+  embeddedAudio?: string,
 ): Promise<void> {
   // Per-role Voxtral override: if the Brother recorded their own voice
   // and assigned it to this role, that clone plays regardless of the
@@ -453,7 +461,7 @@ export async function speakAsRole(
       case "deepgram": return speakDeepgramAsRole(text, role);
       case "kokoro": return speakKokoroAsRole(text, role);
       case "voxtral": return speakVoxtralAsRole(text, role);
-      case "gemini": return speakGeminiAsRole(text, role, style);
+      case "gemini": return speakGeminiAsRole(text, role, style, embeddedAudio);
       default: {
         const profile = voiceMap?.get(role) || getVoiceForRole(role);
         return speakBrowser(text, {

@@ -172,6 +172,12 @@ interface StoredSectionRecord {
   order: number;
   gavels: number;
   action: string | null;
+  /** Gemini style tag for this line (v2+ .mram files). */
+  style?: string;
+  /** Pre-rendered Opus audio for this line, encrypted base64 bytes split
+   *  into ciphertext + iv the same way plain/cipher text are (v3+ files). */
+  audioCipher?: ArrayBuffer;
+  audioIv?: Uint8Array;
 }
 
 /**
@@ -211,6 +217,17 @@ export async function saveMRAMDocument(mramDoc: MRAMDocument): Promise<string> {
     const { ciphertext: textCipher, iv: textIv } = await encrypt(section.text);
     const { ciphertext: cipherTextCipher, iv: cipherTextIv } = await encrypt(section.cipherText);
 
+    // Encrypt pre-rendered audio too if present. Audio bytes are already
+    // base64; we encrypt them at rest to maintain the "nothing sensitive
+    // sits in plain IndexedDB" invariant.
+    let audioCipher: ArrayBuffer | undefined;
+    let audioIv: Uint8Array | undefined;
+    if (section.audio) {
+      const encrypted = await encrypt(section.audio);
+      audioCipher = encrypted.ciphertext;
+      audioIv = encrypted.iv;
+    }
+
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(SECTIONS_STORE, "readwrite");
       const store = tx.objectStore(SECTIONS_STORE);
@@ -227,6 +244,8 @@ export async function saveMRAMDocument(mramDoc: MRAMDocument): Promise<string> {
         order: section.order,
         gavels: section.gavels,
         action: section.action,
+        ...(section.style ? { style: section.style } : {}),
+        ...(audioCipher && audioIv ? { audioCipher, audioIv } : {}),
       } as StoredSectionRecord);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => resolve();
@@ -252,6 +271,10 @@ export interface RitualSectionWithCipher {
   action: string | null;
   /** Gemini 3.1 Flash TTS audio tag (v2+ .mram files). Undefined on v1. */
   style?: string;
+  /** Pre-rendered Opus audio for this line, base64. v3+ .mram files only.
+   *  When present, the Gemini playback path uses this directly and skips
+   *  the /api/tts/gemini call. */
+  audio?: string;
 }
 
 /**
@@ -306,6 +329,12 @@ export async function getDocumentSections(documentId: string): Promise<RitualSec
       cipherText = await decrypt(record.cipherTextCipher, record.cipherTextIv);
     }
 
+    // Decrypt the pre-rendered audio if it was baked at build time (v3+).
+    let audio: string | undefined;
+    if (record.audioCipher && record.audioIv) {
+      audio = await decrypt(record.audioCipher, record.audioIv);
+    }
+
     sections.push({
       id: record.id,
       degree: record.degree,
@@ -316,6 +345,8 @@ export async function getDocumentSections(documentId: string): Promise<RitualSec
       order: record.order,
       gavels: record.gavels ?? 0,
       action: record.action ?? null,
+      ...(record.style ? { style: record.style } : {}),
+      ...(audio ? { audio } : {}),
     });
   }
 

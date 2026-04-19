@@ -66,32 +66,31 @@ page patterns cover the save flow. Add a "Suggest Styles" button next to
 ---
 
 ### Voxtral fallback + error banner + automatic next-line prefetch
-**Priority:** P2
-**What:** Three remaining polish items from the original eng-review:
+**Priority:** P3 (de-prioritized 2026-04-19 — bake-in shipped)
+**What:** Two remaining polish items from the original eng-review:
   - 2A/13A: error banner on styled lines when Gemini falls back to
     Voxtral. Today the fallback is silent — Brother hears Voxtral and
     doesn't know why.
   - 12A: automatic prefetch of line N+1 while N plays (cancels on
-    pause/seek). The current preload button covers the bulk case but
-    on a cold cache during live rehearsal there's still a gap.
+    pause/seek).
 
-**Status update (2026-04-18):**
+**Status update (2026-04-19):**
+- ✅ Audio bake-in at build time shipped. .mram files built with
+  `--with-audio` embed pre-rendered Opus audio per line. At playback,
+  zero API call per Brother per rehearsal. This collapses the case
+  that motivated prefetch + streaming in the first place — cold-cache
+  latency doesn't exist when audio is already on device.
 - ✅ Voxtral fallback works (chain: Gemini all 3 models → Voxtral → Google
-  Cloud → browser). Voxtral now has 15 default character voices in the
-  pool to draw from when Brother hasn't recorded their own.
-- ✅ Streaming attempted via `streamGenerateContent` SSE. Reverted to
-  server-side SSE buffering (route reads stream, builds complete WAV with
-  Content-Length, returns single response) because Chromium choked on
-  chunked-transfer audio blobs with `ERR_REQUEST_RANGE_NOT_SATISFIABLE`.
-  Tradeoff: no user-visible streaming benefit (~2-5s/line first-time)
-  but reliable playback. Preload button covers the rehearsal case by
-  caching every line into IndexedDB before the session starts.
-- ⏳ Error banner: not started.
-- ⏳ Automatic next-line prefetch: not started. Preload covers it for
-  prepared rehearsals; needed for cold-cache live use.
+  Cloud → browser). Voxtral has 15 default character voices in the pool.
+- ⏳ Error banner: still not started. Less critical now that the common
+  path (embedded audio) doesn't hit the fallback chain at all.
+- ⏳ Automatic next-line prefetch: still not started. Only relevant for
+  Brothers who override the canonical voice cast AND haven't hit
+  preload. Edge case.
 
-**Why:** Banner closes a confusion gap (silent fallback feels broken).
-Auto-prefetch closes the cold-cache latency gap during ad-hoc practice.
+**Why:** Banner closes a confusion gap for Brothers who pick a non-baked
+voice cast and hear Voxtral on Gemini failures. Auto-prefetch closes the
+cold-cache latency gap for that same edge case.
 
 **Depends on / blocked by:** nothing.
 
