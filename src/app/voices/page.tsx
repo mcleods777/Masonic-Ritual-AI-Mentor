@@ -27,14 +27,23 @@ type RecordingState = "idle" | "recording" | "recorded" | "saving";
 // Suggested phrases for recording samples
 // ============================================================
 
+// Voice-cloning prompts. Each ~35-55 words / ~10-14 seconds at natural
+// pace, with intentional prosodic structure (opening statement → middle
+// pause → resolved close) so Voxtral captures pitch range, pacing, and
+// register. Original prose only — never any actual ritual content. The
+// dignified register matches the Masonic context without revealing any
+// of the work itself.
 const SAMPLE_PHRASES = [
-  "Brethren, the lodge is now open for the transaction of business.",
-  "Worshipful Master, the lodge is tyled.",
-  "The Junior Warden's station is in the south.",
-  "Let us offer our prayers to the Most High.",
-  "I vouch for this brother, that he is worthy and well qualified.",
-  "The minutes of the previous communication are as follows.",
-  "So mote it be.",
+  "There is a quiet kind of work that asks nothing in return, and gives more than it takes. The hands that do it are rarely thanked, but the place is always better for them having been there.",
+  "Time has a way of revealing what mattered all along. The arguments fade, the pride dissolves, and what remains is the simple fact that we showed up for one another when it counted.",
+  "When the lamps are low and the room is still, a man can hear the shape of his own thoughts. It is in those hours that he decides what sort of person he intends to be.",
+  "We carry with us the lessons of those who came before, not as a weight, but as a steady hand on the shoulder. Their words echo forward, plain and patient, asking us to live well.",
+  "The work of building is slow. Stone upon stone, day upon day, with no great applause and no clear horizon. And yet the wall rises, and one morning you turn around and see it standing.",
+  "Friendship is not measured in the bright hours. It is measured in the long dim ones, when the work is hard and the company is silent, and someone simply stays.",
+  "There is dignity in keeping a promise, even one no one would notice you had broken. Especially that kind. The world is held together by such small, invisible faithfulnesses.",
+  "Walk slowly through the morning. Notice the cool air, the way the light falls across the floor, the small sounds the house makes as it wakes. These are the hours you will miss.",
+  "A craftsman does not boast of his tools. He sets them down, picks them up, and does the work. The wood remembers his hands long after his name has been forgotten.",
+  "There are rooms in our lives we leave and never visit again. We carry them with us anyway, in the way we hold a cup, in the way we listen, in the half-remembered shape of an old kindness.",
 ];
 
 // ============================================================
@@ -520,8 +529,9 @@ export default function VoicesPage() {
         {/* Tips */}
         <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3">
           <p className="text-xs text-amber-400/80">
-            <strong>Tips:</strong> 3-5 seconds is ideal. Shorter recordings = faster TTS response.
-            Speak in the tone you want for rehearsal. A quiet room helps cloning quality.
+            <strong>Tips:</strong> ~10 seconds gives the cleanest clone. Speak naturally and
+            let your voice rise and fall &mdash; a flat reading clones flat. Use the tone you want
+            for rehearsal. A quiet room helps.
           </p>
         </div>
 
