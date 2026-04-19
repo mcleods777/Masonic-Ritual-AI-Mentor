@@ -178,6 +178,14 @@ npx tsx scripts/build-mram-from-dialogue.ts <plain> <cipher> <out> --with-audio 
 npx tsx scripts/build-mram-from-dialogue.ts <plain> <cipher> <out> --with-audio --on-fallback=continue
 ```
 
+**On abort, the contaminated cache entry is removed.** The line that was just rendered on the fallback tier gets its cache file deleted before exit, so when you re-run after midnight PT:
+
+- All lines rendered on the preferred tier before the drop → cache hits, zero API cost
+- The triggering line → fresh render on the preferred tier
+- All subsequent lines → fresh render on the preferred tier
+
+Result: uniform premium bake, paying only for the unrendered lines on your next run.
+
 The final summary prints a per-model tally so you can see exactly how many lines each model served:
 
 ```

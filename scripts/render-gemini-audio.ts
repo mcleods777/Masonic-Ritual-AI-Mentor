@@ -142,6 +142,23 @@ export async function renderLineAudio(
   }
 }
 
+/**
+ * Delete a specific cache entry by its cacheKey. Returns true if the
+ * file existed and was removed, false if it wasn't there. Used by the
+ * build script on the abort path to remove a just-rendered fallback-tier
+ * entry so a re-run after quota reset produces a uniform premium bake
+ * instead of a silent cache-hit on the degraded bytes.
+ */
+export function deleteCacheEntry(cacheKey: string, cacheDir?: string): boolean {
+  const dir = cacheDir ?? CACHE_DIR;
+  const cachePath = path.join(dir, `${cacheKey}.opus`);
+  if (fs.existsSync(cachePath)) {
+    fs.unlinkSync(cachePath);
+    return true;
+  }
+  return false;
+}
+
 // ============================================================
 // Gemini API call with 3-model fallback
 // ============================================================

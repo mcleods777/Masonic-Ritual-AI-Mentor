@@ -43,7 +43,7 @@ import { parseDialogue } from "../src/lib/dialogue-format";
 import { buildFromDialogue } from "../src/lib/dialogue-to-mram";
 import type { MRAMDocument } from "../src/lib/mram-format";
 import { GEMINI_ROLE_VOICES, getGeminiVoiceForRole } from "../src/lib/tts-cloud";
-import { renderLineAudio } from "./render-gemini-audio";
+import { renderLineAudio, deleteCacheEntry } from "./render-gemini-audio";
 
 // ============================================================
 // Encryption (Node crypto — binary layout matches Web Crypto
@@ -404,6 +404,12 @@ async function bakeAudioIntoDoc(
     const cleanText = line.plain.trim();
     let statusLabel = "";
     let thisLineModel: string | undefined;
+    // Cache key for this line's render, captured from the onProgress
+    // event. Needed on the abort path: renderLineAudio has already
+    // written the fallback-tier bytes to disk by the time we detect
+    // the tier drop, so aborting without deleting this entry would
+    // leave a single degraded line cached that silently hits on re-run.
+    let thisLineCacheKey: string | undefined;
 
     try {
       const opus = await renderLineAudio(cleanText, line.style, voice, {
@@ -417,6 +423,7 @@ async function bakeAudioIntoDoc(
             statusLabel = event.model ?? "rendered";
             totalBytes += event.bytesOut ?? 0;
             thisLineModel = event.model;
+            thisLineCacheKey = event.cacheKey;
             const key = event.model ?? "unknown";
             modelTally[key] = (modelTally[key] ?? 0) + 1;
           } else if (event.status === "waiting-for-quota-reset") {
@@ -465,30 +472,57 @@ async function bakeAudioIntoDoc(
         console.error(`   midnight PT for a uniform premium bake.`);
         console.error("");
 
-        if (fallbackMode === "abort") {
+        // Shared abort handler. Renders at the fallback tier have
+        // already been written to the cache by renderLineAudio — if we
+        // exit without deleting THIS line's entry, a re-run after quota
+        // reset will cache-hit the degraded bytes and never re-render
+        // on the preferred model. Delete it so the re-run produces a
+        // uniform premium bake.
+        const handleAbort = (reason: string) => {
+          const rendered_on_premium = (modelTally[preferredModel] ?? 0);
+          const deleted = thisLineCacheKey
+            ? deleteCacheEntry(thisLineCacheKey)
+            : false;
+          console.error(reason);
+          if (deleted) {
+            console.error(
+              `   Removed the just-rendered fallback-tier cache entry for line ${line.id}.`,
+            );
+          }
           console.error(
-            `   --on-fallback=abort set. Halting now. Cache is preserved —`,
+            `   ${rendered_on_premium} line(s) already rendered on ${preferredModel}`,
           );
           console.error(
-            `   re-run after midnight PT to finish the bake on the preferred model.`,
+            `   remain cached. Re-run after midnight PT — cached lines skip the API,`,
+          );
+          console.error(
+            `   only line ${line.id} onward renders fresh on the preferred tier.`,
           );
           console.error("");
           process.exit(2);
+        };
+
+        if (fallbackMode === "abort") {
+          handleAbort(
+            `   --on-fallback=abort set. Halting now.`,
+          );
         }
 
         if (fallbackMode === "ask") {
           const choice = await promptFallbackChoice();
           if (choice === "abort") {
-            console.error(
-              `   Aborting. Cache is preserved — re-run after midnight PT for`,
-            );
-            console.error(`   a uniform premium bake.`);
-            console.error("");
-            process.exit(2);
+            handleAbort(`   Aborting for a uniform premium bake.`);
           }
           console.error(
             `   Continuing with mixed-tier bake. Will not prompt again this run.`,
           );
+          console.error(
+            `   (The fallback-tier cache entry for line ${line.id} is kept — re-runs`,
+          );
+          console.error(
+            `   will cache-hit it. Delete ~/.cache/masonic-mram-audio/ to force full`,
+          );
+          console.error(`   re-render later.)`);
           console.error("");
         } else {
           // continue mode
