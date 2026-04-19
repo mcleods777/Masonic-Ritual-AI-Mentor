@@ -208,11 +208,14 @@ device, you load the `.mram` file there too.
 - Decryption happens in your browser, on your device. The lodge's server
   never sees the decrypted ritual.
 - The app never stores your ritual on any server, ever.
-- When the app reads lines aloud, or when you speak a line and the app
-  evaluates it, small pieces of text and audio are sent briefly to voice
-  and AI services (Voxtral, Google, Deepgram, Groq) for processing. These
-  services have no-retention policies — they do not save or train on the
-  data.
+- When you speak a line and the app evaluates it, or if you ask it to read
+  a line with a cloud voice it hasn't played before, small pieces of text
+  and audio are sent briefly to voice and AI services (Google Gemini,
+  Voxtral, Groq) for processing. These services have no-retention policies
+  — they do not save or train on the data.
+- For the pilot, most ritual audio is pre-rendered and embedded inside your
+  `.mram` file. When the app plays a line from a baked file, no cloud
+  service is called at all — the audio is already on your device.
 - If you prefer maximum privacy, the app will eventually include a local-only
   mode that uses only your device's built-in voice features and no cloud
   services at all.

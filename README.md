@@ -25,8 +25,9 @@ flowchart TB
     end
 
     subgraph External["External Services (optional)"]
-        Claude["Claude Haiku\nRehearsal feedback\n(plain text only)"]
+        Llama["Llama 3.3 (Groq)\nRehearsal feedback\n(plain text only)"]
         Whisper["Groq Whisper\nSpeech-to-text"]
+        Gemini["Gemini 3.1 Flash TTS\nDefault engine\n(3-model fallback)"]
         Voxtral["Voxtral (Mistral)\nVoice cloning TTS"]
         Deepgram["Deepgram Aura-2\nFast TTS voices"]
         Eleven["ElevenLabs\nPremium TTS voices"]
@@ -34,9 +35,10 @@ flowchart TB
         Kokoro["Kokoro (self-hosted)\nFree TTS"]
     end
 
-    Rehearsal -->|"AI feedback"| Claude
+    Rehearsal -->|"AI feedback"| Llama
     Rehearsal -->|"Speech input"| Whisper
     Voices -->|"Voice cloning"| Voxtral
+    Listen -->|"TTS"| Gemini
     Listen -->|"TTS"| Voxtral
     Listen -->|"TTS"| Deepgram
     Listen -->|"TTS"| Eleven
@@ -381,6 +383,7 @@ Shannon McLeod, a Freemason who got tired of practicing ritual by reading from a
 
 | Service | What It Does | Model |
 |---------|-------------|-------|
+| **Google** | Default TTS (per-role male voices with prompt-tag direction) | Gemini 3.1 Flash TTS (preview) |
 | **Groq** | AI rehearsal feedback (tells you what you got right/wrong) | Llama 3.3 70B |
 | **Groq** | Speech-to-text (transcribes your spoken ritual) | Whisper Large v3 |
 | **Mistral** | Voice cloning TTS (clones a brother's voice from 3s of audio) | Voxtral Mini TTS |
@@ -406,12 +409,14 @@ Shannon McLeod, a Freemason who got tired of practicing ritual by reading from a
 - **Mar 2026** — Switched AI feedback from Claude Haiku to Llama 3.3 on Groq (faster, free tier). Added Voxtral voice cloning. Reduced TTS latency with streaming.
 - **Apr 2026** — Design review (C+ → B+ design score), mobile-first redesign, voice export/import, TTS benchmark tooling, dead voice model cleanup. Pretext-powered interactive landing page with Masonic symbols and real-time text reflow. Pre-baked default voices (7 male Aura-2). Feedback voice selector in rehearsal mode.
 - **Apr 18, 2026** — Ritual review tool at `/author` (local-only side-by-side editor with shared client/server validation). Gemini 3.1 Flash TTS becomes the default engine, with a 3-model fallback chain inside the route (3.1-flash → 2.5-flash → 2.5-pro) so preview-tier daily caps don't break playback. Magic-link auth + pilot allowlist + per-IP / per-email rate limiting. Strict CSP and security headers. 15 default Voxtral character voices repurposed as the unassigned fallback pool — they sit there for the Voxtral fallback path and users can assign one to a role anytime.
+- **Apr 19, 2026** — Audio bake-in at build time. `scripts/build-mram-from-dialogue.ts --with-audio` renders every spoken line via Gemini 3.1 Flash TTS, Opus-encodes at 32 kbps mono, and embeds the bytes in the encrypted .mram. Brothers receiving a baked file hit zero Gemini API calls per rehearsal — audio plays from the file, not the network. Single-passphrase wrapper `scripts/bake-ea-rituals.ts` bakes all three EA rituals back-to-back. Voice recording prompts rewritten to 10 generic prose passages (no ritual content) so Brothers capture a real prosodic range without exposing ritual. CSP fix to allow Google Fonts (Cinzel + Cormorant Garamond load on pilot devices). Voice cards show a "Default" badge instead of the 12/31/1969 epoch date.
 
 ### By the Numbers
 
-- **220 automated tests** (Vitest)
+- **226 automated tests** (Vitest)
 - **7 TTS engines** supported (Gemini 3.1 Flash TTS as default, Voxtral, Deepgram, ElevenLabs, Google, Kokoro, Browser)
 - **3-model Gemini fallback chain** inside the route (3.1-flash → 2.5-flash → 2.5-pro)
+- **Build-time audio bake-in** (`--with-audio`) — pre-rendered Opus audio embedded in the encrypted .mram; zero API calls per Brother per rehearsal
 - **5-layer text comparison** (normalization, word diff, phonetic, fuzzy, scoring)
 - **0 user accounts required** — everything stays in your browser
 - **Magic-link auth + per-IP/per-email rate limiting** for the pilot allowlist
