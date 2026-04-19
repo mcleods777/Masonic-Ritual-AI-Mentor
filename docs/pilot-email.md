@@ -60,11 +60,13 @@ Write-up in VentureBeat:
 https://venturebeat.com/technology/midjourney-engineer-debuts-new-vibe-coded-open-source-standard-pretext-to
 
 Full transparency: no brother asked me to put this on the front page. I
-put it there as a flex. When I first read about Pretext, I wanted to
-see if I could get it running inside the app within the hour — and I
-was frankly amazed when I could. It has no bearing on the rehearsal
-feature itself. It is there because it is beautiful, it is new, and
-our lodge's pilot page gets to be one of the first places on the open
+put it there because it is genuinely interesting and novel. When I first
+read about Pretext, I wanted to see if I could get it running inside the
+app within the hour — and I was frankly amazed when I could. It has no
+bearing on the rehearsal feature itself. It is there because we are
+among the first to sample a revolutionary new way of using the web —
+text that finally escapes the rectangle after thirty years — and our
+lodge's pilot page gets to be one of the earliest places on the open
 web to show it off.
 
 ## Under the hood — why this app is unique
