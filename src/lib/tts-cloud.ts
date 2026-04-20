@@ -4,6 +4,10 @@
  * Each engine calls its corresponding Next.js API route (which holds
  * the secret API key) and plays back the returned audio via an
  * HTMLAudioElement.
+ *
+ * For the canonical per-engine role-to-voice tables (and the gender
+ * guardrails that keep female voices out of Masonic audio), see
+ * `docs/VOICE-MAPS.md`. Keep that doc and the tables below in sync.
  */
 
 import { fetchApi } from "./api-fetch";
