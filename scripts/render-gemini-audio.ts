@@ -183,6 +183,32 @@ class AllModelsQuotaExhausted extends Error {
   }
 }
 
+/**
+ * Thrown by consumeSseToWav when the Gemini stream completed with no
+ * audio chunks. This is the "text-token regression" Google documents —
+ * the model returns a 200 OK but fills the SSE stream with text tokens
+ * instead of audio tokens. Officially: retry. Treated as retryable on
+ * the same model (NOT a tier-drop event) so we don't burn a fallback
+ * on what's a transient model blip.
+ */
+class EmptyAudioStreamError extends Error {
+  constructor() {
+    super("Gemini SSE stream returned no audio chunks (text-token regression)");
+  }
+}
+
+/**
+ * Per-model retry schedule. Addresses two distinct failure modes:
+ *   - 429 from the per-minute rate limiter (preview models are capped
+ *     at ~10-15 req/min regardless of daily quota — clears in ~60s)
+ *   - 500s and text-token regressions (Google's documented blip —
+ *     retry is the official remediation)
+ * Total wait across three retries: ~42s, well under the per-minute
+ * cap reset window. After these attempts the model is treated as
+ * genuinely exhausted and we fall through to the next tier.
+ */
+const PER_MODEL_RETRY_BACKOFF_MS = [2000, 10000, 30000];
+
 async function callGeminiWithFallback(
   text: string,
   style: string | undefined,
@@ -208,24 +234,104 @@ async function callGeminiWithFallback(
   const attempted: string[] = [];
   for (const model of models) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`;
-    const resp = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body,
-    });
 
-    if (resp.status === 429 || resp.status === 404) {
-      attempted.push(model);
-      continue;
+    // Per-model retry loop. Try the request up to 4 times on this model
+    // before giving up and falling through to the next tier. Covers:
+    //   * 429 (per-minute rate limit, clears in ~60s)
+    //   * 500/502/503 (transient Google-side issues)
+    //   * 200 OK with empty audio stream (text-token regression)
+    // 404 is NOT retried on the same model — it means the endpoint shape
+    // is wrong (e.g., preview model only exposes streamGenerateContent;
+    // retrying won't help).
+    const MAX_ATTEMPTS = PER_MODEL_RETRY_BACKOFF_MS.length + 1;
+    let exhausted = false;
+
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      let resp: Response;
+      try {
+        resp = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body,
+        });
+      } catch (fetchErr) {
+        // Network error — retry on same model if we have attempts left.
+        if (attempt < MAX_ATTEMPTS - 1) {
+          const waitMs = PER_MODEL_RETRY_BACKOFF_MS[attempt];
+          process.stderr.write("\r" + " ".repeat(80) + "\r");
+          console.error(
+            `  ${model} network error: ${(fetchErr as Error).message}. Retrying in ${waitMs / 1000}s (${attempt + 2}/${MAX_ATTEMPTS})...`,
+          );
+          await new Promise((r) => setTimeout(r, waitMs));
+          continue;
+        }
+        // Final attempt network-failed — fall through to next tier.
+        attempted.push(model);
+        exhausted = true;
+        break;
+      }
+
+      if (resp.status === 404) {
+        // Endpoint shape mismatch. Never retryable on the same model —
+        // fall through to the next tier immediately.
+        attempted.push(model);
+        exhausted = true;
+        break;
+      }
+
+      // Retryable on same model: 429 (per-minute throttle) and 5xx.
+      if (resp.status === 429 || resp.status >= 500) {
+        if (attempt < MAX_ATTEMPTS - 1) {
+          const waitMs = PER_MODEL_RETRY_BACKOFF_MS[attempt];
+          process.stderr.write("\r" + " ".repeat(80) + "\r");
+          console.error(
+            `  ${model} returned ${resp.status}. Retrying in ${waitMs / 1000}s (${attempt + 2}/${MAX_ATTEMPTS})...`,
+          );
+          await new Promise((r) => setTimeout(r, waitMs));
+          continue;
+        }
+        // Exhausted retries on this model — fall through to next tier.
+        attempted.push(model);
+        exhausted = true;
+        break;
+      }
+
+      if (!resp.ok) {
+        const errText = await resp.text();
+        throw new Error(`Gemini ${model} returned ${resp.status}: ${errText.slice(0, 300)}`);
+      }
+
+      // 200 OK. Try to consume the stream. If it's empty (text-token
+      // regression), retry the same model — it's a model-side blip,
+      // not a quota issue.
+      try {
+        const wav = await consumeSseToWav(resp);
+        return { wav, model };
+      } catch (consumeErr) {
+        if (consumeErr instanceof EmptyAudioStreamError) {
+          if (attempt < MAX_ATTEMPTS - 1) {
+            const waitMs = PER_MODEL_RETRY_BACKOFF_MS[attempt];
+            process.stderr.write("\r" + " ".repeat(80) + "\r");
+            console.error(
+              `  ${model} text-token regression (empty audio stream). Retrying in ${waitMs / 1000}s (${attempt + 2}/${MAX_ATTEMPTS})...`,
+            );
+            await new Promise((r) => setTimeout(r, waitMs));
+            continue;
+          }
+          // Exhausted retries — fall through to next tier.
+          attempted.push(model);
+          exhausted = true;
+          break;
+        }
+        // Other consumption errors (malformed SSE, missing body) —
+        // not retryable, rethrow.
+        throw consumeErr;
+      }
     }
 
-    if (!resp.ok) {
-      const errText = await resp.text();
-      throw new Error(`Gemini ${model} returned ${resp.status}: ${errText.slice(0, 300)}`);
-    }
-
-    const wav = await consumeSseToWav(resp);
-    return { wav, model };
+    // Only continue to the next model if this one was marked exhausted
+    // inside the retry loop. (A successful return above already exited.)
+    if (!exhausted) break;
   }
 
   throw new AllModelsQuotaExhausted(attempted);
@@ -273,7 +379,7 @@ async function consumeSseToWav(resp: Response): Promise<Buffer> {
   }
 
   if (pcmChunks.length === 0) {
-    throw new Error("Gemini SSE stream returned no audio chunks");
+    throw new EmptyAudioStreamError();
   }
 
   const pcm = Buffer.concat(pcmChunks);
