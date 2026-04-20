@@ -47,6 +47,7 @@ import {
   renderLineAudio,
   deleteCacheEntry,
   isLineCached,
+  PersistentTextTokenRegression,
 } from "./render-gemini-audio";
 import {
   buildPreamble,
@@ -569,6 +570,10 @@ async function bakeAudioIntoDoc(
   const startTime = Date.now();
   let rendered = 0;
   let cacheHits = 0;
+  // Lines that text-token-regressed across every retry and every model
+  // in the chain. Not a bake-killing error — these stay un-embedded in
+  // the .mram, and the runtime TTS path handles them at rehearsal time.
+  const regressedLines: { id: number; role: string; text: string }[] = [];
   let totalBytes = 0;
   // Tally of which models actually served each line. Populated only on
   // `rendered` events (cache hits don't report a model since the cached
@@ -757,6 +762,30 @@ async function bakeAudioIntoDoc(
           `ETA ${etaFormat(eta)}       `,
       );
     } catch (err) {
+      // Text-token regression on a too-short line — don't bail the
+      // whole bake, just leave this line without embedded audio. The
+      // runtime TTS path will handle it per-rehearsal (which is what
+      // used to happen for EVERY line before bake-in existed). We
+      // track these so the final summary shows them, and the user can
+      // decide whether to edit the source line or accept the small
+      // runtime API cost.
+      if (err instanceof PersistentTextTokenRegression) {
+        process.stderr.write("\r" + " ".repeat(80) + "\r");
+        console.error(
+          `\n  ⚠  Line ${line.id} (${line.role}) "${cleanText.slice(0, 50)}${cleanText.length > 50 ? "…" : ""}"`,
+        );
+        console.error(
+          `     Gemini returned text tokens instead of audio across all retries.`,
+        );
+        console.error(
+          `     This line is too short for reliable generation (${cleanText.length} chars).`,
+        );
+        console.error(
+          `     Skipping bake for this line — runtime TTS will handle it at rehearsal.\n`,
+        );
+        regressedLines.push({ id: line.id, role: line.role, text: cleanText });
+        continue; // next line, don't set line.audio, don't re-throw
+      }
       console.error(
         `\n\nError rendering line ${line.id} (${line.role}): ${(err as Error).message}`,
       );
@@ -779,6 +808,19 @@ async function bakeAudioIntoDoc(
     }
   }
   console.error(`  Cache hits:        ${cacheHits}`);
+  if (regressedLines.length > 0) {
+    console.error(
+      `  Skipped (text-token regression, will hit runtime TTS): ${regressedLines.length} line(s)`,
+    );
+    for (const r of regressedLines.slice(0, 10)) {
+      console.error(
+        `    id=${r.id} ${r.role}: "${r.text.slice(0, 40)}${r.text.length > 40 ? "…" : ""}" (${r.text.length} chars)`,
+      );
+    }
+    if (regressedLines.length > 10) {
+      console.error(`    … and ${regressedLines.length - 10} more`);
+    }
+  }
   console.error(
     `  Bytes added (pre-encrypt):  ${(totalBytes / 1024 / 1024).toFixed(2)} MB Opus`,
   );

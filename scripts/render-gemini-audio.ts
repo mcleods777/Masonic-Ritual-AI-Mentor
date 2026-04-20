@@ -151,6 +151,8 @@ export async function renderLineAudio(
         await waitHandler();
         continue; // retry from the top with fresh quota
       }
+      // PersistentTextTokenRegression is content-based — sleeping won't
+      // help. Rethrow so the caller can skip this line and continue.
       throw err;
     }
   }
@@ -202,6 +204,28 @@ export function isLineCached(
 class AllModelsQuotaExhausted extends Error {
   constructor(public attempted: string[]) {
     super(`All ${attempted.length} Gemini models returned 429: ${attempted.join(", ")}`);
+  }
+}
+
+/**
+ * Thrown when every model in the fallback chain exhausted its retries
+ * specifically on EmptyAudioStreamError — the model returned 200 OK but
+ * filled the stream with text tokens instead of audio tokens. This is
+ * a content-based failure, not a quota issue: sleeping until midnight
+ * PT won't fix it because the line will still trigger the same
+ * regression on the next attempt.
+ *
+ * Typical cause: ultra-short transcripts ("B.", "O.", "So mote it be.")
+ * that fall below Gemini's reliable-generation threshold. Caller should
+ * skip embedding audio for this line and let the runtime TTS path
+ * handle it per-rehearsal.
+ */
+export class PersistentTextTokenRegression extends Error {
+  constructor(public attempted: string[]) {
+    super(
+      `All ${attempted.length} model(s) returned empty audio streams for this line: ${attempted.join(", ")}. ` +
+        `Content is likely below Gemini's reliable-generation threshold — sleep won't help.`,
+    );
   }
 }
 
@@ -299,6 +323,13 @@ async function callGeminiWithFallback(
   });
 
   const attempted: string[] = [];
+  // Track whether every model's retries failed purely on text-token
+  // regression vs at least one real quota/5xx/network failure. If it's
+  // purely regression, sleeping until midnight PT won't help — the
+  // content is what's triggering it, and the next attempt will regress
+  // the same way. Caller should skip embedding audio for this line.
+  let anyModelSawNonRegressionFailure = false;
+
   for (const model of models) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`;
 
@@ -312,6 +343,7 @@ async function callGeminiWithFallback(
     // retrying won't help).
     const MAX_ATTEMPTS = PER_MODEL_RETRY_BACKOFF_MS.length + 1;
     let exhausted = false;
+    let thisModelSawNonRegressionFailure = false;
 
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       let resp: Response;
@@ -323,6 +355,7 @@ async function callGeminiWithFallback(
         });
       } catch (fetchErr) {
         // Network error — retry on same model if we have attempts left.
+        thisModelSawNonRegressionFailure = true;
         if (attempt < MAX_ATTEMPTS - 1) {
           const waitMs = PER_MODEL_RETRY_BACKOFF_MS[attempt];
           process.stderr.write("\r" + " ".repeat(80) + "\r");
@@ -341,6 +374,7 @@ async function callGeminiWithFallback(
       if (resp.status === 404) {
         // Endpoint shape mismatch. Never retryable on the same model —
         // fall through to the next tier immediately.
+        thisModelSawNonRegressionFailure = true;
         attempted.push(model);
         exhausted = true;
         break;
@@ -348,6 +382,7 @@ async function callGeminiWithFallback(
 
       // Retryable on same model: 429 (per-minute throttle) and 5xx.
       if (resp.status === 429 || resp.status >= 500) {
+        thisModelSawNonRegressionFailure = true;
         if (attempt < MAX_ATTEMPTS - 1) {
           const waitMs = PER_MODEL_RETRY_BACKOFF_MS[attempt];
           process.stderr.write("\r" + " ".repeat(80) + "\r");
@@ -376,6 +411,8 @@ async function callGeminiWithFallback(
         return { wav, model };
       } catch (consumeErr) {
         if (consumeErr instanceof EmptyAudioStreamError) {
+          // Deliberately do NOT set thisModelSawNonRegressionFailure here
+          // — pure regression is what we're trying to distinguish.
           if (attempt < MAX_ATTEMPTS - 1) {
             const waitMs = PER_MODEL_RETRY_BACKOFF_MS[attempt];
             process.stderr.write("\r" + " ".repeat(80) + "\r");
@@ -396,11 +433,23 @@ async function callGeminiWithFallback(
       }
     }
 
+    if (thisModelSawNonRegressionFailure) {
+      anyModelSawNonRegressionFailure = true;
+    }
+
     // Only continue to the next model if this one was marked exhausted
     // inside the retry loop. (A successful return above already exited.)
     if (!exhausted) break;
   }
 
+  // Distinguish the two failure modes so the caller can react correctly.
+  // If ANY model hit a real quota/5xx/network failure, the overall
+  // failure is plausibly quota-related — sleep until midnight PT makes
+  // sense. If EVERY model only ever saw empty-stream responses, the
+  // content itself is the problem and no amount of waiting fixes it.
+  if (!anyModelSawNonRegressionFailure && attempted.length > 0) {
+    throw new PersistentTextTokenRegression(attempted);
+  }
   throw new AllModelsQuotaExhausted(attempted);
 }
 
