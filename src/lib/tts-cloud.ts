@@ -16,6 +16,15 @@ let currentAudio: HTMLAudioElement | null = null;
 let currentResolve: (() => void) | null = null;
 let currentAbort: AbortController | null = null;
 
+// Monotonic token. stopCloudAudio() bumps it to invalidate anything
+// currently in flight; every playAudioBlob() captures the latest token
+// at entry and re-reads before calling audio.play(). If another caller
+// has bumped it since, this playback is stale and never starts.
+// Prevents the "two rapid taps both reach playAudioBlob, both start
+// audio.play() before the pause() from the second call catches the
+// first" race — which produces audible voice overlap on mobile.
+let playToken = 0;
+
 /** Get a new AbortSignal for a TTS fetch. Aborts any previous in-flight fetch. */
 export function getTTSAbortSignal(): AbortSignal {
   if (currentAbort) currentAbort.abort();
@@ -27,6 +36,11 @@ export function getTTSAbortSignal(): AbortSignal {
 export function playAudioBlob(blob: Blob): Promise<void> {
   return new Promise((resolve, reject) => {
     stopCloudAudio();
+    // After stopCloudAudio() (which bumped playToken to invalidate any
+    // prior call), claim the next token for this call. Anyone who
+    // bumps after this will be newer than us; we'll see it.
+    const myToken = ++playToken;
+
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
     currentAudio = audio;
@@ -34,21 +48,47 @@ export function playAudioBlob(blob: Blob): Promise<void> {
 
     audio.onended = () => {
       URL.revokeObjectURL(url);
-      currentAudio = null;
-      currentResolve = null;
+      if (currentAudio === audio) {
+        currentAudio = null;
+        currentResolve = null;
+      }
       resolve();
     };
     audio.onerror = () => {
       URL.revokeObjectURL(url);
-      currentAudio = null;
-      currentResolve = null;
+      if (currentAudio === audio) {
+        currentAudio = null;
+        currentResolve = null;
+      }
       reject(new Error("Cloud TTS audio playback failed"));
     };
 
+    // Final stale check just before actually starting playback. If
+    // another playAudioBlob() call bumped the token between our
+    // `++playToken` above and here, we're about to play a line the
+    // user already moved past — bail before the browser emits sound.
+    if (myToken !== playToken) {
+      URL.revokeObjectURL(url);
+      if (currentAudio === audio) {
+        currentAudio = null;
+        currentResolve = null;
+      }
+      resolve();
+      return;
+    }
+
     audio.play().catch((err) => {
       URL.revokeObjectURL(url);
-      currentAudio = null;
-      currentResolve = null;
+      if (currentAudio === audio) {
+        currentAudio = null;
+        currentResolve = null;
+      }
+      // Browser throws AbortError when we pause() a still-loading audio;
+      // that's expected during rapid-tap interruption, not a real error.
+      if (err instanceof DOMException && err.name === "AbortError") {
+        resolve();
+        return;
+      }
       reject(err);
     });
   });
@@ -56,6 +96,10 @@ export function playAudioBlob(blob: Blob): Promise<void> {
 
 /** Stop whatever cloud audio is currently playing and abort in-flight fetches. */
 export function stopCloudAudio(): void {
+  // Bump the token FIRST so any playAudioBlob() that is past its
+  // cache lookup but hasn't yet called audio.play() sees the bump
+  // and bails before starting playback.
+  playToken++;
   // Abort any in-flight TTS fetch so it doesn't start playback after we stop
   if (currentAbort) {
     currentAbort.abort();
