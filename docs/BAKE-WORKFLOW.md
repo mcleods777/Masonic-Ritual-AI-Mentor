@@ -31,13 +31,38 @@ If you hit Gemini's daily cap mid-bake, the script detects the tier drop, prompt
 
 ## The scripts
 
+**Primary bake pipeline:**
+
 | Script | Purpose |
 |--------|---------|
 | `scripts/build-mram-from-dialogue.ts` | Core builder — one ritual per invocation |
 | `scripts/bake-first-degree.ts` | Wrapper — runs all EA (1st degree) rituals back-to-back with one passphrase. Parallel FC / MM scripts will follow when those degrees are added. |
 | `scripts/render-gemini-audio.ts` | Internal — audio rendering pipeline (imported, not run directly) |
+| `scripts/build-mram.ts` | **Legacy** — single-file paired-text format (cipher + plain lines interleaved in one `.md`). Kept working for older ritual sources; new rituals should use `build-mram-from-dialogue.ts`. |
 
 The wrapper is what you'd normally use. The builder is what you reach for if you only have one ritual to rebuild.
+
+**Pre-bake validation:**
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/validate-rituals.ts` | Local-only integration check for `rituals/*-dialogue.md`. Verifies plain + cipher parse, structure parity, round-trip stability, reports speaker breakdowns. Not wired into CI (the plaintext files are gitignored) — run manually after editing either dialogue file. |
+
+**Post-bake inspection:**
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/verify-mram.ts` | Decrypt and validate a built `.mram` file. Reports format version, metadata, section + line count, role breakdown, checksum, and samples a few lines. Use to confirm a bake produced the file you expected before distributing. |
+| `scripts/list-ritual-lines.ts` | Print every line in a ritual with its MRAM id, role, cache status, and text. Use to match a problem audio line you heard back to its id, then invalidate + re-bake. Supports `--grep`, `--role`, `--uncached` filters. |
+
+**Post-bake maintenance:**
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/invalidate-mram-cache.ts` | Delete specific cache entries so the next bake re-renders just those lines. Use when you listened to the baked audio and heard one line you don't like — you don't want to nuke the whole cache. Takes `--lines 66,75,83` (ids from `list-ritual-lines.ts`), supports dry-run by default. |
+| `scripts/rotate-mram-passphrase.ts` | Re-encrypt one or more `.mram` files with a new passphrase. Use when the old passphrase has leaked or you want to rotate on a schedule. Content bytes (including embedded audio) are preserved; fresh random salt + IV per file so the old ciphertext can't be re-used. Supports `MRAM_OLD_PASSPHRASE` + `MRAM_NEW_PASSPHRASE` env vars for CI. |
+
+See the header comment of each script for complete flags, examples, and gotchas.
 
 ---
 
