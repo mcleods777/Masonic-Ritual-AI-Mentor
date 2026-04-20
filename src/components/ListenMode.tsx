@@ -12,7 +12,7 @@ import {
   type RoleVoiceProfile,
 } from "@/lib/text-to-speech";
 import { playGavelKnocks, countGavelMarks, warmAudioContext } from "@/lib/gavel-sound";
-import GeminiPreloadPanel from "./GeminiPreloadPanel";
+import { preloadGeminiRitual } from "@/lib/tts-cloud";
 
 interface ListenModeProps {
   sections: RitualSectionWithCipher[];
@@ -249,12 +249,42 @@ export default function ListenMode({ sections }: ListenModeProps) {
     };
   }, []);
 
+  // Silent on-mount preload of any lines that lack baked audio. Fires
+  // 2.5s after mount so it doesn't race with a user who immediately
+  // taps play on line 1 (which would otherwise double-POST the same
+  // cache key). preloadGeminiRitual internally skips cache hits, so
+  // repeat mounts are cheap. Errors are swallowed end-to-end.
+  useEffect(() => {
+    let abortFn: (() => void) | null = null;
+    let cancelled = false;
+
+    const timeoutId = window.setTimeout(() => {
+      if (cancelled) return;
+      try {
+        const gapLines = sections
+          .filter((s) => s.speaker && !s.audio && cleanRitualText(s.text).length > 0)
+          .map((s) => ({
+            text: cleanRitualText(s.text),
+            role: s.speaker,
+            style: s.style,
+          }));
+        if (gapLines.length === 0) return;
+        const { abort } = preloadGeminiRitual(gapLines, undefined, 250);
+        abortFn = abort;
+      } catch (err) {
+        console.warn("[tts-gap] silent preload setup failed", err);
+      }
+    }, 2500);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+      if (abortFn) abortFn();
+    };
+  }, [sections]);
+
   return (
     <div className="space-y-4">
-      {/* Gemini audio preload panel — visible only when Gemini is the
-          selected engine. Shared with RehearsalMode. */}
-      <GeminiPreloadPanel sections={sections} />
-
       {/* Header */}
       <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-5">
         <div className="flex items-center justify-between mb-3">

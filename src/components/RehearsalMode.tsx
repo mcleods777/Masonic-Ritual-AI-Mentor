@@ -26,8 +26,7 @@ import {
   type RoleVoiceProfile,
 } from "@/lib/text-to-speech";
 import { playGavelKnocks, countGavelMarks, warmAudioContext } from "@/lib/gavel-sound";
-import { VOXTRAL_ROLE_OPTIONS } from "@/lib/tts-cloud";
-import GeminiPreloadPanel from "./GeminiPreloadPanel";
+import { VOXTRAL_ROLE_OPTIONS, preloadGeminiRitual } from "@/lib/tts-cloud";
 import {
   decideLineAction,
   planComparisonAction,
@@ -767,13 +766,44 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
     };
   }, []);
 
+  // Silent on-mount preload of any lines that lack baked audio. Fires
+  // 2.5s after mount so it doesn't race with a user who immediately
+  // starts rehearsing (which would otherwise double-POST the same
+  // cache key). preloadGeminiRitual internally skips cache hits, so
+  // repeat mounts and Listen/Rehearsal switches are cheap. Errors are
+  // swallowed end-to-end.
+  useEffect(() => {
+    let abortFn: (() => void) | null = null;
+    let cancelled = false;
+
+    const timeoutId = window.setTimeout(() => {
+      if (cancelled) return;
+      try {
+        const gapLines = sections
+          .filter((s) => s.speaker && !s.audio && cleanRitualText(s.text).length > 0)
+          .map((s) => ({
+            text: cleanRitualText(s.text),
+            role: s.speaker,
+            style: s.style,
+          }));
+        if (gapLines.length === 0) return;
+        const { abort } = preloadGeminiRitual(gapLines, undefined, 250);
+        abortFn = abort;
+      } catch (err) {
+        console.warn("[tts-gap] silent preload setup failed", err);
+      }
+    }, 2500);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+      if (abortFn) abortFn();
+    };
+  }, [sections]);
+
   // ============================================================
   // RENDER
   // ============================================================
-
-  // Gemini preload panel — shared component with ListenMode. Renders
-  // null when the engine isn't Gemini.
-  const preloadPanel = <GeminiPreloadPanel sections={sections} />;
 
   // Setup: pick a role
   if (rehearsalState === "setup") {
@@ -949,7 +979,6 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
                 )}
               </div>
 
-              {preloadPanel && <div className="mt-6">{preloadPanel}</div>}
             </div>
           )}
         </div>
@@ -1053,10 +1082,6 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   // Active rehearsal (ai-speaking, user-turn, listening, transcribing, checking)
   return (
     <div className="space-y-4">
-      {/* Gemini preload panel — persistent during active rehearsal so the
-          user can kick off a preload or check progress any time. */}
-      {preloadPanel}
-
       {/* TTS fallback toast */}
       {ttsToast && (
         <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3 flex items-center justify-between">

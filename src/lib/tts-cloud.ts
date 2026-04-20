@@ -1135,7 +1135,7 @@ async function blobToBase64(blob: Blob): Promise<string> {
  */
 export async function speakGemini(
   text: string,
-  options: { style?: string; voice?: string; embeddedAudio?: string } = {}
+  options: { style?: string; voice?: string; embeddedAudio?: string; role?: string } = {}
 ): Promise<void> {
   const voice = options.voice ?? "Kore";
 
@@ -1161,6 +1161,18 @@ export async function speakGemini(
 
   const signal = getTTSAbortSignal();
   if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+
+  // Observability: baked audio is missing AND cache is cold, so we're
+  // about to hit the live /api/tts/gemini route. That's a bake gap.
+  // Users won't see anything (playback still proceeds), but you'll see
+  // these in devtools when debugging why a user had latency spikes.
+  console.warn("[tts-gap]", {
+    role: options.role ?? null,
+    voice,
+    style: options.style ?? null,
+    textPreview: text.slice(0, 60),
+    reason: "no-baked-audio",
+  });
 
   // Retry transient failures (429 rate-limit, 5xx). Mirrors the Voxtral
   // route's retry policy. Prevents mid-ritual fallback when Gemini
@@ -1245,6 +1257,7 @@ export async function speakGeminiAsRole(
     voice: getGeminiVoiceForRole(role),
     style,
     embeddedAudio,
+    role,
   });
 }
 
