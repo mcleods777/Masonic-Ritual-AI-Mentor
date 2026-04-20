@@ -564,7 +564,15 @@ async function encodeWavToOpus(wav: Buffer): Promise<Buffer> {
 // Cache key + WAV helpers
 // ============================================================
 
-function computeCacheKey(
+/**
+ * Canonical cache key computation. Exported so external tools
+ * (invalidate-mram-cache.ts, diagnostic scripts) produce IDENTICAL
+ * keys to the bake path — any drift between the two would mean the
+ * invalidation tool misses the entry or deletes the wrong one.
+ * Keep this in sync with any cache-layout changes; bump
+ * CACHE_KEY_VERSION on structural changes.
+ */
+export function computeCacheKey(
   text: string,
   style: string | undefined,
   voice: string,
