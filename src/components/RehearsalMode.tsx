@@ -27,6 +27,7 @@ import {
 } from "@/lib/text-to-speech";
 import { playGavelKnocks, countGavelMarks, warmAudioContext } from "@/lib/gavel-sound";
 import { VOXTRAL_ROLE_OPTIONS, preloadGeminiRitual } from "@/lib/tts-cloud";
+import { keepScreenAwake, allowScreenSleep } from "@/lib/screen-wake-lock";
 import {
   decideLineAction,
   planComparisonAction,
@@ -763,8 +764,23 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
         engineRef.current.stop();
       }
       stopSpeaking();
+      void allowScreenSleep();
     };
   }, []);
+
+  // Keep the screen awake while the rehearsal is live. Covers every
+  // active state (AI speaking, user's turn, listening, checking, etc.)
+  // but lets the screen sleep during setup and after completion.
+  useEffect(() => {
+    const active = rehearsalState !== "setup"
+      && rehearsalState !== "ready"
+      && rehearsalState !== "complete";
+    if (active) {
+      void keepScreenAwake();
+    } else {
+      void allowScreenSleep();
+    }
+  }, [rehearsalState]);
 
   // Silent on-mount preload of any lines that lack baked audio. Fires
   // 2.5s after mount so it doesn't race with a user who immediately

@@ -13,6 +13,7 @@ import {
 } from "@/lib/text-to-speech";
 import { playGavelKnocks, countGavelMarks, warmAudioContext } from "@/lib/gavel-sound";
 import { preloadGeminiRitual } from "@/lib/tts-cloud";
+import { keepScreenAwake, allowScreenSleep } from "@/lib/screen-wake-lock";
 
 interface ListenModeProps {
   sections: RitualSectionWithCipher[];
@@ -246,8 +247,19 @@ export default function ListenMode({ sections }: ListenModeProps) {
         resumeRef.current();
       }
       stopSpeaking();
+      void allowScreenSleep();
     };
   }, []);
+
+  // Keep the screen awake while the ritual is playing. Browsers release
+  // the lock on tab-hide; the wake-lock module re-acquires on visible.
+  useEffect(() => {
+    if (playState === "playing") {
+      void keepScreenAwake();
+    } else {
+      void allowScreenSleep();
+    }
+  }, [playState]);
 
   // Silent on-mount preload of any lines that lack baked audio. Fires
   // 2.5s after mount so it doesn't race with a user who immediately

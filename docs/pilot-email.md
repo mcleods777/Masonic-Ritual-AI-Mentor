@@ -24,6 +24,147 @@ missed.
 Everything runs privately. Your ritual file is encrypted, decrypted on your
 own device, and never stored on a server.
 
+## What has changed in the last week
+
+If you have been tracking this pilot since Tuesday, April 14, here is the
+running summary of what shipped between then and today. If you are new to
+the pilot, skip to the next section — everything below is already in effect
+when you open the app for the first time.
+
+### Sign-in, landing page, and install (April 15)
+
+- **Magic-link sign-in.** Type your lodge email, receive a one-tap link,
+  remembered for thirty days on that device. No passwords to lose, no
+  shared credentials. The lodge's roster of approved emails is the only
+  gate.
+- **Installable as an app.** On iPhone or Android, the pilot site can be
+  installed to the home screen and opens in its own window, icon and all.
+  Full instructions in the install guide below.
+- **Mobile navigation tightened** so six sections fit cleanly across the
+  bottom bar on a phone, and "How It Works" now appears on mobile where
+  it previously only showed on desktop.
+
+### Pilot invitation email itself (April 16)
+
+- This email was written, published to the repository, and rendered as
+  HTML with the landing-page screenshots and two inline diagrams (the
+  sign-in flow and the data-flow map). Both diagrams have been revised
+  since the first draft.
+
+### Gemini 3.1 Flash TTS became the default voice (April 18)
+
+The single biggest change of the week. Google released **Gemini 3.1 Flash
+TTS** on April 15, and it went in as the app's default voice engine three
+days later after end-to-end testing.
+
+- **Expressive delivery.** Inline audio tags in the ritual text ([slow],
+  [solemn], [whispered]) steer cadence, weight, and emotion mid-sentence.
+  The work reads the way the work is meant to be heard, not as a flat
+  recitation.
+- **Three-model fallback chain.** When the daily quota on the preview
+  model fills up, playback silently falls through to two older Gemini
+  models so a rehearsal never dies mid-ritual. You may hear a slightly
+  different voice on a late-evening practice — that is the fallback
+  working.
+- **SSE streaming fixes.** Several rounds of plumbing work to make
+  streamed audio arrive cleanly across browsers, including WAV header
+  patching and a CRLF-tolerant SSE parser (Chrome and Edge were
+  truncating streamed audio before these landed).
+- **Voxtral voices restored as a fallback pool.** Fifteen character
+  voices come pre-loaded for any officer role that has no custom
+  recording yet, so every role has something to say from the first
+  click.
+- **CSP fix so the Masonic typography loads.** Cinzel (headings) and
+  Cormorant Garamond (body) are now allowed through the content
+  security policy on mobile; before the fix, some devices fell back to
+  a default system font.
+
+### Voxtral voice cloning — better prompts, smarter caching (April 19)
+
+- **Longer, generic prompts** replaced short ritual phrases in the
+  voice-clone training samples. Short phrases were producing cloned
+  voices that sounded stilted on long passages. The new samples
+  produce noticeably more natural clones.
+- **Ceremony-order prefetch.** When you assign a recorded voice to an
+  officer, the app now pre-renders that voice's lines in the order the
+  ritual will actually hit them, so the first few lines you hear are
+  always cache-hot. No more awkward first-line pause while the clone
+  warms up.
+- **Cache + role-assignment flow** generally tightened. The Junior
+  Warden default voice was also swapped from *Puck* to *Enceladus* for
+  a better match to the chair.
+
+### Audio baked into the ritual file at build time (April 19–20)
+
+This is the architectural shift the whole week has been pointing toward.
+Until now, every officer line was synthesized live by calling Google's
+TTS API from your browser while you rehearsed. Starting this week, the
+ritual audio is **pre-rendered into the `.mram` file itself** at build
+time on my machine.
+
+What that means for you:
+
+- **Near-zero runtime API calls.** Ninety-five-plus percent of lines
+  play instantly from the encrypted ritual file the moment the app
+  loads them. No round-trip to Google, no cold-start pause, no quota
+  risk during rehearsal.
+- **Tier 1 + Tier 2 expressive prompting.** Each line is baked with
+  full directorial context — mood, cadence, preceding line — so the
+  cloud-rendered performance is the best Gemini can currently produce,
+  not a first-draft quick read.
+- **Overnight bake mode.** The build pipeline can now pause and wait
+  out a Gemini quota exhaustion instead of failing — perfect for a
+  full three-degree bake that takes hours.
+- **Quality-tier drop detection.** If Gemini silently drops from
+  preview to a weaker fallback model mid-bake, the pipeline catches
+  it and stops for confirmation rather than stitching a mixed-quality
+  ritual together.
+- **Canonical bake workflow documented** in the repository so the
+  process is reproducible, not tribal knowledge.
+
+### Engineering tools for ritual file maintenance (April 20)
+
+Four small scripts were added to maintain encrypted ritual files over
+time without touching the web app:
+
+- `rotate-mram-passphrase.ts` — change the password on an existing
+  `.mram` file.
+- `invalidate-mram-cache.ts` — force a re-bake of a specific line
+  after editing or re-recording.
+- `list-ritual-lines.ts` — list every line in a ritual file with its
+  cache / bake / skip status.
+- `validate-rituals.ts` — now auto-discovers every dialogue pair in
+  the `rituals/` directory so adding a new ritual does not require
+  editing the validation script.
+
+None of these are user-facing, but they are the reason ritual files
+can now evolve safely after they are distributed.
+
+### Practice page UI simplified (April 20 — today)
+
+With baked audio as the default, the old seven-engine voice dropdown
+and the "Preload audio" button on the practice page were no longer
+doing useful work for the rehearser. Both have been removed. The app
+now plays the baked Gemini audio by default and applies any custom
+Voxtral voice you have recorded as a per-role override. Missing lines
+(ultra-short filler phrases the bake intentionally skips) are warmed
+silently in the background a couple of seconds after the page loads.
+
+If you open the pilot today, the first thing you will notice is that
+the practice header is cleaner — a title, a subtitle, and the document
+selector when you have more than one ritual. The mode toggle
+(Rehearsal / Listen) sits below, and that is it.
+
+### Miscellaneous fixes (April 14–18)
+
+- **Rehearsal "jump to line" now respects your selected role** instead
+  of silently switching to whichever role owned the line you jumped
+  to.
+- **Voice cards show a "Default" badge** instead of rendering the Unix
+  epoch (12/31/1969) for voices that never had a custom upload date.
+- **Ritual review tool + auth hardening** shipped together on April 18
+  in the same PR that introduced Gemini as the default engine.
+
 ## About the front page — why it looks the way it does
 
 When you open the pilot URL, the first thing you see is a dark landing
