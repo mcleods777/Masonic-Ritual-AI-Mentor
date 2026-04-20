@@ -418,6 +418,26 @@ async function bakeAudioIntoDoc(
     }
   }
 
+  // Short-utterance preamble skip. Gemini TTS's classifier can mis-route
+  // very short transcripts surrounded by long director's-notes preamble
+  // as "respond to the instructions in text" instead of "generate audio
+  // for the transcript." Observed on lines like "Of an Entered
+  // Apprentice." (25 chars) — three retries all returned empty audio
+  // streams because the preamble:content ratio was ~16:1.
+  //
+  // Short catechism lines ("So mote it be.", "In the East.", "B.", "O.")
+  // don't benefit from character pinning anyway — there's not enough
+  // audio to carry the direction. Fall back to the lightweight
+  // [style] text format for anything under the threshold.
+  //
+  // Configurable via VOICE_CAST_MIN_LINE_CHARS env var so the user can
+  // tune without a code change. Default 40 chars covers the catechism
+  // section of Masonic rituals while keeping every full-sentence line
+  // on the premium preamble path.
+  const MIN_PREAMBLE_LINE_CHARS = Number(
+    process.env.VOICE_CAST_MIN_LINE_CHARS ?? "40",
+  );
+
   // Preferred model is the first entry of the fallback chain — either
   // the env override (GEMINI_TTS_MODELS, first comma-separated value)
   // or the hardcoded 3.1-flash default. Any rendered line that used a
@@ -436,9 +456,20 @@ async function bakeAudioIntoDoc(
   console.error(`  On all-models-429: sleep until midnight PT, auto-resume`);
   console.error(`  On quality-tier drop: ${fallbackMode} (--on-fallback=${fallbackMode})`);
   if (rolesWithPreamble.length > 0) {
+    const shortLines = spokenLines.filter(
+      (l) => l.plain.trim().length < MIN_PREAMBLE_LINE_CHARS,
+    ).length;
     console.error(
       `  Voice-cast preamble: ${rolesWithPreamble.length} role(s) — ${rolesWithPreamble.join(", ")}`,
     );
+    if (shortLines > 0) {
+      console.error(
+        `  Short-line skip: ${shortLines} line(s) under ${MIN_PREAMBLE_LINE_CHARS} chars will use [style] text without preamble`,
+      );
+      console.error(
+        `  (tune VOICE_CAST_MIN_LINE_CHARS env var to change the threshold)`,
+      );
+    }
   } else if (voiceCast) {
     console.error(`  Voice-cast loaded but contained no usable role cards.`);
   } else {
@@ -473,7 +504,13 @@ async function bakeAudioIntoDoc(
     // leave a single degraded line cached that silently hits on re-run.
     let thisLineCacheKey: string | undefined;
 
-    const preamble = preambleByRole[line.role] ?? "";
+    // Skip the preamble for utterances too short to carry character
+    // direction — the preamble:content ratio confuses Gemini's
+    // classifier and causes empty-audio-stream regressions.
+    const preamble =
+      cleanText.length >= MIN_PREAMBLE_LINE_CHARS
+        ? preambleByRole[line.role] ?? ""
+        : "";
 
     try {
       const opus = await renderLineAudio(
@@ -549,7 +586,12 @@ async function bakeAudioIntoDoc(
         // on the preferred model. Delete it so the re-run produces a
         // uniform premium bake.
         const handleAbort = (reason: string) => {
-          const rendered_on_premium = (modelTally[preferredModel] ?? 0);
+          const renderedOnPremium = modelTally[preferredModel] ?? 0;
+          // Cache hits may be either premium-tier entries from prior
+          // runs OR any tier (the cache key doesn't record provenance).
+          // We count them separately so the user sees the total
+          // preserved work, not just what rendered fresh this run.
+          const preservedTotal = renderedOnPremium + cacheHits;
           const deleted = thisLineCacheKey
             ? deleteCacheEntry(thisLineCacheKey)
             : false;
@@ -559,15 +601,27 @@ async function bakeAudioIntoDoc(
               `   Removed the just-rendered fallback-tier cache entry for line ${line.id}.`,
             );
           }
-          console.error(
-            `   ${rendered_on_premium} line(s) already rendered on ${preferredModel}`,
-          );
-          console.error(
-            `   remain cached. Re-run after midnight PT — cached lines skip the API,`,
-          );
-          console.error(
-            `   only line ${line.id} onward renders fresh on the preferred tier.`,
-          );
+          if (preservedTotal > 0) {
+            const parts: string[] = [];
+            if (renderedOnPremium > 0)
+              parts.push(`${renderedOnPremium} rendered on ${preferredModel} this run`);
+            if (cacheHits > 0)
+              parts.push(`${cacheHits} cache hit(s) from prior run(s)`);
+            console.error(`   ${preservedTotal} line(s) preserved (${parts.join(", ")}).`);
+            console.error(
+              `   Re-run after midnight PT — cached lines skip the API, only line`,
+            );
+            console.error(
+              `   ${line.id} onward renders fresh on the preferred tier.`,
+            );
+          } else {
+            console.error(
+              `   No lines rendered this run before the tier drop. Re-run after`,
+            );
+            console.error(
+              `   midnight PT to start fresh on the preferred model.`,
+            );
+          }
           console.error("");
           process.exit(2);
         };
