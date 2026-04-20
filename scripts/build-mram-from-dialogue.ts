@@ -43,7 +43,11 @@ import { parseDialogue } from "../src/lib/dialogue-format";
 import { buildFromDialogue } from "../src/lib/dialogue-to-mram";
 import type { MRAMDocument } from "../src/lib/mram-format";
 import { GEMINI_ROLE_VOICES, getGeminiVoiceForRole } from "../src/lib/tts-cloud";
-import { renderLineAudio, deleteCacheEntry } from "./render-gemini-audio";
+import {
+  renderLineAudio,
+  deleteCacheEntry,
+  isLineCached,
+} from "./render-gemini-audio";
 import {
   buildPreamble,
   validateVoiceCast,
@@ -528,6 +532,36 @@ async function bakeAudioIntoDoc(
   } else {
     console.error(
       `  Voice-cast: none (drop a {slug}-voice-cast.json next to the dialogue for richer delivery)`,
+    );
+  }
+
+  // Pre-bake cache scan. Count how many spoken lines will cache-hit
+  // vs need a fresh render. Gives the user immediate resume visibility:
+  // "you restarted a bake that's already 78/112 cached, only 34 lines
+  // left to render" — rather than discovering it over the next 5
+  // minutes as the progress bar crawls.
+  let preCached = 0;
+  let preToRender = 0;
+  for (const line of spokenLines) {
+    const voice = getGeminiVoiceForRole(line.role);
+    const cleanText = line.plain.trim();
+    const preamble =
+      cleanText.length >= MIN_PREAMBLE_LINE_CHARS
+        ? preambleByRole[line.role] ?? ""
+        : "";
+    if (isLineCached(cleanText, line.style, voice, preamble)) {
+      preCached++;
+    } else {
+      preToRender++;
+    }
+  }
+  const preCachedPct = total > 0 ? Math.round((preCached / total) * 100) : 0;
+  console.error(
+    `  Cache status: ${preCached}/${total} already cached (${preCachedPct}%), ${preToRender} to render fresh`,
+  );
+  if (preCached > 0 && preToRender === 0) {
+    console.error(
+      `  Fully cached — this bake will re-emit the same audio with zero API calls.`,
     );
   }
   console.error("");

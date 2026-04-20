@@ -173,6 +173,28 @@ export function deleteCacheEntry(cacheKey: string, cacheDir?: string): boolean {
   return false;
 }
 
+/**
+ * Check if a given line is already cached without triggering an API
+ * call. Mirrors the cache key computation in renderLineAudio so the
+ * pre-bake cache scan reports accurately. The `preamble` argument
+ * must match what the bake will actually pass at render time —
+ * typically the per-role voice-cast preamble when the line is long
+ * enough to use it, or empty string when the line is short or the
+ * voice-cast is missing.
+ */
+export function isLineCached(
+  text: string,
+  style: string | undefined,
+  voice: string,
+  preamble: string = "",
+  cacheDir?: string,
+): boolean {
+  const dir = cacheDir ?? CACHE_DIR;
+  const cacheKey = computeCacheKey(text, style, voice, preamble);
+  const cachePath = path.join(dir, `${cacheKey}.opus`);
+  return fs.existsSync(cachePath);
+}
+
 // ============================================================
 // Gemini API call with 3-model fallback
 // ============================================================
@@ -588,5 +610,61 @@ async function sleepUntilMidnightPT(): Promise<void> {
   const until = nextMidnightPT();
   const ms = until.getTime() - Date.now();
   if (ms <= 0) return;
-  await new Promise((r) => setTimeout(r, ms + 30_000)); // +30s slack
+
+  const plannedWakeUtc = new Date(until.getTime() + 30_000); // +30s slack
+  const hoursToSleep = (ms + 30_000) / 3_600_000;
+
+  const ptFmt = (d: Date) =>
+    d.toLocaleString("en-US", {
+      timeZone: "America/Los_Angeles",
+      dateStyle: "short",
+      timeStyle: "short",
+    });
+
+  process.stderr.write("\r" + " ".repeat(80) + "\r");
+  console.error(
+    `\n  Sleeping until quota reset. Planned wake: ${ptFmt(plannedWakeUtc)} PT (~${hoursToSleep.toFixed(1)}h from now).`,
+  );
+  console.error(
+    `  IMPORTANT: keep this machine awake through the sleep — OS suspend will freeze the timer.`,
+  );
+  console.error(
+    `    WSL/Windows: Settings → Power → 'Never' when plugged in, and keep Windows from sleeping.`,
+  );
+  console.error(
+    `    macOS:       prefix the command with 'caffeinate -i'.`,
+  );
+  console.error(
+    `    Linux:       systemd-inhibit --what=sleep npx tsx scripts/...\n`,
+  );
+
+  await new Promise((r) => setTimeout(r, ms + 30_000));
+
+  // Drift check: if setTimeout returned MUCH later than scheduled, the
+  // process was almost certainly suspended (laptop sleep, WSL VM pause).
+  // Quota may not be fresh yet — worth flagging so the user doesn't
+  // assume "we slept past midnight = quota is reset for sure."
+  const actualWake = new Date();
+  const driftMs = actualWake.getTime() - plannedWakeUtc.getTime();
+  const DRIFT_THRESHOLD_MS = 10 * 60 * 1000; // 10 min
+
+  if (driftMs > DRIFT_THRESHOLD_MS) {
+    const driftMin = Math.round(driftMs / 60_000);
+    console.error(
+      `\n  ⚠  Wake time drift: ${driftMin} min late (planned ${ptFmt(plannedWakeUtc)} PT, actual ${ptFmt(actualWake)} PT).`,
+    );
+    console.error(
+      `     The process was probably suspended during the sleep (OS/WSL).`,
+    );
+    console.error(
+      `     Quota should still be reset since midnight PT has passed, but if the`,
+    );
+    console.error(
+      `     first retry 429s, the script will sleep again for the next midnight.\n`,
+    );
+  } else {
+    console.error(
+      `\n  Woke at ${ptFmt(actualWake)} PT. Resuming bake on the preferred model.\n`,
+    );
+  }
 }
