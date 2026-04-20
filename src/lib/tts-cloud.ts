@@ -32,23 +32,30 @@ export function playAudioBlob(blob: Blob): Promise<void> {
     currentAudio = audio;
     currentResolve = resolve;
 
-    audio.onended = () => {
+    // Ownership-guarded cleanup: only null the module-level refs if THIS
+    // audio is still the current one. Without these guards, a stale
+    // handler from a previous playAudioBlob (whose .play() promise is
+    // still settling when the next one starts) would wipe the new
+    // audio's reference — leaving audio playing that stopCloudAudio()
+    // can no longer find, which is how "voices keep playing and Stop
+    // doesn't stop them" manifests.
+    const cleanup = () => {
       URL.revokeObjectURL(url);
-      currentAudio = null;
-      currentResolve = null;
+      if (currentAudio === audio) currentAudio = null;
+      if (currentResolve === resolve) currentResolve = null;
+    };
+
+    audio.onended = () => {
+      cleanup();
       resolve();
     };
     audio.onerror = () => {
-      URL.revokeObjectURL(url);
-      currentAudio = null;
-      currentResolve = null;
+      cleanup();
       reject(new Error("Cloud TTS audio playback failed"));
     };
 
     audio.play().catch((err) => {
-      URL.revokeObjectURL(url);
-      currentAudio = null;
-      currentResolve = null;
+      cleanup();
       reject(err);
     });
   });
@@ -62,9 +69,16 @@ export function stopCloudAudio(): void {
     currentAbort = null;
   }
   if (currentAudio) {
-    currentAudio.pause();
-    currentAudio.src = "";
+    const audio = currentAudio;
     currentAudio = null;
+    // Detach event handlers BEFORE pause/src="" so the teardown doesn't
+    // trigger onerror, which would re-enter cleanup and fire reject on
+    // the playAudioBlob promise after we've already resolved it via
+    // currentResolve below.
+    audio.onended = null;
+    audio.onerror = null;
+    audio.pause();
+    audio.src = "";
   }
   // Resolve the pending playAudioBlob promise so callers (e.g. the
   // playFrom loop) don't hang forever waiting for audio that was stopped.
