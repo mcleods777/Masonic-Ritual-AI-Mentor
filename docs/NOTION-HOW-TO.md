@@ -486,7 +486,7 @@ Per-line Opus bytes are cached at `~/.cache/masonic-mram-audio/` so interrupted 
 ### Convenience wrapper — all 3 EA rituals
 
 ```bash
-GOOGLE_GEMINI_API_KEY=... npx tsx scripts/bake-ea-rituals.ts \
+GOOGLE_GEMINI_API_KEY=... npx tsx scripts/bake-first-degree.ts \
   [--on-fallback=ask|continue|abort]
 ```
 

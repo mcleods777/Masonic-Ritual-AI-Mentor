@@ -22,7 +22,7 @@ npx tsx scripts/build-mram-from-dialogue.ts \
 Bake all three EA rituals with one passphrase prompt:
 
 ```bash
-GOOGLE_GEMINI_API_KEY=AIza... npx tsx scripts/bake-ea-rituals.ts
+GOOGLE_GEMINI_API_KEY=AIza... npx tsx scripts/bake-first-degree.ts
 ```
 
 If you hit Gemini's daily cap mid-bake, the script detects the tier drop, prompts you, and on abort deletes the contaminated cache entry so your re-run after midnight PT produces a uniform premium bake.
@@ -34,7 +34,7 @@ If you hit Gemini's daily cap mid-bake, the script detects the tier drop, prompt
 | Script | Purpose |
 |--------|---------|
 | `scripts/build-mram-from-dialogue.ts` | Core builder — one ritual per invocation |
-| `scripts/bake-ea-rituals.ts` | Wrapper — runs all 3 EA rituals back-to-back with a single passphrase prompt |
+| `scripts/bake-first-degree.ts` | Wrapper — runs all EA (1st degree) rituals back-to-back with one passphrase. Parallel FC / MM scripts will follow when those degrees are added. |
 | `scripts/render-gemini-audio.ts` | Internal — audio rendering pipeline (imported, not run directly) |
 
 The wrapper is what you'd normally use. The builder is what you reach for if you only have one ritual to rebuild.
@@ -166,10 +166,10 @@ Usage: npx tsx scripts/build-mram-from-dialogue.ts \
 
 ---
 
-## CLI flags — `bake-ea-rituals.ts`
+## CLI flags — `bake-first-degree.ts`
 
 ```
-Usage: GOOGLE_GEMINI_API_KEY=... npx tsx scripts/bake-ea-rituals.ts \
+Usage: GOOGLE_GEMINI_API_KEY=... npx tsx scripts/bake-first-degree.ts \
   [--on-fallback=ask|continue|abort]
 ```
 
@@ -321,7 +321,7 @@ Just re-run with `--with-audio`. Edited lines re-render; unchanged lines cache-h
 ### Fresh nightly bake of all 3 EA rituals
 
 ```bash
-GOOGLE_GEMINI_API_KEY=AIza... npx tsx scripts/bake-ea-rituals.ts
+GOOGLE_GEMINI_API_KEY=AIza... npx tsx scripts/bake-first-degree.ts
 ```
 
 Enter passphrase once. Walk away. ~25-30 min cold; near-instant if you're just rebuilding from cache.
@@ -351,7 +351,7 @@ Enter passphrase once. Walk away. ~25-30 min cold; near-instant if you're just r
 | 1 | Build failure — missing files, invalid args, passphrase problem, etc. |
 | 2 | User (or `--on-fallback=abort`) aborted on a quality-tier drop. Cache is preserved and cleaned; re-running after quota reset produces a uniform premium bake. |
 
-The wrapper `bake-ea-rituals.ts` propagates exit 2 from any child. CI pipelines can distinguish "bake failed" (1) from "user chose to wait for quota" (2).
+The wrapper `bake-first-degree.ts` propagates exit 2 from any child. CI pipelines can distinguish "bake failed" (1) from "user chose to wait for quota" (2).
 
 ---
 

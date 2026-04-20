@@ -200,7 +200,7 @@ Audio bake complete:
 **Convenience wrapper for the full EA degree:**
 
 ```bash
-GOOGLE_GEMINI_API_KEY=... npx tsx scripts/bake-ea-rituals.ts [--on-fallback=ask|continue|abort]
+GOOGLE_GEMINI_API_KEY=... npx tsx scripts/bake-first-degree.ts [--on-fallback=ask|continue|abort]
 ```
 
 Runs ea-opening, ea-initiation, and ea-closing back-to-back with a single passphrase prompt. Skips any ritual whose source dialogue files aren't present. Use `BAKE_SKIP=ea-closing` to exclude specific rituals. `--on-fallback` is passed through to each child build — if you choose abort (or the default prompt picks abort), the wrapper halts the whole sequence rather than producing a degraded second/third ritual. Total wall time ~25-30 minutes when the cache is cold; near-instant when fully cached.
@@ -314,7 +314,7 @@ rituals/                                  # Local-only — ritual source files (
 scripts/
 ├── build-mram.ts                        # CLI: build .mram files from paired markdown
 ├── build-mram-from-dialogue.ts          # CLI: build .mram from dialogue + cipher + styles + optional pre-rendered Gemini audio
-├── bake-ea-rituals.ts                   # CLI: bake all 3 EA rituals back-to-back with one passphrase prompt
+├── bake-first-degree.ts                   # CLI: bake all EA (1st degree) rituals back-to-back with one passphrase prompt
 ├── render-gemini-audio.ts               # Opus rendering pipeline (Gemini SSE → ffmpeg → cache)
 └── benchmark-tts.ts                     # TTS engine benchmark (TTFB + total response time)
 ```
@@ -443,7 +443,7 @@ Shannon McLeod, a Freemason who got tired of practicing ritual by reading from a
 - **Mar 2026** — Switched AI feedback from Claude Haiku to Llama 3.3 on Groq (faster, free tier). Added Voxtral voice cloning. Reduced TTS latency with streaming.
 - **Apr 2026** — Design review (C+ → B+ design score), mobile-first redesign, voice export/import, TTS benchmark tooling, dead voice model cleanup. Pretext-powered interactive landing page with Masonic symbols and real-time text reflow. Pre-baked default voices (7 male Aura-2). Feedback voice selector in rehearsal mode.
 - **Apr 18, 2026** — Ritual review tool at `/author` (local-only side-by-side editor with shared client/server validation). Gemini 3.1 Flash TTS becomes the default engine, with a 3-model fallback chain inside the route (3.1-flash → 2.5-flash → 2.5-pro) so preview-tier daily caps don't break playback. Magic-link auth + pilot allowlist + per-IP / per-email rate limiting. Strict CSP and security headers. 15 default Voxtral character voices repurposed as the unassigned fallback pool — they sit there for the Voxtral fallback path and users can assign one to a role anytime.
-- **Apr 19, 2026** — Audio bake-in at build time. `scripts/build-mram-from-dialogue.ts --with-audio` renders every spoken line via Gemini 3.1 Flash TTS, Opus-encodes at 32 kbps mono, and embeds the bytes in the encrypted .mram. Brothers receiving a baked file hit zero Gemini API calls per rehearsal — audio plays from the file, not the network. Single-passphrase wrapper `scripts/bake-ea-rituals.ts` bakes all three EA rituals back-to-back. Voice recording prompts rewritten to 10 generic prose passages (no ritual content) so Brothers capture a real prosodic range without exposing ritual. CSP fix to allow Google Fonts (Cinzel + Cormorant Garamond load on pilot devices). Voice cards show a "Default" badge instead of the 12/31/1969 epoch date.
+- **Apr 19, 2026** — Audio bake-in at build time. `scripts/build-mram-from-dialogue.ts --with-audio` renders every spoken line via Gemini 3.1 Flash TTS, Opus-encodes at 32 kbps mono, and embeds the bytes in the encrypted .mram. Brothers receiving a baked file hit zero Gemini API calls per rehearsal — audio plays from the file, not the network. Single-passphrase wrapper `scripts/bake-first-degree.ts` bakes all three EA rituals back-to-back. Voice recording prompts rewritten to 10 generic prose passages (no ritual content) so Brothers capture a real prosodic range without exposing ritual. CSP fix to allow Google Fonts (Cinzel + Cormorant Garamond load on pilot devices). Voice cards show a "Default" badge instead of the 12/31/1969 epoch date.
 
 ### By the Numbers
 

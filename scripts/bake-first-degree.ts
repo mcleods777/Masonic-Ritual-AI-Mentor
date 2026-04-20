@@ -1,19 +1,23 @@
 #!/usr/bin/env npx tsx
 /**
- * bake-ea-rituals.ts — Bake audio into all three EA degree .mram files
- * back-to-back with a single passphrase prompt.
+ * bake-first-degree.ts — Bake audio into all Entered Apprentice (first
+ * degree) .mram files back-to-back with a single passphrase prompt.
  *
- * Wrapper around scripts/build-mram-from-dialogue.ts --with-audio.
- * Runs ea-opening, ea-initiation, ea-closing in sequence, re-using a
- * single passphrase for all three. Resume-safe via the render cache.
+ * This is the first-degree wrapper. Future parallel scripts:
+ *   bake-second-degree.ts — Fellowcraft (FC)
+ *   bake-third-degree.ts  — Master Mason (MM)
+ * Each wraps scripts/build-mram-from-dialogue.ts --with-audio for the
+ * rituals of one degree, re-using a single passphrase across all of
+ * that degree's ceremonies. Resume-safe via the render cache.
  *
  * Usage:
- *   GOOGLE_GEMINI_API_KEY=... npx tsx scripts/bake-ea-rituals.ts \
+ *   GOOGLE_GEMINI_API_KEY=... npx tsx scripts/bake-first-degree.ts \
  *     [--on-fallback=ask|continue|abort]
  *
- * Total time when cache is cold: ~25-30 minutes wall clock (ea-opening
- * ~4 min + ea-initiation ~13 min + ea-closing ~4 min, plus quota-reset
- * pauses if 3.1-flash caps out mid-run).
+ * Total time when cache is cold: ~25-30 minutes wall clock for the
+ * full EA degree (opening ~4 min + initiation ~13 min + explanatory
+ * ~3 min + closing ~4 min, plus quota-reset pauses if 3.1-flash caps
+ * out mid-run).
  *
  * --on-fallback is passed through to each child build subprocess. The
  * default "ask" will prompt if the preferred model (3.1-flash) runs
@@ -22,7 +26,7 @@
  * the same consistency problem as mixing within a ritual).
  *
  * Skip individual rituals by setting BAKE_SKIP (comma-separated):
- *   BAKE_SKIP=ea-closing GOOGLE_GEMINI_API_KEY=... npx tsx scripts/bake-ea-rituals.ts
+ *   BAKE_SKIP=ea-closing GOOGLE_GEMINI_API_KEY=... npx tsx scripts/bake-first-degree.ts
  */
 
 import * as fs from "node:fs";
