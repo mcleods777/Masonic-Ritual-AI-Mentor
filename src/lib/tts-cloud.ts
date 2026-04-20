@@ -1035,6 +1035,48 @@ export const GEMINI_ROLE_VOICES: Record<string, string> = {
   Narrator: "Enceladus", // breathy and soft — scene-setter voice
 };
 
+/**
+ * Safe male fallback for any code path that needs a Gemini voice but
+ * doesn't have a role-specific mapping (unknown roles, roles missing
+ * from a Voxtral group default, the generic `speak()` entry point for
+ * feedback/correction audio, etc.). Must never be a female voice —
+ * Masonry is a men's fraternity and female voices in ritual/lecture
+ * audio are never appropriate.
+ */
+const GEMINI_MALE_FALLBACK_VOICE = "Enceladus";
+
+/**
+ * Gemini voices that are female per Google's roster. Any caller path
+ * that would otherwise pass one of these to the model gets rewritten
+ * to GEMINI_MALE_FALLBACK_VOICE — defense in depth against a stale
+ * cache, a typo in a role map, or an explanatory-lecture speaker label
+ * that slipped through without a male mapping.
+ */
+const GEMINI_FEMALE_VOICES = new Set<string>([
+  "Kore",
+  "Zephyr",
+  "Aoede",
+  "Callirrhoe",
+  "Autonoe",
+  "Despina",
+  "Erinome",
+  "Laomedeia",
+  "Leda",
+  "Pulcherrima",
+  "Sulafat",
+  "Vindemiatrix",
+  "Achernar",
+  "Gacrux",
+]);
+
+/** Sanitize a voice name — swap any known-female voice for the male fallback. */
+function ensureMaleGeminiVoice(voice: string | undefined): string {
+  if (!voice || GEMINI_FEMALE_VOICES.has(voice)) {
+    return GEMINI_MALE_FALLBACK_VOICE;
+  }
+  return voice;
+}
+
 /** Get the default Gemini voice for a Masonic role, or a neutral fallback. */
 export function getGeminiVoiceForRole(role: string): string {
   // Try exact match first, then try group-based resolution for alias roles.
@@ -1049,9 +1091,9 @@ export function getGeminiVoiceForRole(role: string): string {
       "Iapetus", "Achird", "Schedar", "Fenrir",
       "Zubenelgenubi", "Rasalgethi", "Enceladus",
     ];
-    return groupDefaults[group] ?? "Kore";
+    return groupDefaults[group] ?? GEMINI_MALE_FALLBACK_VOICE;
   }
-  return "Kore";
+  return GEMINI_MALE_FALLBACK_VOICE;
 }
 
 /**
@@ -1151,7 +1193,12 @@ export async function speakGemini(
   text: string,
   options: { style?: string; voice?: string; embeddedAudio?: string } = {}
 ): Promise<void> {
-  const voice = options.voice ?? "Kore";
+  // Sanitize: unknown/undefined/known-female voice names get rewritten to
+  // the safe male fallback. This is the last line of defense before the
+  // request hits Gemini — anything upstream can be buggy (stale .mram,
+  // typo in a role map, future-added voice we missed) and we still
+  // guarantee a male voice plays.
+  const voice = ensureMaleGeminiVoice(options.voice);
 
   // Embedded-audio short-circuit: if the .mram had audio baked in for
   // this line at build time (v3+ format), play those bytes directly.
@@ -1273,7 +1320,7 @@ export async function prefetchGeminiLine(
   role: string,
   style?: string
 ): Promise<"hit" | "fetched" | "error"> {
-  const voice = getGeminiVoiceForRole(role);
+  const voice = ensureMaleGeminiVoice(getGeminiVoiceForRole(role));
   const cacheKey = await geminiCacheKey(text, style, voice);
 
   const hit = await getCachedAudio(cacheKey);
