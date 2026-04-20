@@ -460,6 +460,22 @@ async function bakeAudioIntoDoc(
     process.env.VOICE_CAST_MIN_LINE_CHARS ?? "40",
   );
 
+  // Hard-skip threshold: ultra-short lines ("B.", "O.", "A.") never
+  // generate reliable audio from Gemini TTS regardless of prompt shape.
+  // Rather than burn the full ~5-min retry budget per line just to
+  // conclude it can't be baked, skip them outright at pre-scan time.
+  // The .mram ships without embedded audio for these lines, and the
+  // runtime TTS path handles them at rehearsal (same behavior as every
+  // line had before bake-in existed). Cost: a handful of API calls per
+  // Brother per rehearsal, well within free-tier runtime budget.
+  //
+  // Tune via MIN_BAKE_LINE_CHARS env var (default 5 chars — catches
+  // single-letter spelling of Masonic passwords like "B.", "O.", "A."
+  // while still baking anything sentence-like including "Satisfied.").
+  const MIN_BAKE_LINE_CHARS = Number(
+    process.env.MIN_BAKE_LINE_CHARS ?? "5",
+  );
+
   // Preferred model is the first entry of the fallback chain — either
   // the env override (GEMINI_TTS_MODELS, first comma-separated value)
   // or the hardcoded 3.1-flash default. Any rendered line that used a
@@ -536,16 +552,20 @@ async function bakeAudioIntoDoc(
     );
   }
 
-  // Pre-bake cache scan. Count how many spoken lines will cache-hit
-  // vs need a fresh render. Gives the user immediate resume visibility:
-  // "you restarted a bake that's already 78/112 cached, only 34 lines
-  // left to render" — rather than discovering it over the next 5
-  // minutes as the progress bar crawls.
+  // Pre-bake cache scan. Classify every spoken line into one of three
+  // buckets: already-cached, too-short-to-bake, or needs-fresh-render.
+  // Gives the user immediate resume visibility and flags lines that'll
+  // be hard-skipped up front rather than burning retries on them.
   let preCached = 0;
   let preToRender = 0;
+  const preSkipShort: { id: number; role: string; text: string }[] = [];
   for (const line of spokenLines) {
-    const voice = getGeminiVoiceForRole(line.role);
     const cleanText = line.plain.trim();
+    if (cleanText.length < MIN_BAKE_LINE_CHARS) {
+      preSkipShort.push({ id: line.id, role: line.role, text: cleanText });
+      continue;
+    }
+    const voice = getGeminiVoiceForRole(line.role);
     const preamble =
       cleanText.length >= MIN_PREAMBLE_LINE_CHARS
         ? preambleByRole[line.role] ?? ""
@@ -560,7 +580,20 @@ async function bakeAudioIntoDoc(
   console.error(
     `  Cache status: ${preCached}/${total} already cached (${preCachedPct}%), ${preToRender} to render fresh`,
   );
-  if (preCached > 0 && preToRender === 0) {
+  if (preSkipShort.length > 0) {
+    console.error(
+      `  Hard-skip (too short, <${MIN_BAKE_LINE_CHARS} chars): ${preSkipShort.length} line(s) — runtime TTS at rehearsal`,
+    );
+    for (const s of preSkipShort.slice(0, 5)) {
+      console.error(
+        `    id=${s.id} ${s.role}: "${s.text}" (${s.text.length} chars)`,
+      );
+    }
+    if (preSkipShort.length > 5) {
+      console.error(`    … and ${preSkipShort.length - 5} more`);
+    }
+  }
+  if (preCached > 0 && preToRender === 0 && preSkipShort.length === 0) {
     console.error(
       `  Fully cached — this bake will re-emit the same audio with zero API calls.`,
     );
@@ -584,6 +617,17 @@ async function bakeAudioIntoDoc(
   // fallback line. A single decision covers the rest of the run.
   let fallbackResolved = false;
 
+  // Lines pre-flagged as too-short-to-bake (from the pre-scan). They
+  // skip the API entirely — no attempt, no retry, no wait. Counted
+  // as "regressed" in the final summary since the effect at playback
+  // time is identical: no embedded audio, runtime TTS handles them.
+  // Add them to regressedLines up front so the summary is accurate
+  // whether we hit any mid-bake regressions or not.
+  const tooShortIds = new Set(preSkipShort.map((s) => s.id));
+  for (const s of preSkipShort) {
+    regressedLines.push(s);
+  }
+
   for (const line of spokenLines) {
     const voice = getGeminiVoiceForRole(line.role);
     const cleanText = line.plain.trim();
@@ -595,6 +639,20 @@ async function bakeAudioIntoDoc(
     // the tier drop, so aborting without deleting this entry would
     // leave a single degraded line cached that silently hits on re-run.
     let thisLineCacheKey: string | undefined;
+
+    // Hard-skip: line was flagged too-short at pre-scan time. Don't
+    // touch the API. Progress bar still updates so the percentage
+    // moves forward.
+    if (tooShortIds.has(line.id)) {
+      const done = spokenLines.indexOf(line) + 1;
+      const pct = Math.floor((done / total) * 100);
+      process.stderr.write(
+        `\r  [${done.toString().padStart(3)}/${total}] ${pct.toString().padStart(3)}% ` +
+          `${line.role.padEnd(10)} (${"skip-too-short".padEnd(30)}) ` +
+          `                `,
+      );
+      continue;
+    }
 
     // Skip the preamble for utterances too short to carry character
     // direction — the preamble:content ratio confuses Gemini's
