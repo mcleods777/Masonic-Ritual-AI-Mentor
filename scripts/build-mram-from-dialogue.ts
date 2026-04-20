@@ -453,6 +453,14 @@ async function bakeAudioIntoDoc(
   console.error(`  Cache: ~/.cache/masonic-mram-audio/ (safe to interrupt + resume)`);
   console.error(`  Preferred model: ${preferredModel}`);
   console.error(`  Fallback chain: 3.1-flash → 2.5-flash → 2.5-pro`);
+  const retryBackoff = process.env.GEMINI_RETRY_BACKOFF_MS?.trim() || "5000,30000,90000,180000";
+  const retryHuman = retryBackoff
+    .split(",")
+    .map((ms) => `${Math.round(Number(ms) / 1000)}s`)
+    .join(", ");
+  console.error(
+    `  Per-model retry backoff: ${retryHuman} (total ~${Math.round(retryBackoff.split(",").reduce((a, b) => a + Number(b), 0) / 1000)}s before falling to next tier)`,
+  );
   console.error(`  On all-models-429: sleep until midnight PT, auto-resume`);
   console.error(`  On quality-tier drop: ${fallbackMode} (--on-fallback=${fallbackMode})`);
   if (rolesWithPreamble.length > 0) {

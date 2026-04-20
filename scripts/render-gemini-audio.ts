@@ -203,11 +203,56 @@ class EmptyAudioStreamError extends Error {
  *     at ~10-15 req/min regardless of daily quota — clears in ~60s)
  *   - 500s and text-token regressions (Google's documented blip —
  *     retry is the official remediation)
- * Total wait across three retries: ~42s, well under the per-minute
- * cap reset window. After these attempts the model is treated as
- * genuinely exhausted and we fall through to the next tier.
+ *
+ * Schedule covers a full per-minute window reset cleanly. The old
+ * 42s total was landing mid-window on heavily throttled runs; if the
+ * bake is already saturating rate limits, the first two retries won't
+ * clear, and the 30s final wait only gets you to ~42s elapsed before
+ * falling through. The 90s and 180s tail now guarantee window reset
+ * with margin.
+ *
+ * Total wait across four retries: ~5 min. Override with the env var
+ * GEMINI_RETRY_BACKOFF_MS (comma-separated ms values) for tuning.
+ *
+ * After these attempts the model is treated as genuinely exhausted
+ * and we fall through to the next tier (at which point --on-fallback
+ * decides: prompt / continue / abort).
  */
-const PER_MODEL_RETRY_BACKOFF_MS = [2000, 10000, 30000];
+const DEFAULT_RETRY_BACKOFF_MS = [5000, 30000, 90000, 180000];
+
+function readRetryBackoff(): number[] {
+  const env = process.env.GEMINI_RETRY_BACKOFF_MS?.trim();
+  if (!env) return DEFAULT_RETRY_BACKOFF_MS;
+  const parsed = env
+    .split(",")
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  return parsed.length > 0 ? parsed : DEFAULT_RETRY_BACKOFF_MS;
+}
+
+const PER_MODEL_RETRY_BACKOFF_MS = readRetryBackoff();
+
+/**
+ * Wait the given number of milliseconds, printing a single-line
+ * countdown every 30 seconds so long waits (90s, 180s) don't look
+ * like the script has frozen. The \r prefix keeps it on one line.
+ */
+async function sleepWithHeartbeat(ms: number, label: string): Promise<void> {
+  const HEARTBEAT_MS = 30_000;
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    const remaining = Math.min(HEARTBEAT_MS, end - Date.now());
+    await new Promise((r) => setTimeout(r, remaining));
+    const left = end - Date.now();
+    if (left > 1000) {
+      process.stderr.write(
+        `\r  ${label} — ${Math.ceil(left / 1000)}s remaining...          `,
+      );
+    }
+  }
+  // Clear the heartbeat line so the next log doesn't overlap.
+  process.stderr.write("\r" + " ".repeat(80) + "\r");
+}
 
 async function callGeminiWithFallback(
   text: string,
@@ -262,7 +307,7 @@ async function callGeminiWithFallback(
           console.error(
             `  ${model} network error: ${(fetchErr as Error).message}. Retrying in ${waitMs / 1000}s (${attempt + 2}/${MAX_ATTEMPTS})...`,
           );
-          await new Promise((r) => setTimeout(r, waitMs));
+          await sleepWithHeartbeat(waitMs, `waiting for ${model}`);
           continue;
         }
         // Final attempt network-failed — fall through to next tier.
@@ -287,7 +332,7 @@ async function callGeminiWithFallback(
           console.error(
             `  ${model} returned ${resp.status}. Retrying in ${waitMs / 1000}s (${attempt + 2}/${MAX_ATTEMPTS})...`,
           );
-          await new Promise((r) => setTimeout(r, waitMs));
+          await sleepWithHeartbeat(waitMs, `waiting for ${model}`);
           continue;
         }
         // Exhausted retries on this model — fall through to next tier.
