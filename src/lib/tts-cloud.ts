@@ -1009,7 +1009,7 @@ void _AUDIO_CACHE_STORE_UNUSED;
 export const GEMINI_ROLE_VOICES: Record<string, string> = {
   WM: "Alnilam",         // firm and strong — authority of the Master
   SW: "Charon",          // calm and professional — principal officer
-  JW: "Puck",            // upbeat and lively — JW calls craft to refreshment
+  JW: "Enceladus",       // deeper, weighted — the JW speaks with authority of station, not jovially
   SD: "Algenib",         // gravelly — carries orders about, masculine
   JD: "Orus",            // firm and decisive — gate-keeper role
   Sec: "Iapetus",        // clear and articulate — fits the record-keeper
@@ -1031,7 +1031,7 @@ export function getGeminiVoiceForRole(role: string): string {
     // Mirror of GEMINI_ROLE_VOICES by group index. All male voices.
     // Groups 0-11 correspond to VOXTRAL_ROLE_GROUPS ordering.
     const groupDefaults = [
-      "Alnilam", "Charon", "Puck", "Algenib", "Orus",
+      "Alnilam", "Charon", "Enceladus", "Algenib", "Orus",
       "Iapetus", "Achird", "Schedar", "Fenrir",
       "Zubenelgenubi", "Rasalgethi", "Enceladus",
     ];
