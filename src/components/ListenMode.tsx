@@ -205,34 +205,66 @@ export default function ListenMode({ sections }: ListenModeProps) {
       const section = sections[index];
       if (!section) return;
 
-      if (playState === "idle" || playState === "finished") {
-        // One-shot: speak just this line
-        const gen = ++playGenRef.current;
-        stopSpeaking();
-        setCurrentIndex(index);
+      // Unconditionally interrupt whatever is in flight. Bumping
+      // playGenRef FIRST causes any earlier handleLineClick or playFrom
+      // invocation to see stale on its next stale() check, so even if
+      // its async IndexedDB / fetch work is still pending, it returns
+      // before reaching playAudioBlob. Without this, two quick taps
+      // could both race past the old single stopSpeaking() call and
+      // end up with two audio blobs playing in sequence (briefly overlapping).
+      const gen = ++playGenRef.current;
+      cancelledRef.current = false;
+      pausedRef.current = false;
+      stopSpeaking();
+      if (resumeRef.current) {
+        resumeRef.current();
+        resumeRef.current = null;
+      }
+
+      const stale = () => gen !== playGenRef.current || cancelledRef.current;
+
+      // If full-ceremony playback was in progress, resume the loop from
+      // this line. playFrom() bumps gen again which is harmless — our
+      // gen still matches because we just set it.
+      if (playState === "playing" || playState === "paused") {
+        playFrom(index);
+        return;
+      }
+
+      // One-shot from idle/finished. Transition to "playing" so the
+      // Stop button renders (handleStop → cancelledRef + setPlayState
+      // "idle" correctly cancels this branch via stale()).
+      setPlayState("playing");
+      setCurrentIndex(index);
+
+      try {
         const gavelCount = section.gavels > 0 ? section.gavels : countGavelMarks(section.text);
-        if (gavelCount > 0) await playGavelKnocks(gavelCount);
-        if (gen !== playGenRef.current) return;
+        if (gavelCount > 0) {
+          await playGavelKnocks(gavelCount);
+        }
+        if (stale()) return;
+
         if (section.speaker) {
           const cleanText = cleanRitualText(section.text);
           if (cleanText) {
-            try {
-              await speakAsRole(cleanText, section.speaker, voiceMapRef.current, section.style, section.audio);
-            } catch {
-              /* ignore */
-            }
+            await speakAsRole(
+              cleanText,
+              section.speaker,
+              voiceMapRef.current,
+              section.style,
+              section.audio,
+            );
           }
         }
-      } else if (playState === "playing" || playState === "paused") {
-        // Jump playback to this line and continue from here
-        // stopSpeaking() cancels current audio; playFrom() bumps generation
-        // so the old loop exits at its next checkpoint
-        stopSpeaking();
-        if (resumeRef.current) {
-          resumeRef.current();
-          resumeRef.current = null;
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        // Other errors: swallow for one-shot playback — the user can retry.
+      } finally {
+        // Only flip back to idle if we weren't superseded (another tap
+        // or Stop button). Superseding paths own the next transition.
+        if (!stale()) {
+          setPlayState("idle");
         }
-        playFrom(index);
       }
     },
     [playState, sections, playFrom],
