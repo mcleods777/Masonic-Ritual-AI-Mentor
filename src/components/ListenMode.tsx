@@ -27,6 +27,7 @@ export default function ListenMode({ sections }: ListenModeProps) {
   const pausedRef = useRef(false);
   const resumeRef = useRef<(() => void) | null>(null);
   const playGenRef = useRef(0); // generation counter to prevent overlapping playFrom loops
+  const oneShotRef = useRef(false); // true while a single-line click is playing; keeps subsequent clicks from being routed to ceremony playback
   const voiceMapRef = useRef<Map<string, RoleVoiceProfile>>(new Map());
   const scriptContainerRef = useRef<HTMLDivElement>(null);
 
@@ -91,6 +92,7 @@ export default function ListenMode({ sections }: ListenModeProps) {
       const gen = ++playGenRef.current;
       cancelledRef.current = false;
       pausedRef.current = false;
+      oneShotRef.current = false;
       setPlayState("playing");
 
       for (let i = startIndex; i < sections.length; i++) {
@@ -142,6 +144,10 @@ export default function ListenMode({ sections }: ListenModeProps) {
                   // Final failure — pause before advancing so user notices the skip
                   await new Promise((r) => setTimeout(r, 1500));
                 }
+                // Re-check after the backoff: if the user has stopped or
+                // jumped to a different line while we were sleeping, bail
+                // out instead of retrying or advancing.
+                if (stale()) return;
               }
             }
           }
@@ -187,6 +193,10 @@ export default function ListenMode({ sections }: ListenModeProps) {
   const handleStop = useCallback(() => {
     cancelledRef.current = true;
     pausedRef.current = false;
+    oneShotRef.current = false;
+    // Bump generation so any in-flight one-shot or ceremony loop exits at
+    // its next stale() checkpoint rather than continuing past the await.
+    ++playGenRef.current;
     stopSpeaking();
     if (resumeRef.current) {
       resumeRef.current();
@@ -204,22 +214,43 @@ export default function ListenMode({ sections }: ListenModeProps) {
       const section = sections[index];
       if (!section) return;
 
-      if (playState === "idle" || playState === "finished") {
-        // One-shot: speak just this line
+      // Route one-shot clicks (including repeat clicks while a one-shot is
+      // still playing) to the single-line branch. Only clicks that arrive
+      // during real ceremony playback should jump the ceremony.
+      const isOneShotContext =
+        oneShotRef.current || playState === "idle" || playState === "finished";
+
+      if (isOneShotContext) {
+        // One-shot: speak just this line. Flip playState to "playing" so
+        // the Stop button renders — without this, the click starts audio
+        // with no way for the user to halt it.
         const gen = ++playGenRef.current;
+        cancelledRef.current = false;
+        oneShotRef.current = true;
         stopSpeaking();
         setCurrentIndex(index);
-        const gavelCount = section.gavels > 0 ? section.gavels : countGavelMarks(section.text);
-        if (gavelCount > 0) await playGavelKnocks(gavelCount);
-        if (gen !== playGenRef.current) return;
-        if (section.speaker) {
-          const cleanText = cleanRitualText(section.text);
-          if (cleanText) {
-            try {
-              await speakAsRole(cleanText, section.speaker, voiceMapRef.current, section.style, section.audio);
-            } catch {
-              /* ignore */
+        setPlayState("playing");
+        try {
+          const gavelCount = section.gavels > 0 ? section.gavels : countGavelMarks(section.text);
+          if (gavelCount > 0) await playGavelKnocks(gavelCount);
+          if (cancelledRef.current || gen !== playGenRef.current) return;
+          if (section.speaker) {
+            const cleanText = cleanRitualText(section.text);
+            if (cleanText) {
+              try {
+                await speakAsRole(cleanText, section.speaker, voiceMapRef.current, section.style, section.audio);
+              } catch {
+                /* ignore */
+              }
             }
+          }
+        } finally {
+          // Only reset state if we're still the latest generation — a
+          // newer click (or Stop) will have already bumped gen and set
+          // its own playState.
+          if (gen === playGenRef.current && !cancelledRef.current) {
+            oneShotRef.current = false;
+            setPlayState("idle");
           }
         }
       } else if (playState === "playing" || playState === "paused") {
