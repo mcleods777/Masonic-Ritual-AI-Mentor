@@ -138,13 +138,15 @@ async function main() {
 
   // Pass through --on-fallback to each child build. Default "ask" so
   // the user controls quality-tier consistency across all three rituals
-  // with a single prompt on the first fallback.
+  // with a single prompt on the first fallback. Wait mode is best for
+  // overnight bakes — child sleeps until midnight PT on preferred-
+  // model exhaustion and resumes automatically, never degrading.
   const fallbackArg = process.argv.slice(2).find((a) => a.startsWith("--on-fallback="));
   const fallbackFlag = fallbackArg ?? "--on-fallback=ask";
   const fallbackValue = fallbackFlag.slice("--on-fallback=".length);
-  if (!["ask", "continue", "abort"].includes(fallbackValue)) {
+  if (!["ask", "continue", "abort", "wait"].includes(fallbackValue)) {
     console.error(
-      `Error: invalid ${fallbackFlag}. Must be one of: ask, continue, abort.`,
+      `Error: invalid ${fallbackFlag}. Must be one of: ask, continue, abort, wait.`,
     );
     process.exit(1);
   }

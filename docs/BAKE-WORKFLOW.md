@@ -161,6 +161,7 @@ Usage: npx tsx scripts/build-mram-from-dialogue.ts \
 | `--on-fallback=ask` | **default** | Prompt once (y/N) the first time Gemini 3.1-flash (the preferred tier) hits quota and the bake falls back to 2.5-flash or 2.5-pro. Interactive. |
 | `--on-fallback=continue` | — | Silently continue on the fallback tier. Suitable for CI or "I want the file now, quality can be mixed" scenarios. |
 | `--on-fallback=abort` | — | Exit with code 2 on first fallback. Suitable for "I demand uniform premium quality" scenarios. |
+| `--on-fallback=wait` | — | Lock to the preferred model only (no fallback chain at all). If daily quota exhausts, sleep until midnight Pacific Time and auto-resume. Zero prompts, zero degradation. **Best mode for overnight bakes** — start before bed, wake up to a finished uniform-premium bake. |
 
 **Passphrase is never passed on the command line.** It's read interactively with echo disabled (raw-mode stdin), or from `MRAM_PASSPHRASE` env var when stdin is not a TTY (CI, the wrapper script).
 
@@ -340,6 +341,19 @@ Enter passphrase once. Walk away. ~25-30 min cold; near-instant if you're just r
 2. Bake finishes with mixed-tier audio
 3. Ship it
 4. Later, when you want uniform premium: `rm -rf ~/.cache/masonic-mram-audio/` and re-bake
+
+### You want to start the bake before bed and wake up to a finished premium file
+
+```bash
+GOOGLE_GEMINI_API_KEY=AIza... npx tsx scripts/bake-first-degree.ts --on-fallback=wait
+```
+
+Enter the passphrase, close the laptop. The bake runs as far as your daily quota lets it, then when the preferred model's quota exhausts, the script sleeps until midnight Pacific Time and auto-resumes. No prompts to answer, no tier degradation. If your quota resets before you wake up, you'll find a finished uniform-premium bake in the morning.
+
+Practical notes:
+- Machine has to stay awake during the sleep. On macOS: `caffeinate -i npx tsx scripts/bake-first-degree.ts --on-fallback=wait`. On Linux: prevent suspend via your power-management settings.
+- If you start the bake *after* midnight PT but your quota is already gone from earlier in the day, you'll sleep all the way until the NEXT midnight (~24 hours). Check your quota status first.
+- Cache is preserved during the sleep. Ctrl-C at any point is safe — next run resumes where you left off.
 
 ---
 

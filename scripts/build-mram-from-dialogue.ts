@@ -163,15 +163,22 @@ async function promptPassphrase(): Promise<string> {
   });
 }
 
-type FallbackMode = "ask" | "continue" | "abort";
+type FallbackMode = "ask" | "continue" | "abort" | "wait";
 
 function parseFallbackMode(args: string[]): FallbackMode {
   const flag = args.find((a) => a.startsWith("--on-fallback="));
   if (!flag) return "ask";
   const value = flag.slice("--on-fallback=".length);
-  if (value === "ask" || value === "continue" || value === "abort") return value;
+  if (
+    value === "ask" ||
+    value === "continue" ||
+    value === "abort" ||
+    value === "wait"
+  ) {
+    return value;
+  }
   throw new Error(
-    `Invalid --on-fallback=${value}. Must be one of: ask, continue, abort.`,
+    `Invalid --on-fallback=${value}. Must be one of: ask, continue, abort, wait.`,
   );
 }
 
@@ -185,7 +192,7 @@ async function main() {
     console.error(
       "Usage: npx tsx scripts/build-mram-from-dialogue.ts " +
         "<plain.md> <cipher.md> <output.mram> [--with-audio] " +
-        "[--on-fallback=ask|continue|abort]",
+        "[--on-fallback=ask|continue|abort|wait]",
     );
     console.error(
       "Passphrase is read interactively (no echo) or from MRAM_PASSPHRASE env var.",
@@ -196,11 +203,21 @@ async function main() {
     console.error(
       "  Requires ffmpeg in PATH and GOOGLE_GEMINI_API_KEY env var.",
     );
+    console.error("--on-fallback modes:");
     console.error(
-      "--on-fallback=ask (default): prompt once if 3.1-flash quota exhausts mid-bake.",
+      "  ask (default): prompt once if 3.1-flash quota exhausts mid-bake",
     );
     console.error(
-      "  continue = keep going silently; abort = exit with code 2 on first fallback.",
+      "  continue: keep going silently on the fallback tier (mixed quality)",
+    );
+    console.error(
+      "  abort: exit with code 2 on first fallback (strict premium)",
+    );
+    console.error(
+      "  wait: lock to preferred model only; if daily quota hits, sleep",
+    );
+    console.error(
+      "        until midnight PT and auto-resume. Best for overnight bakes.",
     );
     process.exit(1);
   }
@@ -446,13 +463,28 @@ async function bakeAudioIntoDoc(
     process.env.GEMINI_TTS_MODELS?.split(",")[0]?.trim() ||
     "gemini-3.1-flash-tts-preview";
 
+  // Wait mode locks renderLineAudio to the preferred model only by
+  // passing models: [preferredModel]. When that single model's quota
+  // exhausts, callGeminiWithFallback throws AllModelsQuotaExhausted,
+  // which renderLineAudio's existing catch triggers the
+  // sleep-until-midnight-PT waitHandler. After the sleep, the outer
+  // retry loop tries the same model again — now with fresh quota.
+  // Net effect: the bake blocks until quota resets and then continues,
+  // never degrading to the lower tier. Good for overnight bakes.
+  const modelsForWaitMode: string[] | undefined =
+    fallbackMode === "wait" ? [preferredModel] : undefined;
+
   const spokenLines = doc.lines.filter((l) => l.role && l.plain.trim().length > 0);
   const total = spokenLines.length;
 
   console.error(`\nBaking audio for ${total} spoken lines...`);
   console.error(`  Cache: ~/.cache/masonic-mram-audio/ (safe to interrupt + resume)`);
   console.error(`  Preferred model: ${preferredModel}`);
-  console.error(`  Fallback chain: 3.1-flash → 2.5-flash → 2.5-pro`);
+  if (fallbackMode === "wait") {
+    console.error(`  Fallback chain: NONE — wait mode locks to preferred only`);
+  } else {
+    console.error(`  Fallback chain: 3.1-flash → 2.5-flash → 2.5-pro`);
+  }
   const retryBackoff = process.env.GEMINI_RETRY_BACKOFF_MS?.trim() || "5000,30000,90000,180000";
   const retryHuman = retryBackoff
     .split(",")
@@ -461,8 +493,21 @@ async function bakeAudioIntoDoc(
   console.error(
     `  Per-model retry backoff: ${retryHuman} (total ~${Math.round(retryBackoff.split(",").reduce((a, b) => a + Number(b), 0) / 1000)}s before falling to next tier)`,
   );
-  console.error(`  On all-models-429: sleep until midnight PT, auto-resume`);
-  console.error(`  On quality-tier drop: ${fallbackMode} (--on-fallback=${fallbackMode})`);
+  if (fallbackMode === "wait") {
+    console.error(
+      `  On preferred-model exhaustion: sleep until midnight PT, auto-resume`,
+    );
+    console.error(
+      `  (walk away / go to bed — no prompt fires, no degradation, premium-only)`,
+    );
+  } else {
+    console.error(
+      `  On all-models-429: sleep until midnight PT, auto-resume`,
+    );
+    console.error(
+      `  On quality-tier drop: ${fallbackMode} (--on-fallback=${fallbackMode})`,
+    );
+  }
   if (rolesWithPreamble.length > 0) {
     const shortLines = spokenLines.filter(
       (l) => l.plain.trim().length < MIN_PREAMBLE_LINE_CHARS,
@@ -527,6 +572,7 @@ async function bakeAudioIntoDoc(
         voice,
         {
         apiKey,
+        ...(modelsForWaitMode ? { models: modelsForWaitMode } : {}),
         onProgress: (event) => {
           if (event.status === "cache-hit") {
             cacheHits++;

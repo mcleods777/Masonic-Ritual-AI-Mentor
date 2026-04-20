@@ -176,6 +176,10 @@ npx tsx scripts/build-mram-from-dialogue.ts <plain> <cipher> <out> --with-audio 
 
 # Keep going on the lower tier without prompting (good for CI)
 npx tsx scripts/build-mram-from-dialogue.ts <plain> <cipher> <out> --with-audio --on-fallback=continue
+
+# Overnight bake: lock to preferred model, sleep until midnight PT if
+# daily quota exhausts, auto-resume. Start before bed, wake up done.
+npx tsx scripts/build-mram-from-dialogue.ts <plain> <cipher> <out> --with-audio --on-fallback=wait
 ```
 
 **On abort, the contaminated cache entry is removed.** The line that was just rendered on the fallback tier gets its cache file deleted before exit, so when you re-run after midnight PT:
