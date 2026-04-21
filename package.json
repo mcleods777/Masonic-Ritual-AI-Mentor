@@ -11,9 +11,9 @@
     "test:run": "vitest run"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^3.0.44",
+    "@ai-sdk/anthropic": "^3.0.71",
     "@ai-sdk/react": "^3.0.88",
-    "ai": "^6.0.86",
+    "ai": "^6.0.168",
     "diff": "^8.0.3",
     "jose": "^6.2.2",
     "mammoth": "^1.11.0",
