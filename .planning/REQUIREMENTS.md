@@ -158,13 +158,13 @@ Each v1 requirement maps to exactly one phase. Populated by `gsd-roadmapper` on 
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| HYGIENE-01 | Phase 1 | Pending |
-| HYGIENE-02 | Phase 1 | Pending |
-| HYGIENE-03 | Phase 1 | Pending |
-| HYGIENE-04 | Phase 1 | Pending |
-| HYGIENE-05 | Phase 1 | Pending |
-| HYGIENE-06 | Phase 1 | Pending |
-| HYGIENE-07 | Phase 1 | Pending |
+| HYGIENE-01 | Phase 1 | ✓ Validated (2026-04-21, commit b82aefe) |
+| HYGIENE-02 | Phase 1 | ✓ Validated (2026-04-21, commit 005dc82) |
+| HYGIENE-03 | Phase 1 | ✓ Validated (2026-04-21, commit 2135496; preview-deploy curl check deferred to UAT) |
+| HYGIENE-04 | Phase 1 | ✓ Validated (2026-04-21, commit 2b68c72) |
+| HYGIENE-05 | Phase 1 | ⏸ Deferred (Shannon iPhone test pending in 01-HUMAN-UAT.md) |
+| HYGIENE-06 | Phase 1 | ✓ Validated (2026-04-21, commit 9cfbb3a) |
+| HYGIENE-07 | Phase 1 | ⏸ Partial (runbook written commit 66b4d93; rehearsal pending in 01-HUMAN-UAT.md) |
 | SAFETY-01 | Phase 2 | Pending |
 | SAFETY-02 | Phase 2 | Pending |
 | SAFETY-03 | Phase 2 | Pending |

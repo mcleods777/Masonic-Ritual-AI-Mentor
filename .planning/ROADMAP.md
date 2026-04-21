@@ -11,7 +11,7 @@ Ship the invited-lodge v1: the pilot, hardened and extended so Shannon can perso
 
 ## Phases
 
-- [ ] **Phase 1: Pre-invite Hygiene** — Small, zero-risk cleanup that must land before outside lodges are invited
+- [x] **Phase 1: Pre-invite Hygiene** — Small, zero-risk cleanup that must land before outside lodges are invited (completed 2026-04-21; 2 manual UAT items tracked in 01-HUMAN-UAT.md)
 - [ ] **Phase 2: Safety Floor (cost, abuse, auth hardening)** — Per-user rate limits, budget caps, audit log, client-token, kill switch — the layered defense against the three equal-weight fears
 - [ ] **Phase 3: Authoring Throughput** — Bake cache, orchestrator, validators, preview server — Shannon-hours reduction so content work doesn't dominate calendar time
 - [ ] **Phase 4: Content Coverage** — Bake EA, FC, MM, Installation, and officer lectures in Shannon's lodge's working, with per-line Opus verified
@@ -133,7 +133,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Pre-invite Hygiene | 0/7 | Planned | - |
+| 1. Pre-invite Hygiene | 7/7 | Complete (UAT pending) | 2026-04-21 |
 | 2. Safety Floor | 0/0 | Not started | - |
 | 3. Authoring Throughput | 0/0 | Not started | - |
 | 4. Content Coverage | 0/0 | Not started | - |

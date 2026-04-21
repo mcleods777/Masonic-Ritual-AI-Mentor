@@ -1,6 +1,6 @@
 # State: Masonic Ritual AI Mentor — v1 Invited-Lodge Milestone
 
-**Last updated:** 2026-04-20 (Phase 1 planned, 7 plans ready to execute)
+**Last updated:** 2026-04-21 (Phase 1 complete with UAT pending; Phase 2 ready for discuss-phase)
 
 ## Project Reference
 
@@ -13,22 +13,22 @@
 ## Current Position
 
 **Milestone:** v1 invited-lodge
-**Phase:** Phase 1 planned (7 plans, wave 1–7 serial chain)
-**Plan:** 7 PLAN.md files ready
-**Status:** Ready to execute — awaiting `/gsd-execute-phase 1`
-**Progress:** 0/7 phases complete
+**Phase:** Phase 1 complete (code-side); 2 manual UAT items pending in 01-HUMAN-UAT.md
+**Plan:** —
+**Status:** Phase 1 code-complete; Phase 2 ready for `/gsd-discuss-phase 2`
+**Progress:** 1/7 phases complete
 
 ```
-[░░░░░░░░░░░░░░░░░░░░] 0% (0/7 phases)
+[██░░░░░░░░░░░░░░░░░░] 14% (1/7 phases)
 ```
 
-**Next action:** `/gsd-execute-phase 1` to run plans in D-19 order (noindex → matcher test → landing audit → rotation runbook → iPhone verify → AI SDK codemod → package cleanup).
+**Next action:** `/gsd-discuss-phase 2` to gather context on Phase 2 (Safety Floor — rate limits, audit log, kill switch) before planning. The 2 deferred Phase 1 UAT items (iPhone test, runbook rehearsal) run at Shannon's pacing — both must close before outside-lodge invitations but neither blocks Phase 2 planning or execution.
 
 ## Phase Map
 
 | # | Phase | Requirements | Status |
 |---|-------|--------------|--------|
-| 1 | Pre-invite Hygiene | HYGIENE-01..07 (7) | Planned (7 plans) |
+| 1 | Pre-invite Hygiene | HYGIENE-01..07 (7) | ✓ Complete (UAT pending) |
 | 2 | Safety Floor | SAFETY-01..09 (9) | Not started |
 | 3 | Authoring Throughput | AUTHOR-01..10 (10) | Not started |
 | 4 | Content Coverage | CONTENT-01..07 (7) | Not started |
@@ -39,9 +39,9 @@
 ## Performance Metrics
 
 **Requirements coverage:** 57/57 mapped (100%)
-**Phases planned:** 0/7
-**Plans executed:** 0
-**Plans verified:** 0
+**Phases planned:** 1/7
+**Plans executed:** 7/7 Phase 1
+**Plans verified:** 5/7 verified + 2/7 deferred-human (HYGIENE-05, HYGIENE-07 rehearsal)
 
 ## Accumulated Context
 
@@ -84,18 +84,21 @@ None.
 
 ## Session Continuity
 
-**Last significant action:** Phase 1 planned via `/gsd-plan-phase 1` on 2026-04-20. Research surfaced two CONTEXT.md corrections (codemod command syntax, matcher case-sensitivity) + a pattern-mapping correction (test path convention) — all resolved via AskUserQuestion before planning. 7 PLAN.md files created + plan-checker revision loop closed at iteration 2 (1 blocker + 3 warnings → 0 issues). VALIDATION.md and PATTERNS.md also created.
+**Last significant action:** Phase 1 executed via `/gsd-execute-phase 1` on 2026-04-21. All 7 HYGIENE plans landed on branch `gsd/phase-1-pre-invite-hygiene` (13 commits: 7 `hygiene-NN:` + 5 `docs(01-NN):` metadata + 1 `test(01):` UAT). Verifier returned `human_needed` — 5/7 ✓ VERIFIED (HYGIENE-01, 02, 03, 04, 06), 2/7 ⏸ DEFERRED (HYGIENE-05 iPhone test, HYGIENE-07 runbook rehearsal). Shannon approved phase close on 2026-04-21. `01-HUMAN-UAT.md` tracks the 2 deferred items.
 
-**Resumption cue:** Next agent should run `/gsd-execute-phase 1` to execute plans in D-19 order. Plans are strictly serial (wave 1–7 chain).
+**Resumption cue:** Next action: `/gsd-discuss-phase 2` to begin Phase 2 (Safety Floor — SAFETY-01..09). The 2 deferred UAT items run at Shannon's pacing; they do NOT block Phase 2 planning or execution, but MUST close before outside-lodge invitations.
 
 **Critical context for next agent:**
 1. Brownfield milestone — do NOT re-build existing pilot capability (see PROJECT.md Validated)
-2. Phase 1 task order locked: 03 noindex → 06 matcher test → 04 landing audit → 07 runbook → 05 iPhone → 02 AI SDK codemod → 01 package cleanup. See 01-CONTEXT.md §D-19.
-3. One commit per HYGIENE-XX: `hygiene-NN: imperative` (overrides Conventional-Commits per D-20).
-4. Three plans are `autonomous: false` — HYGIENE-04 (human audit), HYGIENE-05 (Shannon iPhone), HYGIENE-07 (Vercel preview rehearsal). Executor must pause for Shannon on these.
-5. Research findings worth carrying: (a) codebase has zero AI SDK imports → HYGIENE-02 codemod is effectively a package.json version bump; (b) current matcher is case-sensitive on .mram extension — tests stay on lowercase paths only; (c) rotation runbook uses `vercel env update` (atomic) not rm+add except for preview-branch (CLI v51.x limitation).
+2. Phase 2 (Safety Floor) introduces paid-route rate limiting, audit log, budget caps, emergency kill switch. Dependency: Phase 2 benefits from HYGIENE-02's AI SDK v6 bump (commit 005dc82) but does not require rewriting `/api/rehearsal-feedback` — that's Phase 5 COACH-02.
+3. Pending Phase 1 manual verification (both in `01-HUMAN-UAT.md`):
+   - HYGIENE-05: Shannon iPhone + iCloud Private Relay magic-link test (~2-3 min)
+   - HYGIENE-07: Rotation runbook rehearsal on Vercel preview (~15-30 min)
+4. Phase 1 left on branch `gsd/phase-1-pre-invite-hygiene` — decide merge-to-main strategy before Phase 2 OR create a fresh `gsd/phase-2-safety-floor` branch from main (Phase 1 commits travel via merge).
+5. Research findings from Phase 1 worth carrying forward: (a) codebase had zero AI SDK imports at Phase 1 start — Phase 5 COACH-02 will be the first consumer of v6 idioms; (b) current matcher is case-sensitive on .mram extension; (c) rotation runbook uses `vercel env update` atomically except for preview-branch (CLI v51.x limitation).
 
 ---
 *State initialized: 2026-04-20 after roadmap creation*
 *Phase 1 context gathered: 2026-04-20*
 *Phase 1 planned: 2026-04-20 (7 plans, verification passed iteration 2)*
+*Phase 1 executed: 2026-04-21 (7/7 plans landed, 5/7 verified + 2/7 deferred-human)*
