@@ -1,6 +1,6 @@
 # State: Masonic Ritual AI Mentor — v1 Invited-Lodge Milestone
 
-**Last updated:** 2026-04-21 (Phase 1 complete with UAT pending; Phase 2 ready for discuss-phase)
+**Last updated:** 2026-04-21 (Phase 2 context gathered; ready for /gsd-plan-phase 2)
 
 ## Project Reference
 
@@ -13,16 +13,16 @@
 ## Current Position
 
 **Milestone:** v1 invited-lodge
-**Phase:** Phase 1 complete (code-side); 2 manual UAT items pending in 01-HUMAN-UAT.md
+**Phase:** Phase 2 context gathered (21 decisions locked across 4 gray areas)
 **Plan:** —
-**Status:** Phase 1 code-complete; Phase 2 ready for `/gsd-discuss-phase 2`
+**Status:** Phase 1 code-complete + 2 UAT pending; Phase 2 ready for `/gsd-plan-phase 2`
 **Progress:** 1/7 phases complete
 
 ```
 [██░░░░░░░░░░░░░░░░░░] 14% (1/7 phases)
 ```
 
-**Next action:** `/gsd-discuss-phase 2` to gather context on Phase 2 (Safety Floor — rate limits, audit log, kill switch) before planning. The 2 deferred Phase 1 UAT items (iPhone test, runbook rehearsal) run at Shannon's pacing — both must close before outside-lodge invitations but neither blocks Phase 2 planning or execution.
+**Next action:** `/gsd-plan-phase 2` to decompose Phase 2 into executable plans. 02-CONTEXT.md captures 21 locked decisions across budget thresholds (60/hr + 300/day caps, $10 total + $3 per-user alerts, daily 02:00 UTC cron), audit log (Vercel logs via console.log, per-model pricing table, TS discriminated union, compile-time PII guards), client-token (`{sub: hashedUser, aud: client-token, exp: 1h}`, proactive 50-min refresh, middleware + route-level defense in depth), and kill switch (single env var, 503 + structured fallback per route, persistent banner). The 2 deferred Phase 1 UAT items (iPhone test, runbook rehearsal) run at Shannon's pacing — neither blocks Phase 2.
 
 ## Phase Map
 
