@@ -88,9 +88,26 @@ Rehearsal checklist (to complete before Phase 1 close):
 
 ---
 
-## HYGIENE-05 — iPhone + iCloud Private Relay magic-link verification (Plan 05 — pending)
+## HYGIENE-05 — iPhone + iCloud Private Relay magic-link verification
 
-*(filled in when Plan 05 completes)*
+**Plan:** 01-05-iphone-verify-PLAN.md
+**Commit:** (this plan's hygiene-05 commit)
+**Status:** ⏸ DEFERRED to Phase 1 close gate — Shannon chose on 2026-04-21 to defer the manual device test
+
+Evidence:
+- No code changes — HYGIENE-05 is a pure Shannon manual test (request magic link from iPhone with iCloud Private Relay enabled, tap link from Mail, confirm authenticated session cookie lands)
+- Plan 05 produced this deferral note + SUMMARY.md; no source files modified
+
+**Rehearsal status (per plan):** ⏸ DEFERRED — to be executed alongside HYGIENE-07 runbook rehearsal at Phase 1 close, before inviting outside lodges.
+
+Deferral checklist (to complete before Phase 1 close):
+- [ ] Shannon on iPhone with iCloud Private Relay enabled (verify via Settings → Apple Account → iCloud → Private Relay = On)
+- [ ] Navigate to the production URL in Safari
+- [ ] Submit email from `/signin` — confirm "check your inbox" response
+- [ ] Magic-link email arrives at Shannon's inbox (resend.com delivery to Private-Relay-masked address)
+- [ ] Tap link in Mail app — opens production URL with authenticated session
+- [ ] Confirm landing on an authenticated page (not redirect loop back to /signin)
+- [ ] Record timestamp + iOS version + outcome in this VERIFICATION.md; flip status above from ⏸ to ✓
 
 ---
 
