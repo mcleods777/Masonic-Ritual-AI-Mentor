@@ -111,9 +111,25 @@ Deferral checklist (to complete before Phase 1 close):
 
 ---
 
-## HYGIENE-02 — AI SDK v6 codemod (Plan 06 — pending)
+## HYGIENE-02 — AI SDK v6 codemod
 
-*(filled in when Plan 06 completes)*
+**Plan:** 01-02-ai-sdk-codemod-PLAN.md
+**Commit:** 005dc82
+**Status:** ✓ VERIFIED
+
+Evidence:
+- Pre-flight grep for `from "ai"` / `from "@ai-sdk/*"` across `src/`, `scripts/`, `public/`: **zero matches** (confirms CONTEXT D-16b — codebase has no AI SDK imports)
+- Codemod invocation: `npx --yes @ai-sdk/codemod@3.0.4 v6 src/ scripts/`
+  - Output: `Starting v6 codemods...` → `v6 codemods complete.`
+  - Zero source files modified (as expected per D-16b — codemod walked no source)
+- Dependency bumps in `package.json`:
+  - `ai`: `^6.0.86` → `^6.0.168` (current npm-latest at run time)
+  - `@ai-sdk/anthropic`: `^3.0.44` → `^3.0.71` (current npm-latest at run time)
+- `@ai-sdk/react` retained at `^3.0.88` — removal deferred to HYGIENE-01 (Plan 07)
+- `npm run build`: exit 0 (Next.js 16.2.3 production build green; middleware-deprecation warning is pre-existing per RESEARCH Pitfall #7 and out of scope)
+- `npm run test:run`: exit 0 — 257/257 tests passing (same count as HYGIENE-06 baseline; no test regressions)
+- `git diff HEAD~1 HEAD --name-only` post-commit: ONLY `package.json` + `package-lock.json` — zero diff in `src/`, `scripts/`, or `public/` (matches D-16b expectation)
+- Phase 5 (COACH-02) will be first consumer of v6 idioms when `/api/rehearsal-feedback` is rewritten; HYGIENE-02 puts the scaffolding in place ahead of that work
 
 ---
 
