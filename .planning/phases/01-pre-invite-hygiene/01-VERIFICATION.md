@@ -3,6 +3,9 @@ phase: 1
 slug: pre-invite-hygiene
 status: in_progress
 created: 2026-04-21
+verifier_status: human_needed
+verifier_score: 5/7 verified, 2/7 deferred-human
+verifier_verdict_date: 2026-04-20
 ---
 
 # Phase 1 Verification Log
@@ -158,3 +161,86 @@ Evidence:
 - [x] `npm run test:run` green on final tree
 - [ ] Shannon's iPhone test recorded in HYGIENE-05 — DEFERRED
 - [ ] Runbook rehearsed on preview deploy (HYGIENE-07) — DEFERRED
+
+---
+
+## Verifier Final Verdict
+
+**Verifier:** Claude (gsd-verifier)
+**Verified:** 2026-04-20
+**Status:** `human_needed`
+**Score:** 5/7 success criteria VERIFIED automated + 2/7 DEFERRED to Shannon manual; 0/7 FAILED
+**Re-verification:** No (initial phase verification)
+
+### Decision rationale
+
+Every code-side must-have has been independently re-verified against the actual codebase (not just trusted from SUMMARY claims). All automated checks pass. Two items — HYGIENE-05 (iPhone + iCloud Private Relay round-trip) and the HYGIENE-07 rehearsal leg — are documented-deferred manual tasks that Shannon chose on 2026-04-21 to execute at the Phase 1 close gate alongside outside-lodge invitation prep. These are NOT failures: the code work is done, the preconditions for manual testing exist, and the deferral is documented with full checklists in this VERIFICATION.md.
+
+Per CONTEXT D-21, Phase 1 done-gate explicitly includes "Shannon's iPhone check." Strict reading of the gate means the phase cannot flip to `complete` until Shannon finishes the two deferred items. This matches `human_needed` — automated work passes; awaiting human verification — rather than `gaps_found` (which would imply something was built wrong).
+
+### Per–success-criterion verdict
+
+| # | Success Criterion (from ROADMAP Phase 1) | Verdict | Evidence |
+|---|------------------------------------------|---------|----------|
+| 1 | `npm ls` shows no `natural`/`uuid`/`@ai-sdk/react`/`@types/uuid`; production bundle no longer ships their code | ✓ PASS | `package.json` contains none of the four names (lines 13-24, 25-39). `npm ls natural uuid @ai-sdk/react @types/uuid` → only `uuid@10.0.0` appears, strictly as a transitive of `resend@6.11.0 → svix@1.90.0` (expected, documented). `npm run build` exits 0. |
+| 2 | `ai` SDK idioms aligned with v6 conventions across codebase (codemod run clean) | ✓ PASS | `package.json` line 15: `"ai": "^6.0.168"`; line 14: `"@ai-sdk/anthropic": "^3.0.71"`. Grep for `from "ai"` / `from "@ai-sdk/*"` in src/, scripts/, public/ → zero matches (no source to transform; version bump is the effective change). |
+| 3 | `X-Robots-Tag: noindex` in all app-route response headers + `public/landing.html` contains zero real ritual text | ✓ PASS (code); preview-curl DEFERRED | `next.config.ts` line 35: `{ key: "X-Robots-Tag", value: "noindex, nofollow" }` in `SECURITY_HEADERS` applied to `source: "/:path*"`. `public/landing.html` line 6: `<meta name="robots" content="noindex, nofollow">`. Grep blocklist (officer codes, obligation vocab, cipher punctuation, working-specific phrases) against landing.html → zero matches. Preview-deploy `curl -I` header confirmation rolls up with HYGIENE-05 preview session. |
+| 4 | Shannon has completed a live magic-link sign-in on iPhone behind iCloud Private Relay | ⏸ DEFERRED-HUMAN | No code involved — pure manual test. 7-step deferral checklist live in HYGIENE-05 section. Shannon chose 2026-04-21 to batch with HYGIENE-07 rehearsal at Phase 1 close gate. |
+| 5 | A test exists that fails if `.mram` routes are added back to the middleware matcher | ✓ PASS | `src/__tests__/middleware.test.ts` — 54 lines, imports `config` by name from `../middleware`, constructs `new RegExp("^" + matcherString + "$")`, and asserts `.mram` paths (flat / nested / hyphenated) return `false`. Includes a positive-match sanity case so the negatives aren't vacuous. Test is part of the 257/257 green suite. Inverse-check: `src/middleware.ts` line 134 still contains `mram` in the extension alternation — if removed, the test fails. |
+| 6 | A written shared-secret rotation runbook exists + has been rehearsed in staging at least once | ⏸ PARTIAL — runbook ✓; rehearsal DEFERRED-HUMAN | `docs/runbooks/SECRET-ROTATION.md` exists, 234 lines, covers both `RITUAL_CLIENT_SECRET` and `JWT_SECRET`, uses atomic `vercel env update` (production path), documents CLI v51.x `env rm+add` limitation (preview path), JWT → session-invalidation callout present. Rehearsal leg (end-to-end execution on Vercel preview) is the deferred piece. 6-step deferral checklist live in HYGIENE-07 section. |
+
+### Per–requirement-ID trace
+
+All 7 HYGIENE-XX are explicitly claimed by a PLAN's `requirements:` frontmatter (one per plan). REQUIREMENTS.md maps each to Phase 1 with "Pending" status. No orphan IDs.
+
+| Requirement | Source Plan | Commit | Verifier status | Codebase evidence |
+|-------------|-------------|--------|-----------------|-------------------|
+| HYGIENE-01 | Plan 07 (01-01-package-cleanup-PLAN.md) | b82aefe | ✓ SATISFIED | `package.json` lines 13-24, 25-39 — four names absent; `@ai-sdk/anthropic`/`ai` retained. |
+| HYGIENE-02 | Plan 06 (01-02-ai-sdk-codemod-PLAN.md) | 005dc82 | ✓ SATISFIED | `package.json` line 14: `"@ai-sdk/anthropic": "^3.0.71"`; line 15: `"ai": "^6.0.168"`. |
+| HYGIENE-03 | Plan 01 (01-03-noindex-PLAN.md) | 2135496 | ✓ SATISFIED (code) | `next.config.ts:35`, `public/landing.html:6`. |
+| HYGIENE-04 | Plan 03 (01-04-landing-audit-PLAN.md) | 2b68c72 | ✓ SATISFIED | 4-pattern grep blocklist returns zero matches against `public/landing.html`. |
+| HYGIENE-05 | Plan 05 (01-05-iphone-verify-PLAN.md) | 47a0f78 | ⏸ DEFERRED-HUMAN | No code; manual test deferred by Shannon 2026-04-21. |
+| HYGIENE-06 | Plan 02 (01-06-matcher-test-PLAN.md) | 9cfbb3a | ✓ SATISFIED | `src/__tests__/middleware.test.ts` (54 lines) + `src/middleware.ts:134` still contains `mram` in alternation. Full suite 257/257. |
+| HYGIENE-07 | Plan 04 (01-07-rotation-runbook-PLAN.md) | 66b4d93 | ⏸ PARTIAL (runbook satisfied; rehearsal DEFERRED-HUMAN) | `docs/runbooks/SECRET-ROTATION.md` (234 lines) satisfies the write; rehearsal deferred by Shannon 2026-04-21. |
+
+### Cross-reference: actual codebase + commands run by verifier
+
+Commands executed as part of this verification (all on the current tree, not re-read from SUMMARY claims):
+
+- `npm run build` → `✓ Compiled successfully in 9.5s`, exit 0
+- `npm run test:run` → `Test Files 16 passed (16) / Tests 257 passed (257)`, exit 0
+- `npm ls natural uuid @ai-sdk/react @types/uuid` → only `uuid@10.0.0` listed, strictly transitive via `resend → svix` (expected + documented)
+- Grep `from "natural|uuid|@ai-sdk/react"` in `src/`, `scripts/`, `public/` → zero matches
+- Grep for ritual vocab (WM/SW/JW/obligation/cable-tow/…) in `public/landing.html` → zero matches
+- `git log --oneline -14` → 7 `hygiene-NN:` commits + 6 `docs(01-NN):` commits present (Plan 05 HYGIENE-05 has no separate docs commit because its evidence is entirely in-VERIFICATION.md; the deferral note rides on the `hygiene-05:` commit itself — verifier confirmed against history)
+
+Files independently inspected (not inferred from SUMMARY.md):
+
+- `package.json` — dependency/devDependency lists
+- `next.config.ts` — SECURITY_HEADERS + headers() function
+- `public/landing.html` (head + full-file grep blocklist)
+- `src/middleware.ts` — matcher regex unchanged, `.mram` in alternation
+- `src/__tests__/middleware.test.ts` — regression test body + assertion count
+- `docs/runbooks/SECRET-ROTATION.md` — line count + `vercel env update` coverage + both secrets referenced
+
+### Notes on the two deferrals
+
+**These are not gaps.** They are explicit human-verification items tracked in this document with 6-7 step closure checklists. The executor(s) cannot close them; Shannon must:
+
+1. **HYGIENE-05:** 2-3 min of Shannon's time on an iPhone with iCloud Private Relay enabled — record outcome in HYGIENE-05 checklist, flip ⏸ → ✓.
+2. **HYGIENE-07 rehearsal:** 15-30 min of Shannon's time driving the runbook end-to-end against a Vercel preview deploy — record runbook gaps (if any), apply fixes as `hygiene-07: incorporate rehearsal fixes`, record rehearsal date + preview URL, flip ⏸ → ✓.
+
+Both are expected at the same Shannon sweep immediately before sending the first outside-lodge invitation. Shannon has full agency on timing.
+
+### Recommended next-step routing
+
+- **Do not mark Phase 1 `complete` yet.** Frontmatter `status` stays `in_progress` until Shannon finishes both ⏸ items. This is deliberate — the single signal preventing accidental outside-lodge invitation before manual verification.
+- **Phase 2 (Safety Floor) planning is NOT blocked.** Phase 2 depends on Phase 1 per ROADMAP, but the dependency is code-side (HYGIENE-01 + HYGIENE-02) and those are ✓ VERIFIED. Shannon can begin Phase 2 planning in parallel with his manual sweep; only invitation-to-outside-lodges is blocked on the two deferrals.
+- **When Shannon finishes both manual items:**
+  1. Edit HYGIENE-05 and HYGIENE-07 sections above: flip ⏸ → ✓, add timestamps/iOS version/preview URL.
+  2. Check the two remaining boxes in the "Phase 1 done gate" checklist.
+  3. Flip frontmatter `status: in_progress` → `status: complete`.
+  4. Commit as `docs(phase-1): close phase 1 done gate after shannon manual verification`.
+  5. Phase 1 is then officially complete and outside-lodge invitations are unblocked.
+- **If the iPhone test fails** (Private-Relay delivery doesn't work end-to-end), file a separate issue and DO NOT close Phase 1 — this is real regression risk, not a paperwork step.
+- **If the rehearsal surfaces runbook gaps** (e.g., CLI version skew, missing step), apply fixes and re-commit as `hygiene-07: incorporate rehearsal fixes` before flipping ⏸ → ✓.
