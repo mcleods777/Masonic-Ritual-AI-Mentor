@@ -60,9 +60,31 @@ Evidence:
 
 ---
 
-## HYGIENE-07 — Shared-secret rotation runbook (Plan 04 — pending)
+## HYGIENE-07 — Shared-secret rotation runbook
 
-*(filled in when Plan 04 completes)*
+**Plan:** 01-07-rotation-runbook-PLAN.md
+**Commit:** (this plan's hygiene-07 commit — fill in with the actual SHA after committing)
+**Status:** ⏸ RUNBOOK LANDED; REHEARSAL DEFERRED to Phase 1 close gate
+
+Evidence:
+- `docs/runbooks/SECRET-ROTATION.md` created (new folder `docs/runbooks/`, 234 lines)
+- Covers rotation of both `RITUAL_CLIENT_SECRET` and `JWT_SECRET` per CONTEXT D-01
+- Production path uses atomic `vercel env update` per D-05b (no window-of-unset)
+- Preview-branch path documents the CLI v51.x limitation that forces rm+add, explicit window-of-unset warning, and Shannon-only-rehearsal mitigation (per checker revision)
+- JWT session-invalidation side effect (D-02) called out as expected behavior, not a bug
+- Install check, rollback section, trailing-newline + preview-branch-arg footguns all documented
+- Structure matches `docs/BAKE-WORKFLOW.md` analog per PATTERNS.md §2
+- `npm run build` exit 0, `npm run test:run` 257/257 (docs-only change, no source impact)
+
+**Rehearsal status (per D-04):** ⏸ DEFERRED — Shannon chose on 2026-04-21 to defer the end-to-end Vercel preview rehearsal. The runbook exists and is accurate to the best of pre-rehearsal knowledge, but has not been executed against a live preview deploy. **Phase 1 done-gate requires this rehearsal before inviting outside lodges** — it is open work, not closed.
+
+Rehearsal checklist (to complete before Phase 1 close):
+- [ ] Vercel CLI installed and authenticated on Shannon's machine
+- [ ] Create rehearsal branch, push, observe preview URL
+- [ ] Run the full production rotation steps against the preview
+- [ ] Verify magic-link round-trip works on rotated preview
+- [ ] Note any runbook gaps; apply fixes; re-commit as `hygiene-07: incorporate rehearsal fixes`
+- [ ] Flip status above from ⏸ to ✓ and record rehearsal date + preview URL used
 
 ---
 
