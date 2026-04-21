@@ -10,7 +10,7 @@
 
 | File | New/Modified | Role | Data Flow | Closest Analog | Match Quality |
 |------|--------------|------|-----------|----------------|---------------|
-| `src/middleware.test.ts` | NEW | unit test (vitest) | read-only import + pure-function regex assertions | `src/lib/__tests__/rehearsal-decision.test.ts` | exact (same framework, same "pure-logic + it.each + no mocks" shape) |
+| `src/__tests__/middleware.test.ts` | NEW | unit test (vitest) | read-only import + pure-function regex assertions | `src/lib/__tests__/rehearsal-decision.test.ts` | exact (same framework, same "pure-logic + it.each + no mocks" shape) |
 | `docs/runbooks/SECRET-ROTATION.md` | NEW | operational runbook | human-procedure doc, inline CLI | `docs/BAKE-WORKFLOW.md` | exact (same heading hierarchy, inline code fences, troubleshooting tail) |
 | `.planning/phases/01-pre-invite-hygiene/01-VERIFICATION.md` | NEW | phase evidence log | append-only human notes | `.planning/phases/01-pre-invite-hygiene/01-VALIDATION.md` (structure reference only) | partial — no prior VERIFICATION.md exists in repo; planner to follow .planning convention |
 | `next.config.ts` | MODIFIED | config | build-time → Vercel edge headers | n/a — file is its own analog; add one row to existing `SECURITY_HEADERS` array | trivial |
@@ -18,14 +18,14 @@
 | `package.json` | MODIFIED | build config | npm dependency manifest | n/a — standard `npm uninstall` / `npm install` semantics | trivial |
 
 **Data flow notes:**
-- `src/middleware.test.ts` imports `config` from `../middleware` (one step up from the test file) — but vitest config includes `src/**/*.test.{ts,tsx}` so a flat co-located `src/middleware.test.ts` importing from `./middleware` works identically.
-- The repo's existing test convention is **`src/lib/__tests__/<name>.test.ts`** (subdirectory), not co-located at sibling level. CONTEXT D-11 explicitly overrides to co-located `src/middleware.test.ts` — the vitest glob `src/**/*.test.{ts,tsx}` covers both so no config change needed. Planner should note this deliberate deviation in the commit message.
+- `src/__tests__/middleware.test.ts` imports `config` from `../middleware` (one step up from the test file, since middleware.ts lives at `src/middleware.ts` and the test lives in the `__tests__/` subdirectory of src/).
+- CONTEXT D-11 (updated 2026-04-20 post-pattern-mapping) locked the test at `src/__tests__/middleware.test.ts` to match the repo's actual test convention (`src/lib/__tests__/rehearsal-decision.test.ts` is the exemplar). The vitest glob `src/**/*.test.{ts,tsx}` picks this up without any config change.
 
 ---
 
 ## Pattern Assignments
 
-### 1. `src/middleware.test.ts` (unit test, pure-function regex assertions)
+### 1. `src/__tests__/middleware.test.ts` (unit test, pure-function regex assertions)
 
 **Analog:** `/home/mcleods777/Masonic-Ritual-AI-Mentor/src/lib/__tests__/rehearsal-decision.test.ts`
 
@@ -43,11 +43,11 @@ import {
 } from "../rehearsal-decision";
 ```
 
-For the new middleware test, import only `config` (the named export at `src/middleware.ts:125-136`):
+For the new middleware test (at `src/__tests__/middleware.test.ts`), import only `config` (the named export at `src/middleware.ts:125-136`) from the parent directory:
 
 ```typescript
 import { describe, it, expect } from "vitest";
-import { config } from "./middleware";
+import { config } from "../middleware";
 ```
 
 **Core pattern — describe/it with regression comments** (rehearsal-decision.test.ts lines 35-45):

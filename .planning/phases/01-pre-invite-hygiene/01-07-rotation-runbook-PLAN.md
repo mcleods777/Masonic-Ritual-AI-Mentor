@@ -2,7 +2,7 @@
 phase: 01-pre-invite-hygiene
 plan: 04
 type: execute
-wave: 1
+wave: 4
 depends_on: [03]
 files_modified:
   - docs/runbooks/SECRET-ROTATION.md
@@ -129,7 +129,11 @@ Known footguns (from project memory — must appear in runbook):
        c. Add preview-scoped secrets USING THE EXPLICIT BRANCH ARG (footgun): `printf "%s" "<TEST>" | vercel env add RITUAL_CLIENT_SECRET preview rotation-rehearsal`. Same for JWT_SECRET.
        d. Trigger preview deploy by pushing to the branch: `git push origin rotation-rehearsal`.
        e. Open the preview URL; request magic link; tap; confirm auth works.
-       f. Rotate the preview secrets (run `vercel env update NAME preview` with new values, though note: `update` does not scope by branch — for preview-branch values you `vercel env rm NAME preview rotation-rehearsal --yes` then `vercel env add NAME preview rotation-rehearsal` with the new value). Document this asymmetry in the runbook as a known quirk.
+       f. Rotate the preview secrets. **The runbook content for this step MUST make three things explicit** (not just mention them in passing):
+          (a) **NAME the window-of-unset risk.** Between `vercel env rm` and `vercel env add` the preview app will have NO secret set — requests hitting the preview during that window will fail with 401. This is the SAME FOOTGUN that CONTEXT D-05b avoids for production. For production rotations, ALWAYS use `vercel env update` (atomic, no window-of-unset). The rm+add path is ONLY acceptable here because the preview branch is Shannon-only during rehearsal.
+          (b) **DOCUMENT the CLI limitation that forces rm+add.** `vercel env update` (as of CLI v51.x) cannot scope to a specific git branch within the preview environment — it rotates the env var across ALL preview branches. Rotating a preview-branch-scoped secret therefore requires `vercel env rm NAME preview rotation-rehearsal --yes` followed by `vercel env add NAME preview rotation-rehearsal` with the new value. Treat this as a known Vercel CLI asymmetry, not a runbook defect.
+          (c) **RECOMMEND the mitigation.** During this rehearsal Shannon is the only user of the preview branch, so the window-of-unset is harmless. If this runbook is ever reused to rotate a preview-branch secret that other users touch (e.g. a stakeholder preview), pause that preview's traffic first — OR bring up a second preview on a fresh branch, swap DNS / shared URL over to it, then rotate the old preview's secret after it has no live users.
+          The runbook MUST write out (a), (b), and (c) in the preview-rotation section — not buried in troubleshooting — so the reader sees the risk named at the point of action, not after something has already broken.
        g. Redeploy the preview (push an empty commit: `git commit --allow-empty -m "re-deploy after rotation rehearsal"`; `git push`).
        h. Re-verify sign-in works.
        i. Cleanup: `vercel env rm RITUAL_CLIENT_SECRET preview rotation-rehearsal --yes` + same for JWT_SECRET.

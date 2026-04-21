@@ -2,7 +2,7 @@
 phase: 01-pre-invite-hygiene
 plan: 02
 type: execute
-wave: 1
+wave: 2
 depends_on: [01]
 files_modified:
   - src/__tests__/middleware.test.ts

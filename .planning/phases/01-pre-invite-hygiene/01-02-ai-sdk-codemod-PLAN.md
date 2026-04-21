@@ -2,7 +2,7 @@
 phase: 01-pre-invite-hygiene
 plan: 06
 type: execute
-wave: 1
+wave: 6
 depends_on: [05]
 files_modified:
   - package.json

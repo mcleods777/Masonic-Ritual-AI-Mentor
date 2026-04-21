@@ -164,10 +164,10 @@ From public/landing.html (<head> block, lines 3-12):
     Do NOT audit or redact landing.html body content — that is plan 03 (HYGIENE-04). This plan only adds the noindex meta tag. Do NOT switch to XHTML-style self-closing `/>`; the existing file uses HTML5 style without it.
   </action>
   <verify>
-    <automated>grep -c 'name="robots" content="noindex, nofollow"' /home/mcleods777/Masonic-Ritual-AI-Mentor/public/landing.html</automated>
+    <automated>[ "$(grep -c 'name="robots" content="noindex, nofollow"' /home/mcleods777/Masonic-Ritual-AI-Mentor/public/landing.html)" = "1" ]</automated>
   </verify>
   <acceptance_criteria>
-    - grep `grep -c 'name="robots" content="noindex, nofollow"' public/landing.html` returns exactly `1`
+    - strict equality check `[ "$(grep -c 'name="robots" content="noindex, nofollow"' public/landing.html)" = "1" ]` exits 0 (exactly one match — not zero, not duplicated)
     - grep `grep -n 'name="robots"' public/landing.html` shows the meta tag on a line BEFORE the first `<title>` occurrence
     - `wc -l public/landing.html` shows exactly one more line than before (one line added, no other edits)
     - File still starts with `<!DOCTYPE html>` and head still contains the original `<meta charset="utf-8">`, `<meta name="viewport"`, and `<title>` tags

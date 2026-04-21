@@ -2,7 +2,7 @@
 phase: 01-pre-invite-hygiene
 plan: 03
 type: execute
-wave: 1
+wave: 3
 depends_on: [02]
 files_modified:
   - public/landing.html

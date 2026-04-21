@@ -519,21 +519,15 @@ grep -E '\b[A-Z][a-z]+ of the [A-Z][a-z]+' public/landing.html
 | A4 | Rotating `JWT_SECRET` in production cleanly invalidates all live pilot sessions with no residual damage. | CONTEXT D-02 | `src/lib/auth.ts` uses jose HS256; sessions signed with the old key simply fail `verifySessionToken` and fall through to the `/signin` redirect. No database entries to clean up. LOW risk. |
 | A5 | Shannon's iPhone can complete an end-to-end magic-link flow on iCloud Private Relay today. | HYGIENE-05 | Magic-link deliverability from Resend to Private Relay addresses has had transient failures in 2025 (see Common Pitfalls #5). If this fails during HYGIENE-05, it's not a Phase 1 code defect — it's environmental. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Should HYGIENE-02 use `v6` or `upgrade` subcommand?**
-   - What we know: `v6` runs only v5→v6 codemods; `upgrade` runs all codemods + bumps package.json deps.
-   - What's unclear: CONTEXT D-16 wrote `upgrade v6` which is neither clean syntax.
-   - Recommendation: Use `v6 src/ scripts/` + a manual `npm install ai@^6.0.168 @ai-sdk/anthropic@^3.0.71` as a sibling step in the same commit. Keeps scope narrow and version-bump decision explicit.
+All three open questions were resolved during context-refinement after research (Shannon via AskUserQuestion, 2026-04-20). Plans implement the chosen resolutions.
 
-2. **Does `/FOO.MRAM` match or not match the current matcher?**
-   - What we know: Extension alternation is lowercase-only `(?:...|mram|...)`; JS RegExp is case-sensitive by default.
-   - What's unclear: CONTEXT D-12 asserts uppercase is also excluded, but that contradicts the current regex.
-   - Recommendation: Adopt Pattern 1 Option C — test `/FOO.MRAM` AS NOT excluded (documents current behavior, locks it against silent reversal). Flag in HYGIENE-06's commit for Shannon's review; adjust matcher only if he wants uppercase excluded (out of scope for Phase 1 regardless).
+1. **RESOLVED — HYGIENE-02 codemod invocation:** Use `npx @ai-sdk/codemod@3.0.4 v6 src/ scripts/` (version-pinned, correct `v6` subcommand, explicit source dirs). Shannon confirmed via AskUserQuestion. CONTEXT D-16 updated 2026-04-20 with the correct syntax; the planner encoded this in `01-02-ai-sdk-codemod-PLAN.md` Task 2.
 
-3. **What order: codemod then version bump, or version bump then codemod?**
-   - What we know: `v6` codemod does NOT touch package.json. The `upgrade` subcommand DOES.
-   - Recommendation: Given there are zero `ai` imports, the order is irrelevant for source. Recommend: (a) `npm install ai@^6.0.168 @ai-sdk/anthropic@^3.0.71` to update package.json, (b) `npx @ai-sdk/codemod@3.0.4 v6 src/ scripts/` to apply codemods (no-op), (c) `npm run build && npm test`. All in one commit.
+2. **RESOLVED — `/FOO.MRAM` test assertion:** Drop uppercase from the test matrix. Shannon confirmed via AskUserQuestion: app URLs are lowercase by convention, no uppercase `.mram` files are served, and making the matcher case-insensitive is scope creep. CONTEXT D-12 updated 2026-04-20; the matcher test asserts only lowercase paths (`/foo.mram`, `/deeply/nested/path/ritual.mram`, `/ea-degree.mram`, `/hyphen-name.mram`).
+
+3. **RESOLVED — Codemod vs version-bump ordering:** The codemod runs effectively as a no-op on this codebase (zero `ai` imports). The plan does: (a) `npm install ai@^6.0.168 @ai-sdk/anthropic@^3.0.71` to update `package.json`, (b) `npx @ai-sdk/codemod@3.0.4 v6 src/ scripts/` as mechanical safety-net, (c) `npm run build && npm run test:run` to prove nothing broke. All in one commit (`hygiene-02:`). Encoded in `01-02-ai-sdk-codemod-PLAN.md` Task 2.
 
 ## Environment Availability
 

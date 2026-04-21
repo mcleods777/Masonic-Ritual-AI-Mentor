@@ -2,7 +2,7 @@
 phase: 01-pre-invite-hygiene
 plan: 05
 type: execute
-wave: 1
+wave: 5
 depends_on: [04]
 files_modified:
   - .planning/phases/01-pre-invite-hygiene/01-VERIFICATION.md
