@@ -17,11 +17,7 @@
 import { beforeEach, afterEach, describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
 import { config, middleware } from "../middleware";
-import {
-  SESSION_COOKIE_NAME,
-  signClientToken,
-  signSessionToken,
-} from "@/lib/auth";
+import { signClientToken, signSessionToken } from "@/lib/auth";
 
 const GOOD_SECRET = "test-secret-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"; // 44 chars
 

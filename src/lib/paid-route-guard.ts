@@ -5,10 +5,9 @@
  * upstream AI work:
  *
  *   1. RITUAL_EMERGENCY_DISABLE_PAID kill switch (SAFETY-08, D-16/D-17)
- *   2. Client-token verification (SAFETY-05/09 — added in Plan 05)
+ *   2. Client-token verification (SAFETY-05/09, D-14)
  *   3. Per-user + per-route rate-limit buckets (SAFETY-02, SAFETY-03,
- *      D-01/D-02/D-03)
- *   4. hashedUser derivation for audit-log emission (D-03)
+ *      D-01/D-02/D-03) keyed off tokenPayload.sub (canonical hashedUser)
  *
  * Each of the 9 paid routes (7 TTS + transcribe + rehearsal-feedback)
  * starts with:
@@ -17,25 +16,32 @@
  *   if (guard.kind === "deny") return guard.response;
  *   const { hashedUser } = guard;
  *
- * The guard reads only headers + cookies, never the request body — so
- * transcribe (formData) and feedback (JSON) both route through the same
- * helper without needing to parse the body twice.
+ * The guard reads only headers, never the request body — so transcribe
+ * (formData) and feedback (JSON) both route through the same helper
+ * without needing to parse the body twice.
  *
- * Wave 2 skeleton (this file): kill-switch + rate-limit + hashedUser
- * derivation only. Plan 05 (SAFETY-05/09) adds the requireClientToken gate
- * in the "client-token check" slot below. Plans 08/09 wire the helper into
- * the 9 paid route handlers.
+ * Defense-in-depth ordering (D-14): middleware verifies the Bearer
+ * client-token at the perimeter on /api/* (except /api/auth/*). This
+ * guard RE-VERIFIES at the route level so a future Next.js quirk that
+ * skips middleware cannot bypass paid-route auth. Middleware is perimeter;
+ * route-level is the last line.
+ *
+ * After Plan 05, hashedUser is sourced from `tokenPayload.sub` (the same
+ * hash minted by POST /api/auth/client-token, which uses
+ * hashedUserFromEmail(session.email)). This removes cookie-vs-IP drift
+ * risk — the guard no longer re-derives; it trusts the signed claim.
+ * Kill-switch fires BEFORE the client-token check so operators can cut
+ * the paid surface without needing a valid token.
  *
  * Pilot-scale pragmatism: rate-limit state is in-memory and resets on
  * cold start (same caveat as rate-limit.ts). Acceptable at pilot scale;
  * SAFETY-v2-01 documents the durable-store swap path.
  */
 
-import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { rateLimit, getClientIp } from "./rate-limit";
-import { SESSION_COOKIE_NAME, verifySessionToken } from "./auth";
+import { rateLimit } from "./rate-limit";
+import { verifyClientToken } from "./auth";
 
 export type PaidRouteName =
   | "tts:gemini"
@@ -73,20 +79,6 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // one-route misbehavior when the per-user aggregate is still healthy).
 const PER_ROUTE_HOUR_LIMIT = 100;
 
-function sha256Hex(input: string): string {
-  return crypto.createHash("sha256").update(input).digest("hex");
-}
-
-function hashedUserFromEmail(email: string): string {
-  return sha256Hex(email.trim().toLowerCase()).slice(0, 16);
-}
-
-function hashedUserFromIp(ip: string): string {
-  // Namespace with "ip:" prefix so the IP-derived keyspace cannot collide
-  // with an email-derived key that happens to hash to the same prefix.
-  return sha256Hex(`ip:${ip}`).slice(0, 16);
-}
-
 /**
  * Body shapes per D-17:
  *   - /api/tts/*       → { error: "paid_disabled", fallback: "pre-baked" }
@@ -123,18 +115,23 @@ function rateLimitedResponse(retryAfterSeconds: number): NextResponse {
  *     hashedUser for audit emit; userKey is a named alias (same value)
  *     callers can use to compose additional rate-limit keys if needed.
  *   - { kind: "deny", response } — caller should `return response`
- *     immediately; the response is a fully-formed NextResponse (503/429,
- *     later 401 once Plan 05 lands client-token).
+ *     immediately; the response is a fully-formed NextResponse
+ *     (503 kill-switch, 401 client-token-invalid, or 429 rate-limited).
  *
- * Wave 2 behavior:
+ * Behavior:
  *   1. Kill switch — `RITUAL_EMERGENCY_DISABLE_PAID === "true"` (strict
  *      string equality per RESEARCH Assumption A5; "1", "yes", "TRUE" do
- *      NOT flip the switch).
- *   2. (reserved) Client-token verification — Plan 05 adds here.
- *   3. userKey derivation — valid session cookie → email-hash; otherwise
- *      IP-hash fallback (D-03).
- *   4. Rate-limit buckets — per-user hour (60) → per-user day (300) →
- *      per-route hour (100). First failing bucket short-circuits with 429.
+ *      NOT flip the switch). Fires FIRST so operators can cut the paid
+ *      surface without a valid client-token.
+ *   2. Client-token verification (SAFETY-05/09, D-14) — Authorization
+ *      header must carry `Bearer <token>` with audience "client-token".
+ *      Missing/invalid → 401 `{error:"client_token_invalid"}`. Middleware
+ *      already enforces this on /api/*; the route-level re-check is
+ *      belt-and-suspenders against a future middleware-skip quirk.
+ *   3. Rate-limit buckets — per-user hour (60) → per-user day (300) →
+ *      per-route hour (100). Keyed off tokenPayload.sub (canonical
+ *      hashedUser from the client-token mint). First failing bucket
+ *      short-circuits with 429.
  */
 export async function applyPaidRouteGuards(
   request: NextRequest,
@@ -150,18 +147,29 @@ export async function applyPaidRouteGuards(
     };
   }
 
-  // 2. Client-token verification slot (Plan 05, SAFETY-05/09).
-  // TODO(Plan 05): const tokenCheck = requireClientToken(request);
-  //                if (!tokenCheck.ok) return { kind: "deny", response:
-  //                  NextResponse.json({ error: "client_token_invalid" },
-  //                    { status: 401 }) };
+  // 2. Client-token verification (SAFETY-05/09, D-14 defense-in-depth).
+  //    Middleware already enforces on /api/*; route-level re-check is
+  //    belt-and-suspenders against a future Next.js middleware-skip quirk.
+  const authHeader = request.headers.get("authorization");
+  const bearer = authHeader?.startsWith("Bearer ")
+    ? authHeader.slice(7)
+    : undefined;
+  const tokenPayload = await verifyClientToken(bearer);
+  if (!tokenPayload) {
+    return {
+      kind: "deny",
+      response: NextResponse.json(
+        { error: "client_token_invalid" },
+        { status: 401 },
+      ),
+    };
+  }
 
-  // 3. userKey derivation (D-03).
-  const cookieValue = request.cookies.get(SESSION_COOKIE_NAME)?.value;
-  const session = await verifySessionToken(cookieValue);
-  const hashedUser = session
-    ? hashedUserFromEmail(session.email)
-    : hashedUserFromIp(getClientIp(request));
+  // 3. userKey = tokenPayload.sub (canonical hashedUser from mint). Mint
+  //    side (POST /api/auth/client-token) computes
+  //    sha256(session.email).slice(0,16), so both sides agree without
+  //    re-derivation and there's no cookie-vs-IP drift.
+  const hashedUser = tokenPayload.sub;
   const userKey = hashedUser;
 
   // 4. Rate-limit buckets (D-01/D-02/D-03), checked in priority order.
