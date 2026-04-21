@@ -48,6 +48,26 @@ interface RehearsalModeProps {
   documentTitle?: string;
 }
 
+// SAFETY-06: session step ceiling for advanceInternal. Default 200 exceeds
+// the longest baked ritual's line count (~160). Resets on explicit user
+// navigation (jumpToLine, startRehearsal) but NEVER on auto-advance — a
+// runaway chain cannot reset its own counter. Belt-and-suspenders with
+// the server-side 300/5min counter in /api/rehearsal-feedback (Plan 03).
+const DEFAULT_MAX_SESSION_STEPS = 200;
+
+/** Resolve MAX_SESSION_STEPS, honoring NEXT_PUBLIC_RITUAL_MAX_STEPS env override. */
+export function resolveMaxSessionSteps(): number {
+  const raw = process.env.NEXT_PUBLIC_RITUAL_MAX_STEPS;
+  if (!raw) return DEFAULT_MAX_SESSION_STEPS;
+  const parsed = parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_SESSION_STEPS;
+}
+
+/** Pure ceiling gate. Counter is pre-incremented; 201st call at default trips halt. */
+export function checkStepCeiling(count: number, max: number): "allow" | "halt" {
+  return count > max ? "halt" : "allow";
+}
+
 type RehearsalState =
   | "setup"         // Picking a role
   | "ready"           // Role picked, ready to start
@@ -100,6 +120,9 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   const voiceMapRef = useRef<Map<string, RoleVoiceProfile>>(new Map());
   const cancelledRef = useRef(false);
   const advanceGenRef = useRef(0); // generation counter to prevent overlapping advanceToLine chains
+  // SAFETY-06: step-ceiling state (see MAX_SESSION_STEPS at module scope).
+  const stepCountRef = useRef(0);
+  const maxSessionStepsRef = useRef(resolveMaxSessionSteps());
   const scriptContainerRef = useRef<HTMLDivElement>(null);
   const startListeningRef = useRef<() => void>(() => {});
   const stopListeningRef = useRef<() => void>(() => { });
@@ -203,6 +226,9 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   const startRehearsal = useCallback(() => {
     warmAudioContext();
     cancelledRef.current = false;
+    // SAFETY-06: reset step ceiling + re-read env override on explicit start.
+    stepCountRef.current = 0;
+    maxSessionStepsRef.current = resolveMaxSessionSteps();
     sessionStartRef.current = new Date().toISOString();
     setCurrentIndex(0);
     setLineResults([]);
@@ -216,6 +242,17 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   // to advanceToLine() bumps the generation so any old chain exits.
   const advanceInternal = useCallback(async (index: number, gen: number) => {
     if (cancelledRef.current || index >= sections.length) {
+      setRehearsalState("complete");
+      return;
+    }
+
+    // SAFETY-06 session step ceiling gate.
+    stepCountRef.current += 1;
+    if (checkStepCeiling(stepCountRef.current, maxSessionStepsRef.current) === "halt") {
+      console.warn(
+        `[SAFETY-06] Session step ceiling (${maxSessionStepsRef.current}) reached — halting auto-advance`,
+      );
+      cancelledRef.current = true;
       setRehearsalState("complete");
       return;
     }
@@ -613,6 +650,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
       // Stop everything in-flight
       const gen = ++advanceGenRef.current;
       cancelledRef.current = false;
+      stepCountRef.current = 0; // SAFETY-06: reset on explicit Next/Back/line-click
       stopSpeaking();
       if (engineRef.current) {
         engineRef.current.stop();
