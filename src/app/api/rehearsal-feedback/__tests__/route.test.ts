@@ -150,10 +150,13 @@ describe("POST /api/rehearsal-feedback (SAFETY-03 + SAFETY-06)", () => {
     expect(record.kind).toBe("feedback");
     expect(record.route).toBe("/api/rehearsal-feedback");
     expect(record.hashedUser).toBe("fb01abcd12345678");
-    expect(typeof record.model).toBe("string");
-    expect(record.model.length).toBeGreaterThan(0);
+    // FeedbackRecord schema (audit-log.ts): variantId + promptTokens +
+    // completionTokens. `model` is intentionally NOT a field on
+    // FeedbackRecord — coach variant identity replaces model identity.
     expect(typeof record.variantId).toBe("string");
+    expect(record.variantId.length).toBeGreaterThan(0);
     expect(typeof record.promptTokens).toBe("number");
+    expect(record.promptTokens).toBeGreaterThan(0);
     expect(typeof record.completionTokens).toBe("number");
   });
 

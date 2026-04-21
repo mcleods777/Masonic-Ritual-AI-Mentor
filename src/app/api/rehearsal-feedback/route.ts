@@ -7,7 +7,22 @@
  *
  * Falls back to Mistral Small if GROQ_API_KEY is not set but
  * MISTRAL_API_KEY is available.
+ *
+ * SAFETY-03 / SAFETY-06: guard at the top (kill-switch + client-token
+ * + rate-limit) AND an additional `feedback:5min:<hashedUser>` counter
+ * of 300 calls / 5 minutes per user (CONTEXT §SAFETY-06 server-side
+ * belt-and-suspenders). audit-record emitted on stream completion.
  */
+
+import type { NextRequest } from "next/server";
+import crypto from "node:crypto";
+import { applyPaidRouteGuards } from "@/lib/paid-route-guard";
+import { emit } from "@/lib/audit-log";
+import { estimateCost } from "@/lib/pricing";
+import { rateLimit } from "@/lib/rate-limit";
+
+const sha256Hex = (s: string | Uint8Array | Buffer) =>
+  crypto.createHash("sha256").update(s).digest("hex");
 
 export const maxDuration = 10;
 
@@ -26,6 +41,30 @@ RULES:
 - NEVER quote or reveal the full ritual text.
 - NEVER reveal grips, passwords, signs, or modes of recognition.
 - Do NOT use markdown, bullet points, or formatting — spoken text only.`;
+
+/** Map the active provider to a PRICING_TABLE model id (input/output split). */
+function providerPricingKeys(model: string): {
+  inputKey: string;
+  outputKey: string;
+} {
+  if (model.startsWith("mistral-")) {
+    return {
+      inputKey: "mistral-small-latest-input",
+      outputKey: "mistral-small-latest-output",
+    };
+  }
+  // Default to Groq Llama (both the primary model and the env override
+  // settle into this bucket — the PRICING_TABLE splits in/out rates).
+  return {
+    inputKey: "groq-llama-3.3-70b-versatile-input",
+    outputKey: "groq-llama-3.3-70b-versatile-output",
+  };
+}
+
+/** Rough token estimate from character count (~4 chars/token for English). */
+function estimateTokens(text: string): number {
+  return Math.max(1, Math.ceil(text.length / 4));
+}
 
 /** Provider config resolved from available API keys. */
 function getProvider(): {
@@ -57,7 +96,27 @@ function getProvider(): {
   return null;
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
+  // SAFETY-03: kill-switch + client-token + rate-limit gate (BEFORE
+  // body parsing — guard only reads headers/Bearer).
+  const guard = await applyPaidRouteGuards(req, { routeName: "feedback" });
+  if (guard.kind === "deny") return guard.response;
+  const { hashedUser } = guard;
+
+  // SAFETY-06 server-side burst counter: per CONTEXT §SAFETY-06, 300
+  // calls / 5 minutes per hashed-user. Distinct 429 body shape so the
+  // client can tell burst-limit apart from the generic hour/day cap.
+  const burst = rateLimit(`feedback:5min:${hashedUser}`, 300, 5 * 60 * 1000);
+  if (!burst.allowed) {
+    return Response.json(
+      { error: "feedback_burst" },
+      {
+        status: 429,
+        headers: { "Retry-After": String(burst.retryAfterSeconds) },
+      },
+    );
+  }
+
   const provider = getProvider();
   if (!provider) {
     return Response.json(
@@ -75,7 +134,17 @@ export async function POST(req: Request) {
       lineNumber,
       totalLines,
       performanceContext,
-    } = await req.json();
+      variantId: bodyVariantId,
+    } = (await req.json()) as {
+      accuracy?: number;
+      wrongWords?: number;
+      missingWords?: number;
+      troubleSpots?: string[];
+      lineNumber?: number;
+      totalLines?: number;
+      performanceContext?: string;
+      variantId?: string;
+    };
 
     // Input size cap on paid LLM endpoint (CSO Finding 4). The context
     // field is the only user-controlled free-text — cap it here.
@@ -89,9 +158,9 @@ export async function POST(req: Request) {
     const userPrompt = [
       `The Brother just recited line ${lineNumber} of ${totalLines}.`,
       `Accuracy: ${accuracy}%`,
-      wrongWords > 0 ? `Wrong words: ${wrongWords}` : null,
-      missingWords > 0 ? `Missing words: ${missingWords}` : null,
-      troubleSpots?.length > 0
+      wrongWords && wrongWords > 0 ? `Wrong words: ${wrongWords}` : null,
+      missingWords && missingWords > 0 ? `Missing words: ${missingWords}` : null,
+      troubleSpots && troubleSpots.length > 0
         ? `Trouble spots: ${troubleSpots.slice(0, 5).join(", ")}`
         : null,
       performanceContext
@@ -103,6 +172,7 @@ export async function POST(req: Request) {
       .join(". ");
 
     // Stream from Groq/Mistral OpenAI-compatible endpoint
+    const t0 = Date.now();
     const response = await fetch(provider.url, {
       method: "POST",
       headers: {
@@ -130,7 +200,9 @@ export async function POST(req: Request) {
       );
     }
 
-    // Transform SSE stream → plain text stream for the client
+    // Transform SSE stream → plain text stream for the client.
+    // Accumulate the full completion text server-side so we can emit
+    // an audit record when the stream closes.
     const reader = response.body?.getReader();
     if (!reader) {
       return Response.json(
@@ -139,10 +211,15 @@ export async function POST(req: Request) {
       );
     }
 
+    const variantId = bodyVariantId ?? "mentor-v1";
+    const promptForHash = `${FEEDBACK_SYSTEM_PROMPT}\n\n${userPrompt}`;
+    const promptTokens = estimateTokens(promptForHash);
+
     const stream = new ReadableStream({
       async start(controller) {
         const decoder = new TextDecoder();
         let buffer = "";
+        let completionText = "";
 
         let malformed = 0;
         try {
@@ -168,6 +245,7 @@ export async function POST(req: Request) {
                 const content = parsed.choices?.[0]?.delta?.content;
                 if (content) {
                   controller.enqueue(new TextEncoder().encode(content));
+                  completionText += content;
                   malformed = 0;
                 }
               } catch {
@@ -183,6 +261,36 @@ export async function POST(req: Request) {
           console.error("Feedback stream error:", err);
         } finally {
           controller.close();
+          // SAFETY-03: emit audit record on stream completion. We emit
+          // regardless of partial-content errors — the upstream call
+          // was successful (we already checked response.ok), so the
+          // spend happened even if the client-facing stream stuttered.
+          const latencyMs = Date.now() - t0;
+          const completionTokens = estimateTokens(completionText);
+          const { inputKey, outputKey } = providerPricingKeys(provider.model);
+          const inputCost = estimateCost(
+            inputKey,
+            promptTokens,
+            "per-input-token",
+          );
+          const outputCost = estimateCost(
+            outputKey,
+            completionTokens,
+            "per-output-token",
+          );
+          emit({
+            kind: "feedback",
+            timestamp: new Date().toISOString(),
+            hashedUser,
+            route: "/api/rehearsal-feedback",
+            promptHash: sha256Hex(promptForHash),
+            completionHash: sha256Hex(completionText),
+            estimatedCostUSD: inputCost + outputCost,
+            latencyMs,
+            variantId,
+            promptTokens,
+            completionTokens,
+          });
         }
       },
     });
