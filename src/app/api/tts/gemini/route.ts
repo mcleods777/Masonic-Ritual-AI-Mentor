@@ -1,4 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "node:crypto";
+import { applyPaidRouteGuards } from "@/lib/paid-route-guard";
+import { emit } from "@/lib/audit-log";
+import { estimateCost } from "@/lib/pricing";
 
 /**
  * Proxy route for Google Gemini 3.1 Flash TTS API — streaming mode.
@@ -23,6 +27,9 @@ import { NextRequest, NextResponse } from "next/server";
  */
 
 import { STYLE_TAG_PATTERN } from "@/lib/styles";
+
+const sha256Hex = (s: string | Uint8Array | Buffer) =>
+  crypto.createHash("sha256").update(s).digest("hex");
 
 // Gemini TTS preview models, tried in order on 429. Each model has its
 // own daily quota bucket — when 3.1-flash hits its preview cap we can
@@ -64,6 +71,13 @@ function geminiEndpoint(model: string): string {
 const MAX_TEXT_CHARS = 2000;
 
 export async function POST(request: NextRequest) {
+  // SAFETY-03: kill-switch + client-token + rate-limit gate must run
+  // before any upstream work (and before body parsing — the guard only
+  // reads headers/cookies, never the body).
+  const guard = await applyPaidRouteGuards(request, { routeName: "tts:gemini" });
+  if (guard.kind === "deny") return guard.response;
+  const { hashedUser } = guard;
+
   const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
@@ -131,6 +145,7 @@ export async function POST(request: NextRequest) {
   let servedBy: string | null = null;
   let lastQuotaError: { model: string; status: number; body: string } | null =
     null;
+  const t0 = Date.now();
 
   for (const model of models) {
     const r = await fetch(`${geminiEndpoint(model)}&key=${apiKey}`, {
@@ -284,6 +299,27 @@ export async function POST(request: NextRequest) {
   const sampleRate = parseSampleRate(mimeType);
   const header = buildWavHeader(sampleRate, 1, 16, pcm.length);
   const wav = Buffer.concat([Buffer.from(header), pcm]);
+  const latencyMs = Date.now() - t0;
+
+  // SAFETY-03: emit audit record on successful audio response.
+  // Gemini TTS is priced per-audio-token — 25 tokens per second of audio
+  // (per PRICING_TABLE + PATTERNS §16). Convert PCM bytes → seconds using
+  // 16-bit (2-byte) samples at the stream's sample rate.
+  const audioSeconds = pcm.length / (sampleRate * 2);
+  const audioTokens = audioSeconds * 25;
+  emit({
+    kind: "tts",
+    timestamp: new Date().toISOString(),
+    hashedUser,
+    route: "/api/tts/gemini",
+    promptHash: sha256Hex(prompt),
+    completionHash: sha256Hex(pcm),
+    estimatedCostUSD: estimateCost(servedBy, audioTokens, "per-audio-token"),
+    latencyMs,
+    model: servedBy,
+    voice: voice ?? "default",
+    charCount: text.length,
+  });
 
   return new NextResponse(new Uint8Array(wav), {
     headers: {
