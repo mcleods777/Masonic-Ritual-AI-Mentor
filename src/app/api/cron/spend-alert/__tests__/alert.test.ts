@@ -24,14 +24,23 @@ import { NextRequest } from "next/server";
 const CRON_SECRET = "test-cron-secret-xxxxxxxxxxxxxxxx";
 
 // Mock resend BEFORE importing the route so the route picks up the mock.
-const sendMock = vi.fn();
-vi.mock("resend", () => ({
-  Resend: vi.fn().mockImplementation(() => ({
-    emails: {
-      send: sendMock,
+// vi.mock is hoisted; the factory cannot reference outer variables. We
+// stash the send mock on globalThis so tests can inspect + reset it.
+// Keeping it as a real constructable class preserves `new Resend(...)`
+// semantics the route relies on.
+vi.mock("resend", () => {
+  const g = globalThis as unknown as { __cronSendMock?: ReturnType<typeof vi.fn> };
+  g.__cronSendMock = vi.fn();
+  return {
+    Resend: class {
+      emails = { send: g.__cronSendMock! };
+      constructor(_apiKey: string) {
+        // apiKey ignored in tests.
+      }
     },
-  })),
-}));
+  };
+});
+const sendMock = (globalThis as unknown as { __cronSendMock: ReturnType<typeof vi.fn> }).__cronSendMock;
 
 // Dynamic mock for spend-tally so each test controls the reading.
 let spendReading: { aggregate: number; perUser: Array<{ hashedUser: string; total: number }> } = {
@@ -103,15 +112,9 @@ describe("GET /api/cron/spend-alert — alert body + Resend send", () => {
     expect(body).toEqual({ success: true, sent: true });
 
     expect(sendMock).toHaveBeenCalledTimes(1);
-    const args = sendMock.mock.calls[0][0] as {
-      from: string;
-      to: string;
-      subject: string;
-      html: string;
-      text: string;
-      idempotencyKey: string;
-    };
-    expect(args.idempotencyKey).toBe(`spend-alert-${yesterdayUtc()}`);
+    // Resend v6: payload is arg 0; { idempotencyKey } is arg 1.
+    const options = sendMock.mock.calls[0][1] as { idempotencyKey: string };
+    expect(options.idempotencyKey).toBe(`spend-alert-${yesterdayUtc()}`);
   });
 
   it("email body includes subject 'spend alert' + warm-container caveat + lookup CLI pointer + to=SPEND_ALERT_TO", async () => {
@@ -124,19 +127,18 @@ describe("GET /api/cron/spend-alert — alert body + Resend send", () => {
     const res = await GET(makeRequest());
     expect(res.status).toBe(200);
     expect(sendMock).toHaveBeenCalledTimes(1);
-    const args = sendMock.mock.calls[0][0] as {
+    const payload = sendMock.mock.calls[0][0] as {
       from: string;
       to: string;
       subject: string;
       html: string;
       text: string;
-      idempotencyKey: string;
     };
-    expect(args.subject.toLowerCase()).toContain("spend alert");
-    expect(args.text).toContain("warm-container");
-    expect(args.text).toContain("scripts/lookup-hashed-user.ts");
-    expect(args.to).toBe("shannon@test.example");
-    expect(args.from).toBe("noreply@test.example");
+    expect(payload.subject.toLowerCase()).toContain("spend alert");
+    expect(payload.text).toContain("warm-container");
+    expect(payload.text).toContain("scripts/lookup-hashed-user.ts");
+    expect(payload.to).toBe("shannon@test.example");
+    expect(payload.from).toBe("noreply@test.example");
   });
 
   it("fires alert when a single hashedUser > $3 even if aggregate ≤ $10", async () => {
