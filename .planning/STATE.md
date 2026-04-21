@@ -1,6 +1,6 @@
 # State: Masonic Ritual AI Mentor — v1 Invited-Lodge Milestone
 
-**Last updated:** 2026-04-20 (Phase 1 context gathered)
+**Last updated:** 2026-04-20 (Phase 1 planned, 7 plans ready to execute)
 
 ## Project Reference
 
@@ -13,22 +13,22 @@
 ## Current Position
 
 **Milestone:** v1 invited-lodge
-**Phase:** Phase 1 context gathered (no plans yet)
-**Plan:** None active
-**Status:** Awaiting `/gsd-plan-phase 1` to decompose into executable plans
+**Phase:** Phase 1 planned (7 plans, wave 1–7 serial chain)
+**Plan:** 7 PLAN.md files ready
+**Status:** Ready to execute — awaiting `/gsd-execute-phase 1`
 **Progress:** 0/7 phases complete
 
 ```
 [░░░░░░░░░░░░░░░░░░░░] 0% (0/7 phases)
 ```
 
-**Next action:** `/gsd-plan-phase 1` to decompose Phase 1 (Pre-invite Hygiene) into plans. CONTEXT.md captures 21 implementation decisions across 4 gray areas.
+**Next action:** `/gsd-execute-phase 1` to run plans in D-19 order (noindex → matcher test → landing audit → rotation runbook → iPhone verify → AI SDK codemod → package cleanup).
 
 ## Phase Map
 
 | # | Phase | Requirements | Status |
 |---|-------|--------------|--------|
-| 1 | Pre-invite Hygiene | HYGIENE-01..07 (7) | Context gathered |
+| 1 | Pre-invite Hygiene | HYGIENE-01..07 (7) | Planned (7 plans) |
 | 2 | Safety Floor | SAFETY-01..09 (9) | Not started |
 | 3 | Authoring Throughput | AUTHOR-01..10 (10) | Not started |
 | 4 | Content Coverage | CONTENT-01..07 (7) | Not started |
@@ -84,17 +84,18 @@ None.
 
 ## Session Continuity
 
-**Last significant action:** Phase 1 context gathered via `/gsd-discuss-phase 1` on 2026-04-20. 4 gray areas discussed (secret-rotation runbook, noindex + landing.html audit, middleware matcher test, execution order + rollback). 21 implementation decisions captured. Files written: `.planning/phases/01-pre-invite-hygiene/01-CONTEXT.md`, `.planning/phases/01-pre-invite-hygiene/01-DISCUSSION-LOG.md`; `.planning/STATE.md` updated.
+**Last significant action:** Phase 1 planned via `/gsd-plan-phase 1` on 2026-04-20. Research surfaced two CONTEXT.md corrections (codemod command syntax, matcher case-sensitivity) + a pattern-mapping correction (test path convention) — all resolved via AskUserQuestion before planning. 7 PLAN.md files created + plan-checker revision loop closed at iteration 2 (1 blocker + 3 warnings → 0 issues). VALIDATION.md and PATTERNS.md also created.
 
-**Resumption cue:** Next agent should run `/gsd-plan-phase 1` to decompose Phase 1 into executable plans using the locked implementation decisions in `01-CONTEXT.md`.
+**Resumption cue:** Next agent should run `/gsd-execute-phase 1` to execute plans in D-19 order. Plans are strictly serial (wave 1–7 chain).
 
 **Critical context for next agent:**
-1. This is a brownfield milestone — do NOT plan work that re-builds existing pilot capability (see PROJECT.md Validated section)
-2. Phase success criteria are goal-backward observable behaviors — plan must-haves must satisfy them
-3. Project skills in `.claude/skills/` (gstack) should be checked during plan phase if relevant
-4. Research convergences (from `.planning/research/SUMMARY.md`) are settled decisions; divergences were resolved during roadmapping (see Decisions table above)
-5. Phase 1 task order is locked: 03 → 06 → 04 → 07 → 05 → 02 → 01 (safe-first, risky AI SDK pair last). One commit per HYGIENE-XX. See `01-CONTEXT.md` §Implementation Decisions for full decision set.
+1. Brownfield milestone — do NOT re-build existing pilot capability (see PROJECT.md Validated)
+2. Phase 1 task order locked: 03 noindex → 06 matcher test → 04 landing audit → 07 runbook → 05 iPhone → 02 AI SDK codemod → 01 package cleanup. See 01-CONTEXT.md §D-19.
+3. One commit per HYGIENE-XX: `hygiene-NN: imperative` (overrides Conventional-Commits per D-20).
+4. Three plans are `autonomous: false` — HYGIENE-04 (human audit), HYGIENE-05 (Shannon iPhone), HYGIENE-07 (Vercel preview rehearsal). Executor must pause for Shannon on these.
+5. Research findings worth carrying: (a) codebase has zero AI SDK imports → HYGIENE-02 codemod is effectively a package.json version bump; (b) current matcher is case-sensitive on .mram extension — tests stay on lowercase paths only; (c) rotation runbook uses `vercel env update` (atomic) not rm+add except for preview-branch (CLI v51.x limitation).
 
 ---
 *State initialized: 2026-04-20 after roadmap creation*
 *Phase 1 context gathered: 2026-04-20*
+*Phase 1 planned: 2026-04-20 (7 plans, verification passed iteration 2)*
