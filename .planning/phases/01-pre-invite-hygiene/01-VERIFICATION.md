@@ -133,15 +133,28 @@ Evidence:
 
 ---
 
-## HYGIENE-01 — Dead-package removal (Plan 07 — pending)
+## HYGIENE-01 — Dead-package removal
 
-*(filled in when Plan 07 completes)*
+**Plan:** 01-01-package-cleanup-PLAN.md
+**Commit:** b82aefe
+**Status:** ✓ VERIFIED
+
+Evidence:
+- Pre-flight grep for imports of `natural`, `uuid`, `@ai-sdk/react` across `src/`, `scripts/`, `public/`: **zero matches** (confirms all four packages were truly dead)
+- `npm uninstall natural uuid @ai-sdk/react @types/uuid` executed
+- `npm ls natural @ai-sdk/react @types/uuid`: all three reported "(empty)" / not installed directly. `npm ls uuid` shows `uuid@10.0.0` now only as a transitive dep of `resend@6.11.0 → svix@1.90.0` (expected — our direct dep removed)
+- `package.json` dependencies reduced by 3 entries (removed: `natural`, `uuid`, `@ai-sdk/react`); devDependencies reduced by 1 entry (removed: `@types/uuid`)
+- 81 packages removed overall (4 direct + 77 transitive) per `npm uninstall` output
+- Retained: `ai@^6.0.168`, `@ai-sdk/anthropic@^3.0.71` (per CONTEXT D-14 — for Phase 5 COACH-02)
+- `npm run build`: exit 0 (bundle no longer includes these packages' code paths)
+- `npm run test:run`: exit 0 — 257/257 tests passing, no regressions
+- `git diff HEAD~1 HEAD --name-only`: only `package.json` + `package-lock.json` — zero source changes
 
 ---
 
 **Phase 1 done gate** (per CONTEXT D-21):
-- [ ] All 7 HYGIENE-XX above show ✓ VERIFIED (code) + any deferred manual checks confirmed
-- [ ] `npm run build` green on final tree
-- [ ] `npm run test:run` green on final tree
-- [ ] Shannon's iPhone test recorded in HYGIENE-05
-- [ ] Runbook rehearsed on preview deploy (HYGIENE-07)
+- [x] All 7 HYGIENE-XX above show ✓ VERIFIED (code-side) — manual items (HYGIENE-05, HYGIENE-07) remain ⏸ DEFERRED
+- [x] `npm run build` green on final tree
+- [x] `npm run test:run` green on final tree
+- [ ] Shannon's iPhone test recorded in HYGIENE-05 — DEFERRED
+- [ ] Runbook rehearsed on preview deploy (HYGIENE-07) — DEFERRED
