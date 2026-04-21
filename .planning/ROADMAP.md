@@ -32,7 +32,15 @@ Ship the invited-lodge v1: the pilot, hardened and extended so Shannon can perso
   4. Shannon has completed a live magic-link sign-in on an iPhone behind iCloud Private Relay and observed end-to-end success
   5. A test exists that fails if `.mram` routes are ever added back to the middleware matcher
   6. A written shared-secret rotation runbook exists in the repo and has been rehearsed in staging at least once
-**Plans**: TBD
+**Plans**: 7 plans
+Plans:
+- [ ] 01-03-noindex-PLAN.md — HYGIENE-03: add X-Robots-Tag noindex app-wide + landing meta
+- [ ] 01-06-matcher-test-PLAN.md — HYGIENE-06: regression test locking .mram exclusion in middleware matcher
+- [ ] 01-04-landing-audit-PLAN.md — HYGIENE-04: audit public/landing.html for ritual text
+- [ ] 01-07-rotation-runbook-PLAN.md — HYGIENE-07: write and rehearse secret-rotation runbook
+- [ ] 01-05-iphone-verify-PLAN.md — HYGIENE-05: iPhone + iCloud Private Relay magic-link verify
+- [ ] 01-02-ai-sdk-codemod-PLAN.md — HYGIENE-02: run AI SDK v6 codemod and bump deps
+- [ ] 01-01-package-cleanup-PLAN.md — HYGIENE-01: remove dead packages (natural, uuid, @ai-sdk/react, @types/uuid)
 **UI hint**: no
 
 ### Phase 2: Safety Floor (cost, abuse, auth hardening)
@@ -125,7 +133,7 @@ Ship the invited-lodge v1: the pilot, hardened and extended so Shannon can perso
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Pre-invite Hygiene | 0/0 | Not started | - |
+| 1. Pre-invite Hygiene | 0/7 | Planned | - |
 | 2. Safety Floor | 0/0 | Not started | - |
 | 3. Authoring Throughput | 0/0 | Not started | - |
 | 4. Content Coverage | 0/0 | Not started | - |
