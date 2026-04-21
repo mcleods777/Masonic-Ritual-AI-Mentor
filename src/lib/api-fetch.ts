@@ -40,7 +40,17 @@
  * issues the original call with X-Client-Secret attached — the server's
  * 401 is the right failure mode for an unauthenticated paid-route call,
  * not a client-side crash.
+ *
+ * SAFETY-08 degraded-mode detection (D-19): after the response returns, if
+ * the status is 503 AND the JSON body's `error` field is exactly
+ * "paid_disabled", flip the shared degraded-mode store to `true`. That
+ * store powers DegradedModeBanner in the root layout. Per-response
+ * detection only — no dedicated health endpoint (D-19). A generic upstream
+ * 503 (HTML body, missing `error`, or a different error code) does NOT
+ * flip the flag so genuine upstream outages don't mimic the kill switch.
  */
+
+import { setDegradedMode } from "./degraded-mode-store";
 
 const CLIENT_SECRET = process.env.NEXT_PUBLIC_RITUAL_CLIENT_SECRET;
 const REFRESH_MS = 50 * 60 * 1000; // 10-min safety before the 1h token expiry
@@ -151,6 +161,22 @@ export async function fetchApi(
       }
     }
   }
+
+  // SAFETY-08 (D-19): flip degraded-mode on 503 + {error:"paid_disabled"}.
+  // Per-response detection only; a generic upstream 503 with a different
+  // body (or no JSON body at all) does NOT flip the flag.
+  if (resp.status === 503) {
+    const cloned = resp.clone();
+    try {
+      const body = (await cloned.json()) as { error?: string };
+      if (body?.error === "paid_disabled") {
+        setDegradedMode(true);
+      }
+    } catch {
+      // Body wasn't JSON — generic upstream 503, not the kill switch.
+    }
+  }
+
   return resp;
 }
 

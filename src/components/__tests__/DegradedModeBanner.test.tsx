@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { render, cleanup, screen, fireEvent } from "@testing-library/react";
+import { act } from "react";
 import DegradedModeBanner from "../DegradedModeBanner";
 import {
   setDegradedMode,
@@ -30,7 +31,9 @@ describe("<DegradedModeBanner />", () => {
   });
 
   it("renders a role='status' banner with the soft copy when degradedMode is on", () => {
-    setDegradedMode(true);
+    act(() => {
+      setDegradedMode(true);
+    });
     render(<DegradedModeBanner />);
     const banner = screen.getByRole("status");
     expect(banner).toBeTruthy();
@@ -38,7 +41,9 @@ describe("<DegradedModeBanner />", () => {
   });
 
   it("disappears after the Dismiss button is clicked (per-session dismiss)", () => {
-    setDegradedMode(true);
+    act(() => {
+      setDegradedMode(true);
+    });
     render(<DegradedModeBanner />);
     expect(screen.getByRole("status")).toBeTruthy();
     const btn = screen.getByRole("button", { name: /dismiss/i });
@@ -47,13 +52,19 @@ describe("<DegradedModeBanner />", () => {
   });
 
   it("reappears on a subsequent setDegradedMode(true) after a false→true transition (D-18 re-trigger)", () => {
-    setDegradedMode(true);
+    act(() => {
+      setDegradedMode(true);
+    });
     render(<DegradedModeBanner />);
     // Simulate the store toggling off then back on (e.g., mid-session recovery
     // followed by another paid_disabled response).
-    setDegradedMode(false);
+    act(() => {
+      setDegradedMode(false);
+    });
     expect(screen.queryByRole("status")).toBeNull();
-    setDegradedMode(true);
+    act(() => {
+      setDegradedMode(true);
+    });
     expect(screen.getByRole("status")).toBeTruthy();
   });
 });
