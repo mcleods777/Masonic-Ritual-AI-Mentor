@@ -1,6 +1,6 @@
 # State: Masonic Ritual AI Mentor — v1 Invited-Lodge Milestone
 
-**Last updated:** 2026-04-21 (Phase 2 context gathered; ready for /gsd-plan-phase 2)
+**Last updated:** 2026-04-21 (Phase 2 planned; 9 plans ready to execute)
 
 ## Project Reference
 
@@ -13,16 +13,16 @@
 ## Current Position
 
 **Milestone:** v1 invited-lodge
-**Phase:** Phase 2 context gathered (21 decisions locked across 4 gray areas)
-**Plan:** —
-**Status:** Phase 1 code-complete + 2 UAT pending; Phase 2 ready for `/gsd-plan-phase 2`
+**Phase:** Phase 2 planned (9 plans across 8 waves)
+**Plan:** 9 PLAN.md files ready
+**Status:** Phase 1 code-complete + 2 UAT pending; Phase 2 ready for `/gsd-execute-phase 2`
 **Progress:** 1/7 phases complete
 
 ```
 [██░░░░░░░░░░░░░░░░░░] 14% (1/7 phases)
 ```
 
-**Next action:** `/gsd-plan-phase 2` to decompose Phase 2 into executable plans. 02-CONTEXT.md captures 21 locked decisions across budget thresholds (60/hr + 300/day caps, $10 total + $3 per-user alerts, daily 02:00 UTC cron), audit log (Vercel logs via console.log, per-model pricing table, TS discriminated union, compile-time PII guards), client-token (`{sub: hashedUser, aud: client-token, exp: 1h}`, proactive 50-min refresh, middleware + route-level defense in depth), and kill switch (single env var, 503 + structured fallback per route, persistent banner). The 2 deferred Phase 1 UAT items (iPhone test, runbook rehearsal) run at Shannon's pacing — neither blocks Phase 2.
+**Next action:** `/gsd-execute-phase 2` to run 9 plans in wave order (W1: 01 audit-log infra → W2: 02 rate-limit + paid-route-guard → W3: 05 client-token → W4: 08 kill-switch UX → W5: 03 wire guard into 9 paid routes → W6: 09 defense-in-depth tests → W7: 04 cron + Resend + lookup CLI → W8: 06 session ceiling + 07 wake-lock parallel). Per CONTEXT D-21, create a new `gsd/phase-2-safety-floor` branch from the current `gsd/phase-1-pre-invite-hygiene` tip before code changes. The 2 deferred Phase 1 UAT items remain open (do not block Phase 2 execution).
 
 ## Phase Map
 
@@ -102,3 +102,5 @@ None.
 *Phase 1 context gathered: 2026-04-20*
 *Phase 1 planned: 2026-04-20 (7 plans, verification passed iteration 2)*
 *Phase 1 executed: 2026-04-21 (7/7 plans landed, 5/7 verified + 2/7 deferred-human)*
+*Phase 2 context gathered: 2026-04-21*
+*Phase 2 planned: 2026-04-21 (9 plans, 8 waves, checker iteration 2 passed)*
