@@ -255,3 +255,149 @@ describe("fetchApi (SAFETY-05 extended)", () => {
     expect(headers.get("Authorization")).toBeNull();
   });
 });
+
+/**
+ * SAFETY-08 degraded-mode detection (D-19) — per-response, no health probe.
+ *
+ * The paid-route-guard (SAFETY-02, Plan 02) returns 503 with a structured
+ * JSON body `{error:"paid_disabled", fallback:<route-specific>}` when the
+ * `RITUAL_EMERGENCY_DISABLE_PAID` env var is "true". api-fetch must detect
+ * this specific shape and flip the client-side degraded-mode store so the
+ * DegradedModeBanner renders. A generic upstream 503 with a different body
+ * shape (or no body) must NOT flip the flag.
+ */
+
+describe("fetchApi — SAFETY-08 degraded-mode detection", () => {
+  const originalFetch = globalThis.fetch;
+  const originalSecret = process.env.NEXT_PUBLIC_RITUAL_CLIENT_SECRET;
+
+  beforeEach(() => {
+    vi.resetModules();
+    vi.useRealTimers();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    if (originalSecret === undefined) {
+      delete process.env.NEXT_PUBLIC_RITUAL_CLIENT_SECRET;
+    } else {
+      process.env.NEXT_PUBLIC_RITUAL_CLIENT_SECRET = originalSecret;
+    }
+    vi.useRealTimers();
+  });
+
+  it("calls setDegradedMode(true) on 503 + {error:'paid_disabled'} response", async () => {
+    process.env.NEXT_PUBLIC_RITUAL_CLIENT_SECRET = "abc";
+    const fetchSpy = vi.fn().mockImplementation((input: string) => {
+      if (String(input).includes("/api/auth/client-token")) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ token: "tok-1", expiresIn: 3600 }), {
+            status: 200,
+          }),
+        );
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({ error: "paid_disabled", fallback: "pre-baked" }),
+          { status: 503 },
+        ),
+      );
+    });
+    globalThis.fetch = fetchSpy as typeof fetch;
+
+    const { fetchApi, __resetApiFetchForTests } = await import("../api-fetch");
+    const { getDegradedMode, __resetDegradedModeForTests } = await import(
+      "../degraded-mode-store"
+    );
+    __resetApiFetchForTests();
+    __resetDegradedModeForTests();
+
+    expect(getDegradedMode()).toBe(false);
+    const res = await fetchApi("/api/tts/gemini", { method: "POST" });
+    expect(res.status).toBe(503);
+    expect(getDegradedMode()).toBe(true);
+  });
+
+  it("does NOT flip degraded-mode on a 200 response", async () => {
+    process.env.NEXT_PUBLIC_RITUAL_CLIENT_SECRET = "abc";
+    const fetchSpy = vi.fn().mockImplementation((input: string) => {
+      if (String(input).includes("/api/auth/client-token")) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ token: "tok-1", expiresIn: 3600 }), {
+            status: 200,
+          }),
+        );
+      }
+      return Promise.resolve(new Response("ok", { status: 200 }));
+    });
+    globalThis.fetch = fetchSpy as typeof fetch;
+
+    const { fetchApi, __resetApiFetchForTests } = await import("../api-fetch");
+    const { getDegradedMode, __resetDegradedModeForTests } = await import(
+      "../degraded-mode-store"
+    );
+    __resetApiFetchForTests();
+    __resetDegradedModeForTests();
+
+    await fetchApi("/api/foo");
+    expect(getDegradedMode()).toBe(false);
+  });
+
+  it("does NOT flip degraded-mode on a generic 503 without paid_disabled body", async () => {
+    process.env.NEXT_PUBLIC_RITUAL_CLIENT_SECRET = "abc";
+    const fetchSpy = vi.fn().mockImplementation((input: string) => {
+      if (String(input).includes("/api/auth/client-token")) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ token: "tok-1", expiresIn: 3600 }), {
+            status: 200,
+          }),
+        );
+      }
+      // Upstream provider genuinely 503 — HTML body, not our structured JSON.
+      return Promise.resolve(
+        new Response("<html>Upstream unavailable</html>", { status: 503 }),
+      );
+    });
+    globalThis.fetch = fetchSpy as typeof fetch;
+
+    const { fetchApi, __resetApiFetchForTests } = await import("../api-fetch");
+    const { getDegradedMode, __resetDegradedModeForTests } = await import(
+      "../degraded-mode-store"
+    );
+    __resetApiFetchForTests();
+    __resetDegradedModeForTests();
+
+    const res = await fetchApi("/api/foo");
+    expect(res.status).toBe(503);
+    expect(getDegradedMode()).toBe(false);
+  });
+
+  it("does NOT flip degraded-mode on a 503 with JSON body that has a different error code", async () => {
+    process.env.NEXT_PUBLIC_RITUAL_CLIENT_SECRET = "abc";
+    const fetchSpy = vi.fn().mockImplementation((input: string) => {
+      if (String(input).includes("/api/auth/client-token")) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ token: "tok-1", expiresIn: 3600 }), {
+            status: 200,
+          }),
+        );
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ error: "upstream_timeout" }), {
+          status: 503,
+        }),
+      );
+    });
+    globalThis.fetch = fetchSpy as typeof fetch;
+
+    const { fetchApi, __resetApiFetchForTests } = await import("../api-fetch");
+    const { getDegradedMode, __resetDegradedModeForTests } = await import(
+      "../degraded-mode-store"
+    );
+    __resetApiFetchForTests();
+    __resetDegradedModeForTests();
+
+    await fetchApi("/api/foo");
+    expect(getDegradedMode()).toBe(false);
+  });
+});
