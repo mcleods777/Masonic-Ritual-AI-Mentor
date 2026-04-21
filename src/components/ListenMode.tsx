@@ -152,6 +152,16 @@ export default function ListenMode({ sections }: ListenModeProps) {
           await new Promise((r) => setTimeout(r, 600));
         }
 
+        // If pause was triggered mid-line, don't advance. stopSpeaking()
+        // resolves the TTS promise cleanly (not as an abort), so without
+        // this the for-loop's i++ would skip the paused line and resume
+        // would start the next one. Rewind so the top-of-loop pause check
+        // waits, then on resume replays this line from the start.
+        if (pausedRef.current) {
+          i--;
+          continue;
+        }
+
         // Small gap between lines to avoid hammering the TTS API
         if (!stale() && i < sections.length - 1) {
           await new Promise((r) => setTimeout(r, 150));

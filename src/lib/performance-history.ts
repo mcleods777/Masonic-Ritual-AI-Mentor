@@ -328,57 +328,6 @@ export async function getPerformanceSummary(): Promise<PerformanceSummary> {
 }
 
 /**
- * Build a concise performance context string for the AI coach.
- * This gets injected into the system prompt so the AI can give
- * intelligent, personalized feedback.
- */
-export async function buildPerformanceContext(): Promise<string> {
-  const summary = await getPerformanceSummary();
-  if (summary.totalSessions === 0) {
-    return "This is a new student with no practice history yet.";
-  }
-
-  const lines: string[] = [
-    `STUDENT PERFORMANCE HISTORY (${summary.totalSessions} sessions):`,
-    `- Overall average accuracy: ${summary.averageAccuracy}%`,
-    `- Best session: ${summary.bestAccuracy}%`,
-    `- Total lines practiced: ${summary.totalLinesAttempted}`,
-    `- Current streak (sessions ≥80%): ${summary.currentStreak}`,
-    `- Longest streak: ${summary.longestStreak}`,
-    `- Recent trend: ${summary.recentTrend}`,
-  ];
-
-  if (summary.persistentTroubleSpots.length > 0) {
-    lines.push(`- Persistent trouble words: ${summary.persistentTroubleSpots.join(", ")}`);
-  }
-
-  if (summary.weakestSections.length > 0) {
-    lines.push("- Weakest sections:");
-    for (const s of summary.weakestSections) {
-      lines.push(`  * ${s.sectionName} (${s.degree}): avg ${s.averageAccuracy}%, ${s.attempts} attempts`);
-      if (s.persistentTroubleSpots.length > 0) {
-        lines.push(`    Trouble spots: ${s.persistentTroubleSpots.join(", ")}`);
-      }
-    }
-  }
-
-  if (summary.strongestSections.length > 0) {
-    lines.push("- Strongest sections:");
-    for (const s of summary.strongestSections) {
-      lines.push(`  * ${s.sectionName} (${s.degree}): avg ${s.averageAccuracy}%`);
-    }
-  }
-
-  if (summary.lastSessionDate) {
-    const last = new Date(summary.lastSessionDate);
-    const daysAgo = Math.floor((Date.now() - last.getTime()) / 86400000);
-    lines.push(`- Last practiced: ${daysAgo === 0 ? "today" : daysAgo === 1 ? "yesterday" : `${daysAgo} days ago`}`);
-  }
-
-  return lines.join("\n");
-}
-
-/**
  * Generate smart topic suggestions based on performance data.
  */
 export async function getSmartSuggestions(): Promise<string[]> {

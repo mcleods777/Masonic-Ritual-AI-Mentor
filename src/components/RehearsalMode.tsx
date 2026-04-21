@@ -5,7 +5,6 @@ import Link from "next/link";
 import type { RitualSectionWithCipher } from "@/lib/storage";
 import { ROLE_DISPLAY_NAMES, cleanRitualText } from "@/lib/document-parser";
 import { compareTexts, type ComparisonResult } from "@/lib/text-comparison";
-import { fetchApi } from "@/lib/api-fetch";
 import { getRoleIcon } from "./MasonicIcons";
 import {
   createWebSpeechEngine,
@@ -26,7 +25,7 @@ import {
   type RoleVoiceProfile,
 } from "@/lib/text-to-speech";
 import { playGavelKnocks, countGavelMarks, warmAudioContext } from "@/lib/gavel-sound";
-import { VOXTRAL_ROLE_OPTIONS, preloadGeminiRitual } from "@/lib/tts-cloud";
+import { preloadGeminiRitual } from "@/lib/tts-cloud";
 import { keepScreenAwake, allowScreenSleep } from "@/lib/screen-wake-lock";
 import {
   decideLineAction,
@@ -37,7 +36,6 @@ import {
 import DiffDisplay from "./DiffDisplay";
 import {
   saveSession,
-  buildPerformanceContext,
   type PracticeSession,
   type LineScore,
 } from "@/lib/performance-history";
@@ -81,15 +79,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   const [sttError, setSttError] = useState<string | null>(null);
   const [inputMode, setInputMode] = useState<"voice" | "type">("voice");
   const [sttProvider, setSTTProvider] = useState<STTProvider>("whisper");
-  // AI coaching default is OFF — spoken feedback after every line breaks the
-  // call-and-response rhythm of the ritual. Users can flip it back on from
-  // the role-pick screen if they want coaching for a specific session.
-  const [aiCoaching, setAiCoaching] = useState(false);
-  const [aiFeedback, setAiFeedback] = useState<string | null>(null);
-  const [isSpeakingFeedback, setIsSpeakingFeedback] = useState(false);
-  const [feedbackVoice, setFeedbackVoice] = useState<string>("Narrator");
   const [ttsToast, setTtsToast] = useState<string | null>(null);
-  const [autoStop, setAutoStop] = useState(true);
 
 
   const engineRef = useRef<STTEngine | null>(null);
@@ -103,17 +93,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   const scriptContainerRef = useRef<HTMLDivElement>(null);
   const startListeningRef = useRef<() => void>(() => {});
   const stopListeningRef = useRef<() => void>(() => { });
-  const autoStopRef = useRef(autoStop);
-  autoStopRef.current = autoStop;
   const sessionStartRef = useRef<string>(new Date().toISOString());
-  const perfContextRef = useRef<string>("");
-
-  // Load performance context on mount for AI feedback
-  useEffect(() => {
-    buildPerformanceContext()
-      .then((ctx) => { perfContextRef.current = ctx; })
-      .catch(console.error);
-  }, []);
 
   // Extract unique roles from sections (only those with speaker lines)
   const availableRoles = useMemo(() => {
@@ -402,7 +382,6 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
       };
 
       engine.onSilence = () => {
-        if (!autoStopRef.current) return;
         stopListeningRef.current();
       };
 
@@ -478,16 +457,12 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   // Continue to next line after checking
   const continueAfterCheck = useCallback(() => {
     stopSpeaking();
-    setIsSpeakingFeedback(false);
-    setAiFeedback(null);
     advanceToLine(currentIndex + 1);
   }, [advanceToLine, currentIndex]);
 
   // Retry the current line — remove last result and auto-start listening
   const retryCurrentLine = useCallback(() => {
     stopSpeaking();
-    setIsSpeakingFeedback(false);
-    setAiFeedback(null);
     setCurrentComparison(null);
     setTranscript("");
     setLineResults((prev) => prev.slice(0, -1));
@@ -496,60 +471,6 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
       if (!cancelledRef.current) startListeningRef.current();
     }, 400);
   }, []);
-
-  // Fetch AI coaching feedback and speak it aloud
-  const fetchAndSpeakFeedback = useCallback(
-    async (comparison: ComparisonResult) => {
-      if (!aiCoaching || !isTTSAvailable()) return;
-
-      try {
-        const res = await fetchApi("/api/rehearsal-feedback", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            accuracy: comparison.accuracy,
-            wrongWords: comparison.wrongWords,
-            missingWords: comparison.missingWords,
-            troubleSpots: comparison.troubleSpots,
-            lineNumber: lineResults.length + 1,
-            totalLines: userLineCount,
-            performanceContext: perfContextRef.current,
-          }),
-        });
-
-        if (!res.ok) return;
-
-        // Stream the response — show text as it arrives, then speak once complete
-        const reader = res.body?.getReader();
-        if (!reader) return;
-        const decoder = new TextDecoder();
-        let feedback = "";
-        while (true) {
-          const { done, value } = await reader.read();
-          if (cancelledRef.current) { reader.cancel(); return; }
-          if (done) break;
-          feedback += decoder.decode(value, { stream: true });
-          setAiFeedback(feedback);
-        }
-        if (!feedback.trim()) return;
-
-        setIsSpeakingFeedback(true);
-        await speakAsRole(feedback, feedbackVoice, voiceMapRef.current);
-      } catch {
-        // Non-critical — silently skip if feedback fails
-      } finally {
-        setIsSpeakingFeedback(false);
-      }
-    },
-    [aiCoaching, feedbackVoice, lineResults.length, userLineCount]
-  );
-
-  // Trigger AI coaching feedback when a line is checked
-  useEffect(() => {
-    if (rehearsalState === "checking" && currentComparison && aiCoaching) {
-      fetchAndSpeakFeedback(currentComparison);
-    }
-  }, [rehearsalState, currentComparison, aiCoaching, fetchAndSpeakFeedback]);
 
   // Skip user's line (they can't remember)
   const skipLine = useCallback(() => {
@@ -591,8 +512,6 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
     setCurrentComparison(null);
     setLineResults([]);
     setSttError(null);
-    setAiFeedback(null);
-    setIsSpeakingFeedback(false);
   }, []);
 
   // Restart rehearsal
@@ -600,8 +519,6 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
     setLineResults([]);
     setCurrentComparison(null);
     setTranscript("");
-    setAiFeedback(null);
-    setIsSpeakingFeedback(false);
     startRehearsal();
   }, [startRehearsal]);
 
@@ -618,8 +535,6 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
         engineRef.current.stop();
         engineRef.current = null;
       }
-      setAiFeedback(null);
-      setIsSpeakingFeedback(false);
       setTranscript("");
       setCurrentComparison(null);
       setSttError(null);
@@ -909,72 +824,6 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
                   {sttProvider === "whisper"
                     ? "Higher accuracy, Masonic vocabulary hints"
                     : "Free, real-time, browser-native"}
-                </span>
-              </div>
-
-              {/* AI Coaching toggle */}
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-zinc-500 uppercase tracking-wide">AI Coach:</span>
-                <button
-                  onClick={() => setAiCoaching(!aiCoaching)}
-                  className={`
-                    relative inline-flex h-6 w-11 items-center rounded-full transition-colors
-                    ${aiCoaching ? "bg-amber-600" : "bg-zinc-700"}
-                  `}
-                >
-                  <span
-                    className={`
-                      inline-block h-4 w-4 rounded-full bg-white transition-transform
-                      ${aiCoaching ? "translate-x-6" : "translate-x-1"}
-                    `}
-                  />
-                </button>
-                <span className="text-xs text-zinc-600">
-                  {aiCoaching
-                    ? "AI gives spoken feedback after each line"
-                    : "No AI feedback between lines"}
-                </span>
-              </div>
-
-              {/* Feedback voice selector */}
-              {aiCoaching && (
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-zinc-500 uppercase tracking-wide">Feedback Voice:</span>
-                  <select
-                    value={feedbackVoice}
-                    onChange={(e) => setFeedbackVoice(e.target.value)}
-                    className="px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-300 text-xs focus:outline-none focus:border-amber-500 cursor-pointer"
-                  >
-                    {VOXTRAL_ROLE_OPTIONS.filter((o) => o.value).map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {/* Auto-stop toggle */}
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-zinc-500 uppercase tracking-wide">Auto-Stop:</span>
-                <button
-                  onClick={() => setAutoStop(!autoStop)}
-                  className={`
-                    relative inline-flex h-6 w-11 items-center rounded-full transition-colors
-                    ${autoStop ? "bg-amber-600" : "bg-zinc-700"}
-                  `}
-                >
-                  <span
-                    className={`
-                      inline-block h-4 w-4 rounded-full bg-white transition-transform
-                      ${autoStop ? "translate-x-6" : "translate-x-1"}
-                    `}
-                  />
-                </button>
-                <span className="text-xs text-zinc-600">
-                  {autoStop
-                    ? "Auto-submits after 3s of silence"
-                    : "Manual — press Done Speaking to submit"}
                 </span>
               </div>
 
@@ -1360,11 +1209,9 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
                 Listening — speak your line...
               </span>
             </div>
-            {autoStop && (
-              <p className="text-xs text-zinc-500 text-center">
-                Will auto-submit after 3 seconds of silence
-              </p>
-            )}
+            <p className="text-xs text-zinc-500 text-center">
+              Will auto-submit after 3 seconds of silence
+            </p>
 
             {transcript && (
               <div className="p-4 bg-zinc-800/50 rounded-lg border border-zinc-700">
@@ -1426,37 +1273,10 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
                   </div>
                 )}
 
-                {/* AI Coach feedback */}
-                {aiCoaching && (
-                  <div className="p-3 bg-amber-900/20 rounded-lg border border-amber-700/30">
-                    {aiFeedback ? (
-                      <div className="flex items-start gap-2">
-                        {isSpeakingFeedback && (
-                          <div className="flex gap-0.5 items-center pt-1 flex-shrink-0">
-                            <div className="w-1 h-3 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                            <div className="w-1 h-4 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                            <div className="w-1 h-3 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
-                          </div>
-                        )}
-                        <p className="text-sm text-amber-200/90 italic">{aiFeedback}</p>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2 text-amber-400/60">
-                        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                        </svg>
-                        <span className="text-xs">AI Coach is thinking...</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-
                 <div className="flex justify-center gap-3">
                   <button
                     onClick={retryCurrentLine}
-                    disabled={aiCoaching && (!aiFeedback || isSpeakingFeedback)}
-                    className="px-6 py-3 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40 disabled:cursor-not-allowed text-zinc-200 rounded-lg font-semibold transition-colors flex items-center gap-2"
+                    className="px-6 py-3 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 rounded-lg font-semibold transition-colors flex items-center gap-2"
                   >
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -1465,8 +1285,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
                   </button>
                   <button
                     onClick={continueAfterCheck}
-                    disabled={aiCoaching && (!aiFeedback || isSpeakingFeedback)}
-                    className="px-8 py-3 bg-amber-600 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg font-semibold transition-colors flex items-center gap-2"
+                    className="px-8 py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-semibold transition-colors flex items-center gap-2"
                   >
                     Continue
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
