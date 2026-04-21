@@ -63,7 +63,7 @@ Evidence:
 ## HYGIENE-07 — Shared-secret rotation runbook
 
 **Plan:** 01-07-rotation-runbook-PLAN.md
-**Commit:** (this plan's hygiene-07 commit — fill in with the actual SHA after committing)
+**Commit:** 66b4d93
 **Status:** ⏸ RUNBOOK LANDED; REHEARSAL DEFERRED to Phase 1 close gate
 
 Evidence:
