@@ -154,73 +154,73 @@ Explicitly excluded from v1. Documented to prevent scope creep and carry forward
 
 ## Traceability
 
-Populated during roadmap creation by `gsd-roadmapper`. Each v1 requirement maps to exactly one phase.
+Each v1 requirement maps to exactly one phase. Populated by `gsd-roadmapper` on 2026-04-20.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| HYGIENE-01 | — | Pending |
-| HYGIENE-02 | — | Pending |
-| HYGIENE-03 | — | Pending |
-| HYGIENE-04 | — | Pending |
-| HYGIENE-05 | — | Pending |
-| HYGIENE-06 | — | Pending |
-| HYGIENE-07 | — | Pending |
-| SAFETY-01 | — | Pending |
-| SAFETY-02 | — | Pending |
-| SAFETY-03 | — | Pending |
-| SAFETY-04 | — | Pending |
-| SAFETY-05 | — | Pending |
-| SAFETY-06 | — | Pending |
-| SAFETY-07 | — | Pending |
-| SAFETY-08 | — | Pending |
-| SAFETY-09 | — | Pending |
-| COACH-01 | — | Pending |
-| COACH-02 | — | Pending |
-| COACH-03 | — | Pending |
-| COACH-04 | — | Pending |
-| COACH-05 | — | Pending |
-| COACH-06 | — | Pending |
-| COACH-07 | — | Pending |
-| COACH-08 | — | Pending |
-| COACH-09 | — | Pending |
-| COACH-10 | — | Pending |
-| COACH-11 | — | Pending |
-| COACH-12 | — | Pending |
-| CONTENT-01 | — | Pending |
-| CONTENT-02 | — | Pending |
-| CONTENT-03 | — | Pending |
-| CONTENT-04 | — | Pending |
-| CONTENT-05 | — | Pending |
-| CONTENT-06 | — | Pending |
-| CONTENT-07 | — | Pending |
-| AUTHOR-01 | — | Pending |
-| AUTHOR-02 | — | Pending |
-| AUTHOR-03 | — | Pending |
-| AUTHOR-04 | — | Pending |
-| AUTHOR-05 | — | Pending |
-| AUTHOR-06 | — | Pending |
-| AUTHOR-07 | — | Pending |
-| AUTHOR-08 | — | Pending |
-| AUTHOR-09 | — | Pending |
-| AUTHOR-10 | — | Pending |
-| ADMIN-01 | — | Pending |
-| ADMIN-02 | — | Pending |
-| ADMIN-03 | — | Pending |
-| ADMIN-04 | — | Pending |
-| ADMIN-05 | — | Pending |
-| ADMIN-06 | — | Pending |
-| ADMIN-07 | — | Pending |
-| ONBOARD-01 | — | Pending |
-| ONBOARD-02 | — | Pending |
-| ONBOARD-03 | — | Pending |
-| ONBOARD-04 | — | Pending |
-| ONBOARD-05 | — | Pending |
+| HYGIENE-01 | Phase 1 | Pending |
+| HYGIENE-02 | Phase 1 | Pending |
+| HYGIENE-03 | Phase 1 | Pending |
+| HYGIENE-04 | Phase 1 | Pending |
+| HYGIENE-05 | Phase 1 | Pending |
+| HYGIENE-06 | Phase 1 | Pending |
+| HYGIENE-07 | Phase 1 | Pending |
+| SAFETY-01 | Phase 2 | Pending |
+| SAFETY-02 | Phase 2 | Pending |
+| SAFETY-03 | Phase 2 | Pending |
+| SAFETY-04 | Phase 2 | Pending |
+| SAFETY-05 | Phase 2 | Pending |
+| SAFETY-06 | Phase 2 | Pending |
+| SAFETY-07 | Phase 2 | Pending |
+| SAFETY-08 | Phase 2 | Pending |
+| SAFETY-09 | Phase 2 | Pending |
+| COACH-01 | Phase 5 | Pending |
+| COACH-02 | Phase 5 | Pending |
+| COACH-03 | Phase 5 | Pending |
+| COACH-04 | Phase 5 | Pending |
+| COACH-05 | Phase 5 | Pending |
+| COACH-06 | Phase 5 | Pending |
+| COACH-07 | Phase 5 | Pending |
+| COACH-08 | Phase 5 | Pending |
+| COACH-09 | Phase 5 | Pending |
+| COACH-10 | Phase 5 | Pending |
+| COACH-11 | Phase 5 | Pending |
+| COACH-12 | Phase 5 | Pending |
+| CONTENT-01 | Phase 4 | Pending |
+| CONTENT-02 | Phase 4 | Pending |
+| CONTENT-03 | Phase 4 | Pending |
+| CONTENT-04 | Phase 4 | Pending |
+| CONTENT-05 | Phase 4 | Pending |
+| CONTENT-06 | Phase 4 | Pending |
+| CONTENT-07 | Phase 4 | Pending |
+| AUTHOR-01 | Phase 3 | Pending |
+| AUTHOR-02 | Phase 3 | Pending |
+| AUTHOR-03 | Phase 3 | Pending |
+| AUTHOR-04 | Phase 3 | Pending |
+| AUTHOR-05 | Phase 3 | Pending |
+| AUTHOR-06 | Phase 3 | Pending |
+| AUTHOR-07 | Phase 3 | Pending |
+| AUTHOR-08 | Phase 3 | Pending |
+| AUTHOR-09 | Phase 3 | Pending |
+| AUTHOR-10 | Phase 3 | Pending |
+| ADMIN-01 | Phase 6 | Pending |
+| ADMIN-02 | Phase 6 | Pending |
+| ADMIN-03 | Phase 6 | Pending |
+| ADMIN-04 | Phase 6 | Pending |
+| ADMIN-05 | Phase 6 | Pending |
+| ADMIN-06 | Phase 6 | Pending |
+| ADMIN-07 | Phase 6 | Pending |
+| ONBOARD-01 | Phase 7 | Pending |
+| ONBOARD-02 | Phase 7 | Pending |
+| ONBOARD-03 | Phase 7 | Pending |
+| ONBOARD-04 | Phase 7 | Pending |
+| ONBOARD-05 | Phase 7 | Pending |
 
 **Coverage:**
-- v1 requirements: 55 total
-- Mapped to phases: 0 (pre-roadmap)
-- Unmapped: 55 — to be filled by `gsd-roadmapper`
+- v1 requirements: 57 total
+- Mapped to phases: 57 (100%)
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-20*
-*Last updated: 2026-04-20 after initialization*
+*Last updated: 2026-04-20 after roadmap creation — traceability filled in by gsd-roadmapper*
