@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 760" font-family="Georgia, 'Times New Roman', serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900" font-family="Georgia, 'Times New Roman', serif">
   <!-- background -->
-  <rect width="1200" height="760" fill="#faf6ed"/>
+  <rect width="1200" height="900" fill="#faf6ed"/>
 
   <!-- title -->
   <text x="600" y="50" font-size="30" font-weight="bold" fill="#5a4410" text-anchor="middle">
@@ -9,7 +9,7 @@
   <line x1="280" y1="66" x2="920" y2="66" stroke="#c9962c" stroke-width="1.5"/>
 
   <!-- Left side: "Your device" box (dashed gold) -->
-  <rect x="60" y="110" width="420" height="560" fill="#ffffff" stroke="#c9962c" stroke-width="3" stroke-dasharray="8 6" rx="10"/>
+  <rect x="60" y="110" width="420" height="700" fill="#ffffff" stroke="#c9962c" stroke-width="3" stroke-dasharray="8 6" rx="10"/>
   <text x="270" y="148" font-size="22" font-weight="bold" fill="#8b6914" text-anchor="middle">YOUR DEVICE</text>
   <text x="270" y="172" font-size="14" fill="#8b6914" text-anchor="middle" font-style="italic">phone or computer</text>
 
@@ -19,45 +19,60 @@
     <text x="270" y="224" font-size="15" font-weight="bold" fill="#222" text-anchor="middle">Ritual text (encrypted, AES-GCM)</text>
     <text x="270" y="244" font-size="12" fill="#5a5a5a" text-anchor="middle">decrypted only in browser memory</text>
 
-    <rect x="100" y="280" width="340" height="50" fill="#fff8e1" stroke="#c9962c" stroke-width="1" rx="6"/>
-    <text x="270" y="311" font-size="15" font-weight="bold" fill="#222" text-anchor="middle">Your password</text>
+    <rect x="100" y="280" width="340" height="60" fill="#fff8e1" stroke="#c9962c" stroke-width="1" rx="6"/>
+    <text x="270" y="304" font-size="15" font-weight="bold" fill="#222" text-anchor="middle">Baked Gemini audio (.mram)</text>
+    <text x="270" y="324" font-size="12" fill="#5a5a5a" text-anchor="middle">plays locally — zero cloud call per line</text>
 
-    <rect x="100" y="350" width="340" height="50" fill="#fff8e1" stroke="#c9962c" stroke-width="1" rx="6"/>
-    <text x="270" y="381" font-size="15" font-weight="bold" fill="#222" text-anchor="middle">Recorded voice samples</text>
+    <rect x="100" y="360" width="340" height="50" fill="#fff8e1" stroke="#c9962c" stroke-width="1" rx="6"/>
+    <text x="270" y="391" font-size="15" font-weight="bold" fill="#222" text-anchor="middle">Your password</text>
 
-    <rect x="100" y="420" width="340" height="50" fill="#fff8e1" stroke="#c9962c" stroke-width="1" rx="6"/>
-    <text x="270" y="451" font-size="15" font-weight="bold" fill="#222" text-anchor="middle">Progress, scores, practice history</text>
+    <rect x="100" y="430" width="340" height="50" fill="#fff8e1" stroke="#c9962c" stroke-width="1" rx="6"/>
+    <text x="270" y="461" font-size="15" font-weight="bold" fill="#222" text-anchor="middle">Recorded voice samples</text>
 
-    <rect x="100" y="490" width="340" height="50" fill="#fff8e1" stroke="#c9962c" stroke-width="1" rx="6"/>
-    <text x="270" y="521" font-size="15" font-weight="bold" fill="#222" text-anchor="middle">The sign-in cookie (token of the pass)</text>
+    <rect x="100" y="500" width="340" height="50" fill="#fff8e1" stroke="#c9962c" stroke-width="1" rx="6"/>
+    <text x="270" y="531" font-size="15" font-weight="bold" fill="#222" text-anchor="middle">Progress, scores, practice history</text>
+
+    <rect x="100" y="570" width="340" height="50" fill="#fff8e1" stroke="#c9962c" stroke-width="1" rx="6"/>
+    <text x="270" y="601" font-size="15" font-weight="bold" fill="#222" text-anchor="middle">The sign-in cookie (token of the pass)</text>
   </g>
 
   <!-- "Never leaves, ever" callout -->
-  <text x="270" y="595" font-size="17" font-weight="bold" fill="#8b6914" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif">Never leaves, ever</text>
-  <text x="270" y="620" font-size="13" fill="#5a4410" text-anchor="middle" font-style="italic">not to any server, not to any vendor</text>
+  <text x="270" y="670" font-size="17" font-weight="bold" fill="#8b6914" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif">Content never leaves, ever</text>
+  <text x="270" y="693" font-size="13" fill="#5a4410" text-anchor="middle" font-style="italic">no ritual text, no transcripts,</text>
+  <text x="270" y="710" font-size="13" fill="#5a4410" text-anchor="middle" font-style="italic">no audio content to any server</text>
+  <text x="270" y="755" font-size="12" fill="#8b6914" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">Engine choice removed — the app uses the</text>
+  <text x="270" y="772" font-size="12" fill="#8b6914" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">baked audio automatically. No dropdown.</text>
 
-  <!-- Right side: three cloud service boxes -->
+  <!-- Right side: cloud service boxes -->
   <g font-family="Helvetica, Arial, sans-serif">
-    <!-- Box 1: Whisper / Groq -->
-    <rect x="740" y="150" width="400" height="130" fill="#ffffff" stroke="#8b6914" stroke-width="2" rx="8"/>
-    <text x="940" y="180" font-size="17" font-weight="bold" fill="#222" text-anchor="middle">Groq · Whisper-large-v3</text>
-    <text x="940" y="204" font-size="13" fill="#5a5a5a" text-anchor="middle">speech recognition</text>
-    <text x="940" y="242" font-size="14" fill="#222" text-anchor="middle">audio of one spoken line → transcript</text>
-    <text x="940" y="262" font-size="12" fill="#8b6914" text-anchor="middle" font-style="italic">per line, one round-trip, no retention</text>
+    <!-- Box 1: Whisper / Groq (per line) -->
+    <rect x="740" y="130" width="400" height="130" fill="#ffffff" stroke="#8b6914" stroke-width="2" rx="8"/>
+    <text x="940" y="160" font-size="17" font-weight="bold" fill="#222" text-anchor="middle">Groq · Whisper-large-v3</text>
+    <text x="940" y="184" font-size="13" fill="#5a5a5a" text-anchor="middle">speech recognition</text>
+    <text x="940" y="222" font-size="14" fill="#222" text-anchor="middle">audio of one spoken line → transcript</text>
+    <text x="940" y="242" font-size="12" fill="#8b6914" text-anchor="middle" font-style="italic">per line · no retention · no training</text>
 
-    <!-- Box 2: TTS -->
-    <rect x="740" y="320" width="400" height="130" fill="#ffffff" stroke="#8b6914" stroke-width="2" rx="8"/>
-    <text x="940" y="350" font-size="17" font-weight="bold" fill="#222" text-anchor="middle">Selected voice engine</text>
-    <text x="940" y="374" font-size="13" fill="#5a5a5a" text-anchor="middle">Voxtral / ElevenLabs / Google / Deepgram</text>
-    <text x="940" y="412" font-size="14" fill="#222" text-anchor="middle">text of one line → synthesized audio</text>
-    <text x="940" y="432" font-size="12" fill="#8b6914" text-anchor="middle" font-style="italic">per line, one round-trip, no retention</text>
+    <!-- Box 2: Groq Llama (per line) -->
+    <rect x="740" y="290" width="400" height="130" fill="#ffffff" stroke="#8b6914" stroke-width="2" rx="8"/>
+    <text x="940" y="320" font-size="17" font-weight="bold" fill="#222" text-anchor="middle">Groq · Llama 3.3 70B</text>
+    <text x="940" y="344" font-size="13" fill="#5a5a5a" text-anchor="middle">spoken coaching feedback</text>
+    <text x="940" y="382" font-size="14" fill="#222" text-anchor="middle">your line + expected line → critique</text>
+    <text x="940" y="402" font-size="12" fill="#8b6914" text-anchor="middle" font-style="italic">per line · no retention · no training</text>
 
-    <!-- Box 3: Llama / Groq -->
-    <rect x="740" y="490" width="400" height="130" fill="#ffffff" stroke="#8b6914" stroke-width="2" rx="8"/>
-    <text x="940" y="520" font-size="17" font-weight="bold" fill="#222" text-anchor="middle">Groq · Llama 3.3 70B</text>
-    <text x="940" y="544" font-size="13" fill="#5a5a5a" text-anchor="middle">spoken coaching feedback</text>
-    <text x="940" y="582" font-size="14" fill="#222" text-anchor="middle">your line + expected line → critique</text>
-    <text x="940" y="602" font-size="12" fill="#8b6914" text-anchor="middle" font-style="italic">per line, one round-trip, no retention</text>
+    <!-- Box 3: Mistral Voxtral (rare / edge cases) -->
+    <rect x="740" y="450" width="400" height="130" fill="#ffffff" stroke="#8b6914" stroke-width="2" stroke-dasharray="4 4" rx="8"/>
+    <text x="940" y="480" font-size="17" font-weight="bold" fill="#222" text-anchor="middle">Mistral · Voxtral</text>
+    <text x="940" y="504" font-size="13" fill="#5a5a5a" text-anchor="middle">voice cloning + very short lines only</text>
+    <text x="940" y="542" font-size="14" fill="#222" text-anchor="middle">single line text → synthesized audio</text>
+    <text x="940" y="562" font-size="12" fill="#8b6914" text-anchor="middle" font-style="italic">rarely · no retention · no training</text>
+
+    <!-- Box 4: PostHog (anonymous telemetry) -->
+    <rect x="740" y="610" width="400" height="140" fill="#ffffff" stroke="#8b6914" stroke-width="2" rx="8"/>
+    <text x="940" y="640" font-size="17" font-weight="bold" fill="#222" text-anchor="middle">PostHog · EU region</text>
+    <text x="940" y="664" font-size="13" fill="#5a5a5a" text-anchor="middle">anonymous usage telemetry</text>
+    <text x="940" y="700" font-size="14" fill="#222" text-anchor="middle">event names only · no content · no text</text>
+    <text x="940" y="720" font-size="13" fill="#222" text-anchor="middle">identifier = SHA-256 hash of email</text>
+    <text x="940" y="740" font-size="12" fill="#8b6914" text-anchor="middle" font-style="italic">stored in EU under GDPR</text>
   </g>
 
   <!-- Arrows from device to cloud (bidirectional, labeled "while practicing") -->
@@ -68,22 +83,34 @@
     <marker id="arrL" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M10,0 L0,5 L10,10 Z" fill="#c9962c"/>
     </marker>
+    <marker id="arrRdash" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#b38a2a"/>
+    </marker>
+    <marker id="arrLdash" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M10,0 L0,5 L10,10 Z" fill="#b38a2a"/>
+    </marker>
   </defs>
 
-  <!-- Arrow to box 1 -->
-  <line x1="495" y1="210" x2="735" y2="210" stroke="#c9962c" stroke-width="2.5" marker-end="url(#arrR)"/>
-  <line x1="495" y1="230" x2="735" y2="230" stroke="#c9962c" stroke-width="2.5" marker-start="url(#arrL)"/>
+  <!-- Arrow to box 1 (Whisper) -->
+  <line x1="495" y1="185" x2="735" y2="185" stroke="#c9962c" stroke-width="2.5" marker-end="url(#arrR)"/>
+  <line x1="495" y1="205" x2="735" y2="205" stroke="#c9962c" stroke-width="2.5" marker-start="url(#arrL)"/>
 
-  <!-- Arrow to box 2 -->
-  <line x1="495" y1="380" x2="735" y2="380" stroke="#c9962c" stroke-width="2.5" marker-end="url(#arrR)"/>
-  <line x1="495" y1="400" x2="735" y2="400" stroke="#c9962c" stroke-width="2.5" marker-start="url(#arrL)"/>
+  <!-- Arrow to box 2 (Llama) -->
+  <line x1="495" y1="345" x2="735" y2="345" stroke="#c9962c" stroke-width="2.5" marker-end="url(#arrR)"/>
+  <line x1="495" y1="365" x2="735" y2="365" stroke="#c9962c" stroke-width="2.5" marker-start="url(#arrL)"/>
 
-  <!-- Arrow to box 3 -->
-  <line x1="495" y1="550" x2="735" y2="550" stroke="#c9962c" stroke-width="2.5" marker-end="url(#arrR)"/>
-  <line x1="495" y1="570" x2="735" y2="570" stroke="#c9962c" stroke-width="2.5" marker-start="url(#arrL)"/>
+  <!-- Arrow to box 3 (Voxtral) — dashed to signal "rare" -->
+  <line x1="495" y1="505" x2="735" y2="505" stroke="#b38a2a" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arrRdash)"/>
+  <line x1="495" y1="525" x2="735" y2="525" stroke="#b38a2a" stroke-width="2" stroke-dasharray="6 5" marker-start="url(#arrLdash)"/>
+
+  <!-- Arrow to box 4 (PostHog) - one-way: events leave, nothing returns -->
+  <line x1="495" y1="680" x2="735" y2="680" stroke="#c9962c" stroke-width="2.5" marker-end="url(#arrR)"/>
 
   <!-- Footer note -->
-  <text x="600" y="715" font-size="13" fill="#5a4410" text-anchor="middle" font-style="italic" font-family="Helvetica, Arial, sans-serif">
-    Switch speech + voice to "Browser" in settings and the arrows above disappear — nothing leaves the device at all.
+  <text x="600" y="850" font-size="13" fill="#5a4410" text-anchor="middle" font-style="italic" font-family="Helvetica, Arial, sans-serif">
+    Switch to browser speech recognition and browser voice for zero cloud calls of any kind during practice.
+  </text>
+  <text x="600" y="870" font-size="12" fill="#8b6914" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">
+    Dashed = rare / conditional · solid = per-line during normal practice
   </text>
 </svg>
