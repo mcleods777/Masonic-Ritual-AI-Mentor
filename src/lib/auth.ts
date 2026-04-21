@@ -1,17 +1,32 @@
 /**
  * Pilot authentication helpers.
  *
- * Magic-link email sign-in for the lodge pilot. Two JWT token types:
+ * Magic-link email sign-in for the lodge pilot. Three JWT token types,
+ * each with a distinct `aud` claim so a stolen token of one kind cannot
+ * be replayed as another (jose's jwtVerify rejects audience mismatch):
  *
- *   - Magic-link token: short-lived (24h), sent to the Brother's email.
- *     Clicking the link exchanges this for a session token.
- *   - Session token: longer-lived (30 days), stored in an httpOnly cookie.
- *     Middleware verifies this on every protected request.
+ *   - Magic-link token (`aud: "pilot-magic-link"`) — short-lived (24h),
+ *     sent to the Brother's email. Clicking the link exchanges this for
+ *     a session token.
+ *   - Session token (`aud: "pilot-session"`) — longer-lived (30 days),
+ *     stored in an httpOnly cookie. Middleware verifies this on every
+ *     protected non-API request.
+ *   - Client-token (`aud: "client-token"`, SAFETY-05 D-11) — short-lived
+ *     (1h), minted by POST /api/auth/client-token to a signed-in browser
+ *     and attached as `Authorization: Bearer <token>` on every paid-route
+ *     call. Defence in depth alongside the X-Client-Secret header: a
+ *     leaked shared-secret alone is not sufficient to reach paid routes.
  *
- * Both are signed with HS256 using JWT_SECRET. The secret MUST be at least
+ * Cross-audience invariant (exercised by auth.test.ts + client-token.test.ts):
+ * verify<X>Token rejects every token whose audience is not exactly X.
+ * Stolen cookies cannot become client-tokens; stolen magic-links cannot
+ * become sessions; etc. Stateless — no server-side revocation list in
+ * Phase 2 (ADMIN-04, Phase 6, adds that alongside the durable KV store).
+ *
+ * All are signed with HS256 using JWT_SECRET. The secret MUST be at least
  * 32 bytes of entropy. Rotating JWT_SECRET in Vercel invalidates every
- * outstanding magic-link and session in the jurisdiction within seconds —
- * the emergency kill-switch for lost devices.
+ * outstanding magic-link, session, and client-token in the jurisdiction
+ * within seconds — the emergency kill-switch for lost devices.
  *
  * The allowlist (LODGE_ALLOWLIST) is a comma-separated env var of emails
  * in good standing. Non-allowlisted sign-in requests still return 200 to
@@ -23,9 +38,11 @@ import { SignJWT, jwtVerify } from "jose";
 export const SESSION_COOKIE_NAME = "pilot-session";
 export const MAGIC_LINK_TTL_SECONDS = 60 * 60 * 24; // 24 hours
 export const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
+export const CLIENT_TOKEN_TTL_SECONDS = 60 * 60; // 1 hour (SAFETY-05 D-11)
 
 const MAGIC_LINK_AUDIENCE = "pilot-magic-link";
 const SESSION_AUDIENCE = "pilot-session";
+const CLIENT_TOKEN_AUDIENCE = "client-token";
 const ISSUER = "masonic-ritual-mentor";
 
 function getSecret(): Uint8Array {
@@ -128,6 +145,56 @@ export async function verifySessionToken(
     const email = payload.email;
     if (typeof email !== "string") return null;
     return { email };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sign a 1h client-token (SAFETY-05, D-11/D-12).
+ *
+ * The caller (POST /api/auth/client-token) first authenticates the browser
+ * via the pilot-session cookie, derives `hashedUser = sha256(email).slice(0,16)`,
+ * and passes that here. The token rides along with every paid-route call as
+ * `Authorization: Bearer <token>`, verified by middleware on /api/* (except
+ * /api/auth/*) and re-verified route-level via paid-route-guard (D-14).
+ *
+ * Audience `client-token` is DISTINCT from `pilot-session`. A stolen
+ * pilot-session cookie cannot be replayed as a client-token and vice versa
+ * — jose's jwtVerify rejects audience mismatch, and the cross-audience
+ * round-trip tests are the regression guard.
+ *
+ * Claims are stateless — no session ID — per D-11. Stateful revocation
+ * arrives in Phase 6 ADMIN-04 alongside the durable KV store.
+ */
+export async function signClientToken(hashedUser: string): Promise<string> {
+  return new SignJWT({ sub: hashedUser })
+    .setProtectedHeader({ alg: "HS256" })
+    .setIssuedAt()
+    .setIssuer(ISSUER)
+    .setAudience(CLIENT_TOKEN_AUDIENCE)
+    .setExpirationTime(`${CLIENT_TOKEN_TTL_SECONDS}s`)
+    .sign(getSecret());
+}
+
+/**
+ * Verify a client-token. Edge-runtime safe (pure jose, no Node APIs) so
+ * middleware (edge by default) can verify without a Node fallback. Returns
+ * `{sub: hashedUser}` on success, null on any failure — callers treat null
+ * as "refresh required" and respond 401 `{error:"client_token_invalid"}`.
+ */
+export async function verifyClientToken(
+  token: string | undefined,
+): Promise<{ sub: string } | null> {
+  if (!token) return null;
+  try {
+    const { payload } = await jwtVerify(token, getSecret(), {
+      issuer: ISSUER,
+      audience: CLIENT_TOKEN_AUDIENCE,
+    });
+    const sub = payload.sub;
+    if (typeof sub !== "string") return null;
+    return { sub };
   } catch {
     return null;
   }
