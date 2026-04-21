@@ -54,7 +54,17 @@ Plans:
   4. When Shannon flips `RITUAL_EMERGENCY_DISABLE_PAID=true` and redeploys, every paid route returns a static fallback response and pre-baked audio still plays
   5. A runaway-loop simulation (same session firing feedback repeatedly) gets stopped client-side by the session step ceiling, with a server-side 429 as belt-and-suspenders
   6. Shannon receives a Resend alert email the same day total or per-user spend exceeds a configured threshold
-**Plans**: TBD
+**Plans**: 9 plans
+Plans:
+- [ ] 02-01-PLAN.md — SAFETY-01: audit-log + pricing + spend-tally + ESLint PII guard (Wave 1)
+- [ ] 02-02-PLAN.md — SAFETY-02: rate-limit userKey keyspace + paid-route-guard skeleton (Wave 2)
+- [ ] 02-03-PLAN.md — SAFETY-03: wire guard + emit into all 9 paid routes (60/hr + 300/day caps) (Wave 6)
+- [ ] 02-04-PLAN.md — SAFETY-04: vercel.json cron + Resend spend-alert + lookup-hashed-user CLI (Wave 7)
+- [ ] 02-05-PLAN.md — SAFETY-05: client-token JWT endpoint + api-fetch Bearer + middleware verify (Wave 3)
+- [ ] 02-06-PLAN.md — SAFETY-06: RehearsalMode session step ceiling (client half; server half in Plan 03) (Wave 8)
+- [ ] 02-07-PLAN.md — SAFETY-07: screen-wake-lock inactivity auto-release (Wave 8)
+- [ ] 02-08-PLAN.md — SAFETY-08: kill-switch client degraded-mode UX + KILL-SWITCH.md runbook (Wave 4)
+- [ ] 02-09-PLAN.md — SAFETY-09: defense-in-depth route-level verification + regression tests (Wave 5)
 **UI hint**: no
 
 ### Phase 3: Authoring Throughput
@@ -134,7 +144,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Pre-invite Hygiene | 7/7 | Complete (UAT pending) | 2026-04-21 |
-| 2. Safety Floor | 0/0 | Not started | - |
+| 2. Safety Floor | 0/9 | Not started | - |
 | 3. Authoring Throughput | 0/0 | Not started | - |
 | 4. Content Coverage | 0/0 | Not started | - |
 | 5. Coach Quality Lift | 0/0 | Not started | - |
