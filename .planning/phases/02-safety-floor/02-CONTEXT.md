@@ -37,8 +37,11 @@ Three layered defenses so no invited user can produce a surprise AI bill, no run
 - **D-02:** Per-user **daily cap**: **300 calls/day** aggregate across the same routes. Equivalent to 5 full rehearsal sessions. Caps worst-case runaway loop at ~$1-3/user/day depending on route mix.
 - **D-03:** Rate-limit key scheme (per SAFETY-02): `userKey = sha256(email).slice(0, 16)`. Fallback to IP (existing `getClientIp`) when session is absent. Buckets namespaced per time window: `paid:hour:${userKey}` + `paid:day:${userKey}`. Route handlers additionally keep per-route buckets for per-endpoint throttling if the aggregate is healthy but one route is misbehaving (`tts:hour:${userKey}` etc.) — these are belt-and-suspenders, loose limits (e.g., 100/hr per route).
 - **D-04:** Spike-alert trigger (SAFETY-04): **absolute thresholds** — fires Resend email when (a) total-pilot spend > **$10/day** OR (b) any single hashed-user > **$3/day**. No rolling median, no percentile math. Simple reasoning, no baseline needed, works on day 1.
-- **D-05:** Cron schedule: **daily at 02:00 UTC** via Vercel cron (`vercel.ts` crons block, or `vercel.json` crons field if not yet migrated). One email/day max. Early enough that the previous UTC day's data is complete; late enough Shannon sees it with morning coffee.
+- **D-05:** Cron schedule: **daily at 02:00 UTC** via Vercel cron. Updated 2026-04-21 post-research: **use `vercel.json` `crons` field** (not `vercel.ts` — the latter requires `@vercel/config@^0.2.1` 0.x + named export, unnecessary overhead for a single static cron). Cron handler is a `GET` route at `src/app/api/cron/spend-alert/route.ts` (Vercel cron invokes GET, not POST). Verify `Authorization: Bearer ${CRON_SECRET}` inbound header; 401 otherwise. **Hobby-plan caveat:** cron timing on Hobby plan drifts anywhere in the 02:00-02:59 UTC window; Pro plan is per-minute accurate. Document in the new `docs/runbooks/KILL-SWITCH.md` so a later plan downgrade doesn't silently break the 02:00 expectation.
 - **D-06:** Alert email contents: aggregate totals per route + top 5 spenders (by hashedUser) + per-user totals. Shannon can reverse-lookup via the local hashedUser → email CLI from memory skill `hashed-user-id-analytics-with-operator-runbook`.
+- **D-06b (discovered by research, 2026-04-21):** Cron has no read path back to Vercel logs in Phase 2 (Log Drain API deferred to ADMIN-02). **Solution: new `src/lib/spend-tally.ts`** — a small in-memory day-scoped counter that `emit()` increments synchronously on every audit record. Cron reads the tally, computes thresholds, emits Resend email, clears the UTC-day bucket after sending. Same cold-start caveat as `rate-limit.ts` (new instance = empty tally until traffic repopulates). Pilot-scale accepted; alert email body notes "totals reflect warm-container data for the UTC day." Net add: one new `src/lib/spend-tally.ts` file; `emit()` in `src/lib/audit-log.ts` calls into it. Shannon confirmed via AskUserQuestion after research.
+- **D-06c (discovered by research, 2026-04-21):** D-06 references `scripts/lookup-hashed-user.ts` as if it exists; research confirmed it does NOT. Phase 2 creates it as a small Phase 2 task (~20 lines: read `LODGE_ALLOWLIST`, hash each email, print match for the argument hash). Added to the SAFETY-04 plan. Shannon confirmed via AskUserQuestion after research.
+- **D-06d (discovered by research, 2026-04-21):** Initial `src/lib/pricing.ts` values for Mistral Small and Voxtral TTS are **LOW confidence** — sourced from aggregator/secondary docs, not primary provider pricing pages. All other models HIGH confidence. Shannon reviews the pricing table during code review before merge; planner includes an explicit "verify Mistral + Voxtral prices against console.mistral.ai" task.
 
 ### Audit log destination + shape (SAFETY-01)
 - **D-07:** Destination: **Vercel logs only via structured `console.log`**. `src/lib/audit-log.ts` exports `emit(record: AuditRecord): void` that `JSON.stringify`s the record and calls `console.log('[AUDIT]', jsonStr)`. Vercel captures it; retention per plan. Zero new infrastructure. Phase 6 ADMIN-02 dashboard can tail via Vercel Log Drain API or add its own in-memory buffer on top — Phase 2 does NOT build that buffer.
@@ -116,9 +119,11 @@ None — no pending todos from prior sessions matched Phase 2 scope.
 - `src/components/RehearsalMode.tsx` — session step ceiling (SAFETY-06)
 - `src/lib/screen-wake-lock.ts` — inactivity auto-release (SAFETY-07)
 - `src/components/PilotBanner.tsx` (or a new `DegradedModeBanner.tsx`) — kill-switch banner (D-18)
-- `vercel.ts` or `vercel.json` — cron entry for SAFETY-04 daily spike check
-- `src/app/api/cron/spend-alert/route.ts` — NEW cron target (SAFETY-04)
-- `docs/runbooks/KILL-SWITCH.md` — NEW runbook (D-20)
+- `vercel.json` — crons block for SAFETY-04 daily spike check (D-05 post-research: not `vercel.ts`)
+- `src/app/api/cron/spend-alert/route.ts` — NEW cron target, GET handler (SAFETY-04, D-05)
+- `src/lib/spend-tally.ts` — NEW in-memory day-scoped spend counter (D-06b)
+- `scripts/lookup-hashed-user.ts` — NEW reverse-lookup CLI (D-06c)
+- `docs/runbooks/KILL-SWITCH.md` — NEW runbook (D-20), includes Hobby-plan cron-timing note (D-05)
 - `next.config.ts` — no changes expected
 
 ### External references
