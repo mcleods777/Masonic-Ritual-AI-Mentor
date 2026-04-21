@@ -1,6 +1,6 @@
 # State: Masonic Ritual AI Mentor — v1 Invited-Lodge Milestone
 
-**Last updated:** 2026-04-20 (roadmap created)
+**Last updated:** 2026-04-20 (Phase 1 context gathered)
 
 ## Project Reference
 
@@ -13,22 +13,22 @@
 ## Current Position
 
 **Milestone:** v1 invited-lodge
-**Phase:** Pre-planning (roadmap created, no phase started)
+**Phase:** Phase 1 context gathered (no plans yet)
 **Plan:** None active
-**Status:** Awaiting `/gsd-plan-phase 1` to begin
+**Status:** Awaiting `/gsd-plan-phase 1` to decompose into executable plans
 **Progress:** 0/7 phases complete
 
 ```
 [░░░░░░░░░░░░░░░░░░░░] 0% (0/7 phases)
 ```
 
-**Next action:** `/gsd-plan-phase 1` to decompose Phase 1 (Pre-invite Hygiene) into plans.
+**Next action:** `/gsd-plan-phase 1` to decompose Phase 1 (Pre-invite Hygiene) into plans. CONTEXT.md captures 21 implementation decisions across 4 gray areas.
 
 ## Phase Map
 
 | # | Phase | Requirements | Status |
 |---|-------|--------------|--------|
-| 1 | Pre-invite Hygiene | HYGIENE-01..07 (7) | Not started |
+| 1 | Pre-invite Hygiene | HYGIENE-01..07 (7) | Context gathered |
 | 2 | Safety Floor | SAFETY-01..09 (9) | Not started |
 | 3 | Authoring Throughput | AUTHOR-01..10 (10) | Not started |
 | 4 | Content Coverage | CONTENT-01..07 (7) | Not started |
@@ -84,15 +84,17 @@ None.
 
 ## Session Continuity
 
-**Last significant action:** Roadmap created by `gsd-roadmapper` on 2026-04-20. All 57 v1 requirements mapped across 7 phases. Coverage validated at 100%. Files written: `.planning/ROADMAP.md`, `.planning/STATE.md`; `.planning/REQUIREMENTS.md` traceability section updated in place.
+**Last significant action:** Phase 1 context gathered via `/gsd-discuss-phase 1` on 2026-04-20. 4 gray areas discussed (secret-rotation runbook, noindex + landing.html audit, middleware matcher test, execution order + rollback). 21 implementation decisions captured. Files written: `.planning/phases/01-pre-invite-hygiene/01-CONTEXT.md`, `.planning/phases/01-pre-invite-hygiene/01-DISCUSSION-LOG.md`; `.planning/STATE.md` updated.
 
-**Resumption cue:** Next agent should run `/gsd-plan-phase 1` to begin decomposing Phase 1 (Pre-invite Hygiene) into executable plans.
+**Resumption cue:** Next agent should run `/gsd-plan-phase 1` to decompose Phase 1 into executable plans using the locked implementation decisions in `01-CONTEXT.md`.
 
 **Critical context for next agent:**
 1. This is a brownfield milestone — do NOT plan work that re-builds existing pilot capability (see PROJECT.md Validated section)
 2. Phase success criteria are goal-backward observable behaviors — plan must-haves must satisfy them
 3. Project skills in `.claude/skills/` (gstack) should be checked during plan phase if relevant
 4. Research convergences (from `.planning/research/SUMMARY.md`) are settled decisions; divergences were resolved during roadmapping (see Decisions table above)
+5. Phase 1 task order is locked: 03 → 06 → 04 → 07 → 05 → 02 → 01 (safe-first, risky AI SDK pair last). One commit per HYGIENE-XX. See `01-CONTEXT.md` §Implementation Decisions for full decision set.
 
 ---
 *State initialized: 2026-04-20 after roadmap creation*
+*Phase 1 context gathered: 2026-04-20*
