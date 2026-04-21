@@ -16,11 +16,17 @@
  * call this module (it reads `tokenPayload.sub` from the already-minted
  * client-token, never rehashes).
  *
- * History: Phase 2 Plan 05 introduces the module; Plan 04 extends it with
- * `findEmailByHashedUser` for the reverse-lookup CLI (D-06c). The 16-char
- * prefix matches paid-route-guard.ts's internal hashedUserFromEmail so
- * the guard's internal helper can also be swapped to import from here
- * once Plan 03 lands.
+ * History: Phase 2 Plan 05 introduces the module with hashedUserFromEmail;
+ * Plan 04 extends it with `findEmailByHashedUser` for the reverse-lookup
+ * CLI (D-06c). The 16-char prefix matches paid-route-guard.ts's internal
+ * hashedUserFromEmail so the guard's internal helper can also be swapped
+ * to import from here without drift.
+ *
+ * NOTE: src/lib/paid-route-guard.ts does NOT import this module — after
+ * Plan 05 the guard reads the hash directly from `tokenPayload.sub`
+ * instead of re-hashing a session email. The mint-side (client-token
+ * route) and the lookup-side (this CLI) MUST agree on the formula; a
+ * drift breaks the entire SAFETY-04 alert reverse-lookup promise.
  */
 
 import crypto from "node:crypto";
@@ -44,4 +50,33 @@ export function hashedUserFromEmail(email: string): string {
     .update(email.trim().toLowerCase())
     .digest("hex")
     .slice(0, 16);
+}
+
+/**
+ * Scan a comma-separated allowlist and return the lowercased email whose
+ * 16-hex hash matches `targetHash`. Returns null if no entry matches.
+ *
+ * Used by scripts/lookup-hashed-user.ts (SAFETY-04 D-06c) to reverse-
+ * resolve a hashedUser seen in a spike-alert email back to the real
+ * pilot address.
+ *
+ * Case-insensitive on `targetHash` (hex is canonically lowercase, but
+ * operators may paste uppercase from email clients that rewrite casing).
+ * Blank CSV entries and surrounding whitespace are tolerated.
+ */
+export function findEmailByHashedUser(
+  allowlistCsv: string,
+  targetHash: string,
+): string | null {
+  const needle = targetHash.toLowerCase();
+  const emails = allowlistCsv
+    .split(",")
+    .map((e) => e.trim())
+    .filter(Boolean);
+  for (const email of emails) {
+    if (hashedUserFromEmail(email) === needle) {
+      return email.toLowerCase();
+    }
+  }
+  return null;
 }
