@@ -1063,6 +1063,12 @@ export const GEMINI_ROLE_VOICES: Record<string, string> = {
   Steward: "Rasalgethi", // distinctive male voice — attendant role
   Candidate: "Zubenelgenubi", // distinctive male — the new brother
   Narrator: "Enceladus", // breathy and soft — scene-setter voice
+  // Catechism (explanatory lecture): instructor asking, candidate answering.
+  // Without these, Q/A fall through roleToGroup → -1 → "Kore" (female) default,
+  // producing a girl voice on explanatory bakes. Q reuses Achird (warm/pedagogical)
+  // since that matches the voice-cast; A reuses Zubenelgenubi since A is the candidate.
+  Q: "Achird",
+  A: "Zubenelgenubi",
 };
 
 /** Get the default Gemini voice for a Masonic role, or a neutral fallback. */

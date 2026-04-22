@@ -54,8 +54,14 @@ const CACHE_KEY_VERSION = "v2";
 // ============================================================
 
 export interface RenderOptions {
-  /** Gemini API key. Required. */
-  apiKey: string;
+  /**
+   * Gemini API keys, tried in order when one returns 429. Required,
+   * must be non-empty. Pass a singleton array `[key]` for the legacy
+   * single-key case. With multiple keys (e.g. one per GCP project),
+   * the retry loop rotates through them before incurring a backoff
+   * wait, effectively multiplying the daily quota by pool size.
+   */
+  apiKeys: string[];
   /** Models to try, in order. Defaults to DEFAULT_MODELS (env-overridable). */
   models?: string[];
   /** Override cache dir, for tests. */
@@ -122,7 +128,7 @@ export async function renderLineAudio(
         style,
         voice,
         models,
-        options.apiKey,
+        options.apiKeys,
         preamble,
       );
       const opus = await encodeWavToOpus(wav);
@@ -305,9 +311,12 @@ async function callGeminiWithFallback(
   style: string | undefined,
   voice: string,
   models: string[],
-  apiKey: string,
+  apiKeys: string[],
   preamble: string = "",
 ): Promise<{ wav: Buffer; model: string }> {
+  if (apiKeys.length === 0) {
+    throw new Error("callGeminiWithFallback: apiKeys is empty");
+  }
   const inlineStyle = style ? `[${style}] ` : "";
   const prompt = `${preamble}${inlineStyle}${text}`;
   const body = JSON.stringify({
@@ -331,105 +340,109 @@ async function callGeminiWithFallback(
   let anyModelSawNonRegressionFailure = false;
 
   for (const model of models) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`;
-
-    // Per-model retry loop. Try the request up to 4 times on this model
-    // before giving up and falling through to the next tier. Covers:
-    //   * 429 (per-minute rate limit, clears in ~60s)
-    //   * 500/502/503 (transient Google-side issues)
-    //   * 200 OK with empty audio stream (text-token regression)
-    // 404 is NOT retried on the same model — it means the endpoint shape
-    // is wrong (e.g., preview model only exposes streamGenerateContent;
-    // retrying won't help).
-    const MAX_ATTEMPTS = PER_MODEL_RETRY_BACKOFF_MS.length + 1;
+    // Per-model retry loop structured as ROUNDS. Each round tries every
+    // key in apiKeys once before any wait. Only when all keys in the
+    // pool fail a round do we burn a backoff and retry. With a single
+    // key this collapses back to the original per-attempt shape.
+    //
+    // Retryable within a round: 429 (per-project daily cap or per-minute
+    // throttle), 5xx (transient Google), network errors, and 200-OK
+    // empty-audio (text-token regression — might clear on a different
+    // key/project). Non-retryable: 404 (endpoint shape mismatch — same
+    // for every key) and other 4xx.
+    const MAX_ROUNDS = PER_MODEL_RETRY_BACKOFF_MS.length + 1;
     let exhausted = false;
     let thisModelSawNonRegressionFailure = false;
 
-    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-      let resp: Response;
-      try {
-        resp = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body,
-        });
-      } catch (fetchErr) {
-        // Network error — retry on same model if we have attempts left.
-        thisModelSawNonRegressionFailure = true;
-        if (attempt < MAX_ATTEMPTS - 1) {
-          const waitMs = PER_MODEL_RETRY_BACKOFF_MS[attempt];
+    roundLoop: for (let round = 0; round < MAX_ROUNDS; round++) {
+      for (let keyIdx = 0; keyIdx < apiKeys.length; keyIdx++) {
+        const apiKey = apiKeys[keyIdx];
+        const keyLabel =
+          apiKeys.length > 1 ? ` [key ${keyIdx + 1}/${apiKeys.length}]` : "";
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`;
+        let resp: Response;
+        try {
+          resp = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body,
+          });
+        } catch (fetchErr) {
+          thisModelSawNonRegressionFailure = true;
           process.stderr.write("\r" + " ".repeat(80) + "\r");
           console.error(
-            `  ${model} network error: ${(fetchErr as Error).message}. Retrying in ${waitMs / 1000}s (${attempt + 2}/${MAX_ATTEMPTS})...`,
+            `  ${model}${keyLabel} network error: ${(fetchErr as Error).message}. Trying next key...`,
           );
-          await sleepWithHeartbeat(waitMs, `waiting for ${model}`);
-          continue;
+          continue; // try next key
         }
-        // Final attempt network-failed — fall through to next tier.
-        attempted.push(model);
-        exhausted = true;
-        break;
-      }
 
-      if (resp.status === 404) {
-        // Endpoint shape mismatch. Never retryable on the same model —
-        // fall through to the next tier immediately.
-        thisModelSawNonRegressionFailure = true;
-        attempted.push(model);
-        exhausted = true;
-        break;
-      }
-
-      // Retryable on same model: 429 (per-minute throttle) and 5xx.
-      if (resp.status === 429 || resp.status >= 500) {
-        thisModelSawNonRegressionFailure = true;
-        if (attempt < MAX_ATTEMPTS - 1) {
-          const waitMs = PER_MODEL_RETRY_BACKOFF_MS[attempt];
-          process.stderr.write("\r" + " ".repeat(80) + "\r");
-          console.error(
-            `  ${model} returned ${resp.status}. Retrying in ${waitMs / 1000}s (${attempt + 2}/${MAX_ATTEMPTS})...`,
-          );
-          await sleepWithHeartbeat(waitMs, `waiting for ${model}`);
-          continue;
-        }
-        // Exhausted retries on this model — fall through to next tier.
-        attempted.push(model);
-        exhausted = true;
-        break;
-      }
-
-      if (!resp.ok) {
-        const errText = await resp.text();
-        throw new Error(`Gemini ${model} returned ${resp.status}: ${errText.slice(0, 300)}`);
-      }
-
-      // 200 OK. Try to consume the stream. If it's empty (text-token
-      // regression), retry the same model — it's a model-side blip,
-      // not a quota issue.
-      try {
-        const wav = await consumeSseToWav(resp);
-        return { wav, model };
-      } catch (consumeErr) {
-        if (consumeErr instanceof EmptyAudioStreamError) {
-          // Deliberately do NOT set thisModelSawNonRegressionFailure here
-          // — pure regression is what we're trying to distinguish.
-          if (attempt < MAX_ATTEMPTS - 1) {
-            const waitMs = PER_MODEL_RETRY_BACKOFF_MS[attempt];
-            process.stderr.write("\r" + " ".repeat(80) + "\r");
-            console.error(
-              `  ${model} text-token regression (empty audio stream). Retrying in ${waitMs / 1000}s (${attempt + 2}/${MAX_ATTEMPTS})...`,
-            );
-            await new Promise((r) => setTimeout(r, waitMs));
-            continue;
-          }
-          // Exhausted retries — fall through to next tier.
+        if (resp.status === 404) {
+          // Endpoint shape mismatch — same for every key in the pool.
+          // Fall through to the next model tier immediately.
+          thisModelSawNonRegressionFailure = true;
           attempted.push(model);
           exhausted = true;
-          break;
+          break roundLoop;
         }
-        // Other consumption errors (malformed SSE, missing body) —
-        // not retryable, rethrow.
-        throw consumeErr;
+
+        if (resp.status === 429 || resp.status >= 500) {
+          thisModelSawNonRegressionFailure = true;
+          if (apiKeys.length > 1) {
+            process.stderr.write("\r" + " ".repeat(80) + "\r");
+            console.error(
+              `  ${model}${keyLabel} returned ${resp.status}. Trying next key...`,
+            );
+          }
+          continue; // try next key in this round
+        }
+
+        if (!resp.ok) {
+          const errText = await resp.text();
+          throw new Error(
+            `Gemini ${model} returned ${resp.status}: ${errText.slice(0, 300)}`,
+          );
+        }
+
+        // 200 OK. Consume the SSE stream. Empty stream = text-token
+        // regression — rotate to next key (different project may not
+        // regress) rather than immediately backing off.
+        try {
+          const wav = await consumeSseToWav(resp);
+          return { wav, model };
+        } catch (consumeErr) {
+          if (consumeErr instanceof EmptyAudioStreamError) {
+            // Pure regression — don't flip the non-regression flag.
+            if (apiKeys.length > 1) {
+              process.stderr.write("\r" + " ".repeat(80) + "\r");
+              console.error(
+                `  ${model}${keyLabel} text-token regression (empty audio stream). Trying next key...`,
+              );
+            }
+            continue; // try next key
+          }
+          // Malformed SSE or missing body — not retryable, rethrow.
+          throw consumeErr;
+        }
+      }
+
+      // Every key in the pool failed this round. Backoff and try the
+      // whole pool again — per-minute windows may clear, or a sibling
+      // project's quota may refill faster than the one that 429'd.
+      if (round < MAX_ROUNDS - 1) {
+        const waitMs = PER_MODEL_RETRY_BACKOFF_MS[round];
+        process.stderr.write("\r" + " ".repeat(80) + "\r");
+        const poolLabel =
+          apiKeys.length > 1
+            ? `all ${apiKeys.length} keys failed`
+            : `failed`;
+        console.error(
+          `  ${model}: ${poolLabel}. Retrying round ${round + 2}/${MAX_ROUNDS} in ${waitMs / 1000}s...`,
+        );
+        await sleepWithHeartbeat(waitMs, `waiting for ${model}`);
+      } else {
+        // Final round failed — fall through to the next model tier.
+        attempted.push(model);
+        exhausted = true;
       }
     }
 

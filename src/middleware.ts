@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import {
   SESSION_COOKIE_NAME,
   isAuthConfigured,
+  verifyClientToken,
   verifySessionToken,
 } from "@/lib/auth";
 
@@ -11,6 +12,8 @@ import {
  * *.vercel.app so we pattern-match the subdomain.
  */
 const ALLOWED_ORIGIN_SUFFIXES = [
+  "masonicmentor.app",
+  "www.masonicmentor.app",
   "masonic-ritual-ai-mentor.vercel.app",
   "localhost:3000",
   "localhost:3001",
@@ -66,7 +69,8 @@ export async function middleware(request: NextRequest) {
         headers: {
           "Access-Control-Allow-Origin": origin!,
           "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type, X-Client-Secret",
+          "Access-Control-Allow-Headers":
+            "Content-Type, X-Client-Secret, Authorization",
           "Access-Control-Max-Age": "86400",
         },
       });
@@ -84,6 +88,30 @@ export async function middleware(request: NextRequest) {
             { status: 401 },
           );
         }
+      }
+    }
+
+    // SAFETY-05 / SAFETY-09 / D-14: client-token verification on /api/*
+    // (except /api/auth/*). Defense in depth — each paid-route handler also
+    // re-verifies via src/lib/paid-route-guard.ts#applyPaidRouteGuards, so a
+    // future Next.js middleware-skip quirk cannot bypass paid-route auth.
+    // Skipped entirely when JWT_SECRET is unset (local dev / misconfigured
+    // deploy stays open) and when the shared-secret check is gated off.
+    if (
+      isAuthConfigured() &&
+      !pathname.startsWith("/api/auth/") &&
+      request.method !== "OPTIONS"
+    ) {
+      const authHeader = request.headers.get("authorization");
+      const bearer = authHeader?.startsWith("Bearer ")
+        ? authHeader.slice(7)
+        : undefined;
+      const tokenPayload = await verifyClientToken(bearer);
+      if (!tokenPayload) {
+        return NextResponse.json(
+          { error: "client_token_invalid" },
+          { status: 401 },
+        );
       }
     }
 
