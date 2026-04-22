@@ -7,6 +7,7 @@ depends_on: [04, 05]
 files_modified:
   - scripts/build-mram-from-dialogue.ts
   - scripts/lib/resume-state.ts
+  - scripts/lib/bake-math.ts
   - scripts/__tests__/bake-helpers.test.ts
 autonomous: true
 requirements: [AUTHOR-02, AUTHOR-04, AUTHOR-05, AUTHOR-06, AUTHOR-07]
@@ -31,8 +32,11 @@ must_haves:
     - path: scripts/lib/resume-state.ts
       provides: "shared ResumeState type + atomic read/write helpers, imported by both build-mram-from-dialogue.ts (writer) and bake-all.ts (reader)"
       contains: "writeResumeStateAtomic"
+    - path: scripts/lib/bake-math.ts
+      provides: "pure math helpers extracted from build-mram for unit testability: computeMedianSecPerChar (D-10 rolling median), isDurationAnomaly (>3× or <0.3× ratio check), wordDiff (expected ∖ got + got ∖ expected per D-11 --verify-audio). Imported by build-mram-from-dialogue.ts; covered by bake-helpers.test.ts"
+      contains: "computeMedianSecPerChar"
     - path: scripts/__tests__/bake-helpers.test.ts
-      provides: "unit tests for the ResumeState helpers — atomic write round-trip, missing-file null return, .tmp non-leak"
+      provides: "unit tests for the ResumeState helpers AND the pure math helpers — atomic write round-trip, missing-file null return, .tmp non-leak, median odd/even/single, anomaly ratio <0.3×/>3×/in-band/boundary, wordDiff identical/missed/inserted/case-insensitive"
       contains: "writeResumeStateAtomic"
   key_links:
     - from: scripts/build-mram-from-dialogue.ts
@@ -865,9 +869,10 @@ Commit: `author-06: add duration-anomaly detector + author-07 --verify-audio STT
 </task>
 
 <task type="auto" tdd="true">
-  <name>Task 3: Add line-level _RESUME.json writes (D-06) + shared scripts/lib/resume-state.ts</name>
+  <name>Task 3: Add line-level _RESUME.json writes (D-06) + shared scripts/lib/resume-state.ts + extract pure math helpers to scripts/lib/bake-math.ts</name>
   <files>
     scripts/lib/resume-state.ts,
+    scripts/lib/bake-math.ts,
     scripts/build-mram-from-dialogue.ts,
     scripts/__tests__/bake-helpers.test.ts
   </files>
@@ -1064,7 +1069,61 @@ Treat the Google short-line branch identically — the two helper calls (`markLi
 
 Cleanup note: when `resumeStatePath` is set, the orchestrator is responsible for unlinking `_RESUME.json` after a clean ritual finish (handled in Plan 07). build-mram-from-dialogue.ts does NOT delete the state file — it only writes it.
 
-**Step 3 — Fill scripts/__tests__/bake-helpers.test.ts.** Replace the Plan-01 scaffold with concrete tests of `readResumeState` + `writeResumeStateAtomic`:
+**Step 2b — Extract pure math helpers into scripts/lib/bake-math.ts.** The D-10 duration-anomaly math and the D-11 word-diff are load-bearing (D-10 catches the `gemini-tts-voice-cast-scene-leaks-into-audio` historical failure mode) and must have unit-test coverage. Extract three pure functions out of build-mram-from-dialogue.ts into a new small module:
+
+```ts
+// scripts/lib/bake-math.ts
+export interface DurationSample {
+  durationMs: number;
+  charCount: number;
+}
+
+/** Median sec-per-char across samples. Returns 0 when samples is empty (caller must guard). */
+export function computeMedianSecPerChar(samples: DurationSample[]): number {
+  if (samples.length === 0) return 0;
+  const secPerChar = samples
+    .filter((s) => s.charCount > 0)
+    .map((s) => s.durationMs / 1000 / s.charCount)
+    .sort((a, b) => a - b);
+  if (secPerChar.length === 0) return 0;
+  const mid = Math.floor(secPerChar.length / 2);
+  return secPerChar.length % 2 === 0
+    ? (secPerChar[mid - 1] + secPerChar[mid]) / 2
+    : secPerChar[mid];
+}
+
+/**
+ * Per D-10: anomaly iff ratio > 3.0× OR < 0.3× the per-ritual median. Boundary is INCLUSIVE
+ * of the band (exactly 3.0× or 0.3× does NOT trigger — must strictly exceed).
+ */
+export function isDurationAnomaly(
+  line: DurationSample,
+  ritualMedian: number,
+  thresholds: { min: number; max: number } = { min: 0.3, max: 3.0 },
+): boolean {
+  if (ritualMedian === 0 || line.charCount === 0) return false;
+  const lineSecPerChar = line.durationMs / 1000 / line.charCount;
+  const ratio = lineSecPerChar / ritualMedian;
+  return ratio > thresholds.max || ratio < thresholds.min;
+}
+
+/**
+ * Word-level diff for --verify-audio: returns case-insensitive {missed, inserted} arrays.
+ * Used by verifyAudioRoundTrip to compute wordDiffCount per D-11.
+ */
+export function wordDiff(expected: string, actual: string): { missed: string[]; inserted: string[] } {
+  const norm = (s: string) => s.toLowerCase().trim().split(/\s+/).filter(Boolean);
+  const expSet = new Set(norm(expected));
+  const actSet = new Set(norm(actual));
+  const missed = norm(expected).filter((w) => !actSet.has(w));
+  const inserted = norm(actual).filter((w) => !expSet.has(w));
+  return { missed, inserted };
+}
+```
+
+In build-mram-from-dialogue.ts, replace the inline `computeMedianSecPerChar` definition with `import { computeMedianSecPerChar, isDurationAnomaly, wordDiff, type DurationSample } from "./lib/bake-math"`. Update `addAndCheckAnomaly` to call `isDurationAnomaly` instead of its inline ratio check. Update `verifyAudioRoundTrip` to use `wordDiff` for its word-set difference computation (`wordDiff(expectedText, transcript).missed.length + wordDiff(expectedText, transcript).inserted.length` — or more efficiently, compute once and sum the two array lengths).
+
+**Step 3 — Fill scripts/__tests__/bake-helpers.test.ts.** Replace the Plan-01 scaffold with concrete tests of `readResumeState` + `writeResumeStateAtomic` AND the pure math helpers from `scripts/lib/bake-math.ts`:
 
 ```typescript
 // @vitest-environment node
@@ -1176,12 +1235,136 @@ describe("writeResumeStateAtomic + readResumeState (D-06)", () => {
     expect(readResumeState(nested)).toEqual(state);
   });
 });
+
+// ---- D-10 / D-11 pure-math helpers (extracted to scripts/lib/bake-math.ts) ----
+
+import {
+  computeMedianSecPerChar,
+  isDurationAnomaly,
+  wordDiff,
+  type DurationSample,
+} from "../lib/bake-math";
+
+describe("computeMedianSecPerChar (D-10)", () => {
+  it("returns 0 on empty samples", () => {
+    expect(computeMedianSecPerChar([])).toBe(0);
+  });
+
+  it("returns 0 when all samples have charCount=0", () => {
+    expect(computeMedianSecPerChar([{ durationMs: 1000, charCount: 0 }])).toBe(0);
+  });
+
+  it("computes median for an odd sample count", () => {
+    // durations 1s, 2s, 3s over 10 chars each → 0.1, 0.2, 0.3 s/char → median 0.2
+    const samples: DurationSample[] = [
+      { durationMs: 1000, charCount: 10 },
+      { durationMs: 2000, charCount: 10 },
+      { durationMs: 3000, charCount: 10 },
+    ];
+    expect(computeMedianSecPerChar(samples)).toBeCloseTo(0.2, 5);
+  });
+
+  it("computes median for an even sample count (average of two middles)", () => {
+    // 0.1, 0.2, 0.3, 0.4 → median = (0.2 + 0.3) / 2 = 0.25
+    const samples: DurationSample[] = [
+      { durationMs: 1000, charCount: 10 },
+      { durationMs: 2000, charCount: 10 },
+      { durationMs: 3000, charCount: 10 },
+      { durationMs: 4000, charCount: 10 },
+    ];
+    expect(computeMedianSecPerChar(samples)).toBeCloseTo(0.25, 5);
+  });
+
+  it("skips samples with charCount=0 but still medians the rest", () => {
+    const samples: DurationSample[] = [
+      { durationMs: 1000, charCount: 10 },  // 0.1
+      { durationMs: 9999, charCount: 0 },   // dropped
+      { durationMs: 3000, charCount: 10 },  // 0.3
+    ];
+    // After dropping charCount=0: [0.1, 0.3] → median 0.2
+    expect(computeMedianSecPerChar(samples)).toBeCloseTo(0.2, 5);
+  });
+});
+
+describe("isDurationAnomaly (D-10 >3× or <0.3× ritual median)", () => {
+  const median = 0.2; // sec/char
+
+  it("returns false when ritualMedian is 0 (insufficient sample)", () => {
+    expect(isDurationAnomaly({ durationMs: 9999, charCount: 1 }, 0)).toBe(false);
+  });
+
+  it("returns false when line.charCount is 0", () => {
+    expect(isDurationAnomaly({ durationMs: 9999, charCount: 0 }, median)).toBe(false);
+  });
+
+  it("returns true when ratio > 3.0× (voice-cast-scene-leak pattern)", () => {
+    // 0.8 s/char is 4× of 0.2 median
+    expect(isDurationAnomaly({ durationMs: 8000, charCount: 10 }, median)).toBe(true);
+  });
+
+  it("returns true when ratio < 0.3× (cropped/silent output)", () => {
+    // 0.05 s/char is 0.25× of 0.2 median
+    expect(isDurationAnomaly({ durationMs: 500, charCount: 10 }, median)).toBe(true);
+  });
+
+  it("returns false when ratio is in-band (1.0× = median)", () => {
+    expect(isDurationAnomaly({ durationMs: 2000, charCount: 10 }, median)).toBe(false);
+  });
+
+  it("returns false at the upper boundary (exactly 3.0× does NOT trigger)", () => {
+    // 0.6 s/char = exactly 3.0× of 0.2 → NOT an anomaly (strict >)
+    expect(isDurationAnomaly({ durationMs: 6000, charCount: 10 }, median)).toBe(false);
+  });
+
+  it("returns false at the lower boundary (exactly 0.3× does NOT trigger)", () => {
+    // 0.06 s/char = exactly 0.3× of 0.2 → NOT an anomaly (strict <)
+    expect(isDurationAnomaly({ durationMs: 600, charCount: 10 }, median)).toBe(false);
+  });
+});
+
+describe("wordDiff (D-11 --verify-audio)", () => {
+  it("returns empty arrays when expected === actual", () => {
+    const r = wordDiff("so mote it be", "so mote it be");
+    expect(r.missed).toEqual([]);
+    expect(r.inserted).toEqual([]);
+  });
+
+  it("flags words missing from actual (model dropped words)", () => {
+    const r = wordDiff("brethren let us commence", "brethren us commence");
+    expect(r.missed).toEqual(["let"]);
+    expect(r.inserted).toEqual([]);
+  });
+
+  it("flags words inserted by actual (model hallucinated words)", () => {
+    const r = wordDiff("so mote it be", "so mote it truly be");
+    expect(r.missed).toEqual([]);
+    expect(r.inserted).toEqual(["truly"]);
+  });
+
+  it("is case-insensitive", () => {
+    const r = wordDiff("SO Mote It Be", "so mote it be");
+    expect(r.missed).toEqual([]);
+    expect(r.inserted).toEqual([]);
+  });
+
+  it("handles whitespace variation (collapses multiple spaces)", () => {
+    const r = wordDiff("so   mote  it be", "so mote it be");
+    expect(r.missed).toEqual([]);
+    expect(r.inserted).toEqual([]);
+  });
+
+  it("returns both missed and inserted when both diverge", () => {
+    const r = wordDiff("brethren rise", "brother rose");
+    expect(r.missed.sort()).toEqual(["brethren", "rise"].sort());
+    expect(r.inserted.sort()).toEqual(["brother", "rose"].sort());
+  });
+});
 ```
 
 Commit: `author-02: add scripts/lib/resume-state.ts + line-level _RESUME.json writes in build-mram`
   </action>
   <verify>
-    <automated>test -f scripts/lib/resume-state.ts && grep -q "export interface ResumeState" scripts/lib/resume-state.ts && grep -q "writeResumeStateAtomic" scripts/lib/resume-state.ts && grep -q "\.tmp" scripts/lib/resume-state.ts && grep -q "renameSync" scripts/lib/resume-state.ts && grep -q "resume-state-path" scripts/build-mram-from-dialogue.ts && grep -q "writeResumeStateAtomic\\|inFlightLineIds" scripts/build-mram-from-dialogue.ts && grep -q "skip-line-ids" scripts/build-mram-from-dialogue.ts && grep -q "from \"./lib/resume-state\"" scripts/build-mram-from-dialogue.ts && npx tsc --noEmit && npx vitest run --no-coverage scripts/__tests__/bake-helpers.test.ts</automated>
+    <automated>test -f scripts/lib/resume-state.ts && test -f scripts/lib/bake-math.ts && grep -q "export interface ResumeState" scripts/lib/resume-state.ts && grep -q "writeResumeStateAtomic" scripts/lib/resume-state.ts && grep -q "\.tmp" scripts/lib/resume-state.ts && grep -q "renameSync" scripts/lib/resume-state.ts && grep -q "export function computeMedianSecPerChar" scripts/lib/bake-math.ts && grep -q "export function isDurationAnomaly" scripts/lib/bake-math.ts && grep -q "export function wordDiff" scripts/lib/bake-math.ts && grep -q "resume-state-path" scripts/build-mram-from-dialogue.ts && grep -q "writeResumeStateAtomic\\|inFlightLineIds" scripts/build-mram-from-dialogue.ts && grep -q "skip-line-ids" scripts/build-mram-from-dialogue.ts && grep -q "from \"./lib/resume-state\"" scripts/build-mram-from-dialogue.ts && grep -q "from \"./lib/bake-math\"" scripts/build-mram-from-dialogue.ts && npx tsc --noEmit && npx vitest run --no-coverage scripts/__tests__/bake-helpers.test.ts</automated>
   </verify>
   <acceptance_criteria>
     - `test -f scripts/lib/resume-state.ts` is true (new file created).
@@ -1197,7 +1380,13 @@ Commit: `author-02: add scripts/lib/resume-state.ts + line-level _RESUME.json wr
     - `grep -q "markLineInFlight" scripts/build-mram-from-dialogue.ts` returns ≥ 2 matches (declaration + call).
     - `grep -q "markLineCompleted" scripts/build-mram-from-dialogue.ts` returns ≥ 2 matches (declaration + call).
     - `grep -c "it.todo(" scripts/__tests__/bake-helpers.test.ts` returns 0 (scaffold fully replaced).
-    - `npx vitest run --no-coverage scripts/__tests__/bake-helpers.test.ts` exits 0 with 7+ passing tests (round-trip, missing-file, malformed JSON, schema mismatch, no-tmp-leak, overwrite, mkdir-recursive).
+    - `test -f scripts/lib/bake-math.ts` is true (new math-helpers module created).
+    - `grep -q "export function computeMedianSecPerChar" scripts/lib/bake-math.ts` (D-10 median helper exported).
+    - `grep -q "export function isDurationAnomaly" scripts/lib/bake-math.ts` (D-10 ratio check exported).
+    - `grep -q "export function wordDiff" scripts/lib/bake-math.ts` (D-11 word-diff exported).
+    - `grep -q 'from "./lib/bake-math"' scripts/build-mram-from-dialogue.ts` (build-mram imports the extracted helpers rather than redefining them inline).
+    - `grep -c "describe(" scripts/__tests__/bake-helpers.test.ts` returns ≥ 4 (resume-state + 3 math describes: computeMedianSecPerChar, isDurationAnomaly, wordDiff).
+    - `npx vitest run --no-coverage scripts/__tests__/bake-helpers.test.ts` exits 0 with ≥ 20 passing tests (7+ resume-state + 5 median + 7 anomaly + 6 wordDiff).
     - `npx tsc --noEmit` exits 0.
     - `npm run build` exits 0.
     - Full test suite green: `npx vitest run --no-coverage` exits 0.
@@ -1233,8 +1422,8 @@ Commit: `author-02: add scripts/lib/resume-state.ts + line-level _RESUME.json wr
 <verification>
 - `npx tsc --noEmit` — exits 0.
 - `npm run build` — exits 0.
-- `npx vitest run --no-coverage` — full suite exits 0 (new bake-helpers.test.ts adds 7+ tests; orchestrator-level tests land in Plan 07).
-- `npx vitest run --no-coverage scripts/__tests__/bake-helpers.test.ts` — 7+ passing tests covering the ResumeState helpers.
+- `npx vitest run --no-coverage` — full suite exits 0 (new bake-helpers.test.ts adds ≥ 20 tests; orchestrator-level tests land in Plan 07).
+- `npx vitest run --no-coverage scripts/__tests__/bake-helpers.test.ts` — ≥ 20 passing tests covering ResumeState helpers AND the extracted pure-math helpers (computeMedianSecPerChar, isDurationAnomaly, wordDiff).
 - Grep assertions (acceptance_criteria above) confirm all five gates wired.
 - Integration smoke test (manual, during execution): run `npx tsx scripts/build-mram-from-dialogue.ts --resume-state-path /tmp/rs.json --ritual-slug test-ritual` against one small test ritual and (a) verify validator runs before API calls, (b) short lines get Google audio, (c) `_RESUME.json` is written after every line with the lineId appearing in completedLineIds, (d) duration anomaly detector produces no false positives on a 3-5 line ritual (since samples.length < 30 → skip per Pitfall 6).
 </verification>
@@ -1245,6 +1434,7 @@ Commit: `author-02: add scripts/lib/resume-state.ts + line-level _RESUME.json wr
 - After each rendered line (Gemini or Google), addAndCheckAnomaly() runs; first 30 lines per ritual skip the check; subsequent lines fail the bake on >3× or <0.3× median ratio.
 - --verify-audio flag collects per-line word-diff counts and prints a warn-only summary at the end; never fails the bake.
 - `scripts/lib/resume-state.ts` exists with exported `ResumeState` interface + `readResumeState` + `writeResumeStateAtomic`.
+- `scripts/lib/bake-math.ts` exists with exported `computeMedianSecPerChar` + `isDurationAnomaly` + `wordDiff` + `DurationSample` interface; `build-mram-from-dialogue.ts` imports them instead of defining them inline.
 - `build-mram-from-dialogue.ts` accepts `--resume-state-path`, `--ritual-slug`, `--skip-line-ids` CLI args; writes `_RESUME.json` atomically after every completed line (inFlightLineIds → completedLineIds).
 - `--skip-line-ids` skips matching lineIds entirely (no render, no embed, no anomaly mutation).
 - Neither GOOGLE_CLOUD_TTS_API_KEY nor GROQ_API_KEY appears in any error path output.
