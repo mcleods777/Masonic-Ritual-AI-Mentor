@@ -12,6 +12,9 @@
  *
  * Usage:
  *   GOOGLE_GEMINI_API_KEY=... npx tsx scripts/bake-first-degree.ts \
+ *
+ * Or with a pool of keys (rotates through them on 429):
+ *   GOOGLE_GEMINI_API_KEYS=AIza...,AIza...,AIza... npx tsx scripts/bake-first-degree.ts \
  *     [--on-fallback=ask|continue|abort]
  *
  * Total time when cache is cold: ~25-30 minutes wall clock for the
@@ -128,10 +131,18 @@ function runBuild(
 }
 
 async function main() {
-  if (!process.env.GOOGLE_GEMINI_API_KEY) {
-    console.error("Error: GOOGLE_GEMINI_API_KEY env var is required.");
+  if (
+    !process.env.GOOGLE_GEMINI_API_KEY &&
+    !process.env.GOOGLE_GEMINI_API_KEYS
+  ) {
     console.error(
-      "Set it via: export GOOGLE_GEMINI_API_KEY=AIza... (or prepend inline)",
+      "Error: GOOGLE_GEMINI_API_KEY (single) or GOOGLE_GEMINI_API_KEYS (comma-separated pool) env var is required.",
+    );
+    console.error(
+      "  Single:  export GOOGLE_GEMINI_API_KEY=AIza...",
+    );
+    console.error(
+      "  Pool:    export GOOGLE_GEMINI_API_KEYS=AIza...,AIza...,AIza...",
     );
     process.exit(1);
   }

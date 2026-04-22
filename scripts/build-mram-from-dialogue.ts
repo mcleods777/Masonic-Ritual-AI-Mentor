@@ -229,8 +229,14 @@ async function main() {
 
   const [plainPath, cipherPath, outputPath] = positional;
 
-  if (withAudio && !process.env.GOOGLE_GEMINI_API_KEY) {
-    console.error("Error: --with-audio requires GOOGLE_GEMINI_API_KEY env var.");
+  if (
+    withAudio &&
+    !process.env.GOOGLE_GEMINI_API_KEY &&
+    !process.env.GOOGLE_GEMINI_API_KEYS
+  ) {
+    console.error(
+      "Error: --with-audio requires GOOGLE_GEMINI_API_KEY (single) or GOOGLE_GEMINI_API_KEYS (comma-separated pool) env var.",
+    );
     process.exit(1);
   }
 
@@ -415,7 +421,30 @@ async function bakeAudioIntoDoc(
   fallbackMode: FallbackMode,
   voiceCast: VoiceCastFile | undefined,
 ): Promise<void> {
-  const apiKey = process.env.GOOGLE_GEMINI_API_KEY!;
+  // Pool of API keys. Prefer GOOGLE_GEMINI_API_KEYS (comma-separated)
+  // when set — the render loop rotates through keys on 429, effectively
+  // multiplying the daily preview-model quota by pool size. Falls back
+  // to the legacy singular env var for backwards compatibility.
+  const apiKeys: string[] = (() => {
+    const plural = process.env.GOOGLE_GEMINI_API_KEYS?.trim();
+    if (plural) {
+      const keys = plural
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (keys.length === 0) {
+        throw new Error(
+          "GOOGLE_GEMINI_API_KEYS is set but contains no non-empty entries.",
+        );
+      }
+      return keys;
+    }
+    const singular = process.env.GOOGLE_GEMINI_API_KEY?.trim();
+    if (singular) return [singular];
+    throw new Error(
+      "No API key configured (set GOOGLE_GEMINI_API_KEY or GOOGLE_GEMINI_API_KEYS).",
+    );
+  })();
 
   // Snapshot the canonical voice cast so playback knows exactly which
   // voices were used at bake time. If the app's GEMINI_ROLE_VOICES map
@@ -668,7 +697,7 @@ async function bakeAudioIntoDoc(
         line.style,
         voice,
         {
-        apiKey,
+        apiKeys,
         ...(modelsForWaitMode ? { models: modelsForWaitMode } : {}),
         onProgress: (event) => {
           if (event.status === "cache-hit") {
