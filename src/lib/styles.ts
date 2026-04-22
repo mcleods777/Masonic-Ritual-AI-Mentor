@@ -94,7 +94,49 @@ export interface StylesFile {
     lineHash: string;
     /** The audio tag to prepend, e.g. "gravely" */
     style: string;
+    /**
+     * Optional: override the text sent to Gemini TTS at bake time.
+     * The `.mram` still stores and displays `plain` unchanged — only
+     * the bake prompt and the resulting baked audio use `speakAs`.
+     *
+     * Use case: the line's `plain` is a short ritual token like `"Bee."`
+     * (traditional single-letter exchange). Short lines regress on
+     * Gemini TTS (empty audio stream) and fall below the bake
+     * hard-skip threshold. With `speakAs` we send Gemini a longer
+     * instructional prompt while keeping the ritually-correct short
+     * display text:
+     *
+     *   plain:    "Bee."
+     *   speakAs:  "Say only this single letter name, nothing else: Bee"
+     *   → baked audio says just "Bee"
+     *
+     * When present:
+     *   - Hard-skip threshold is evaluated against `speakAs.length`
+     *   - Cache key uses `speakAs` (so edits to it invalidate)
+     *   - `speakAs` is the `text` argument to `renderLineAudio`
+     *   - `plain` is still what the app and .mram store/display
+     *
+     * Never serialized into the .mram — pure build-time construct.
+     */
+    speakAs?: string;
   }[];
+}
+
+/**
+ * Validate a speakAs instructional prompt. Broader than style tags —
+ * this is a full natural-language instruction to Gemini, not a bracketed
+ * audio tag, so mixed case, digits, and most punctuation are allowed.
+ *
+ * Rejects content that would break prompt structure: newlines, null
+ * bytes, square brackets (reserved for style tags), triple backticks.
+ * Caps length at 200 chars to keep the prompt focused.
+ */
+export function isValidSpeakAs(text: unknown): text is string {
+  if (typeof text !== "string") return false;
+  if (text.length < 1 || text.length > 200) return false;
+  if (/[\n\r\0\[\]]/.test(text)) return false;
+  if (text.includes("```")) return false;
+  return true;
 }
 
 /**

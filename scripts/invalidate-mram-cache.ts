@@ -39,7 +39,7 @@ import {
   type VoiceCastFile,
 } from "../src/lib/voice-cast";
 import { getGeminiVoiceForRole } from "../src/lib/tts-cloud";
-import type { StylesFile } from "../src/lib/styles";
+import { hashLineText, isValidSpeakAs, type StylesFile } from "../src/lib/styles";
 
 // Must stay in sync with build-mram-from-dialogue.ts defaults.
 const MIN_PREAMBLE_LINE_CHARS = Number(
@@ -217,6 +217,27 @@ async function main() {
     }
   }
 
+  // Build speakAs-by-lineId map (same logic as bake script). Lines with
+  // a speakAs override compute their cache key against the override text
+  // (and skip the preamble), so invalidation must mirror that exactly.
+  const speakAsByLineId = new Map<number, string>();
+  if (stylesPayload) {
+    const speakAsByHash = new Map<string, string>();
+    for (const entry of stylesPayload.styles) {
+      if (entry.speakAs && isValidSpeakAs(entry.speakAs)) {
+        speakAsByHash.set(entry.lineHash, entry.speakAs);
+      }
+    }
+    if (speakAsByHash.size > 0) {
+      for (const line of doc.lines) {
+        if (!line.plain || !line.role) continue;
+        const hash = await hashLineText(line.plain);
+        const sa = speakAsByHash.get(hash);
+        if (sa) speakAsByLineId.set(line.id, sa);
+      }
+    }
+  }
+
   // Determine which lines to target. By id and/or by role.
   const idSet = new Set(args.lineIds);
   const roleSet = new Set(args.roles);
@@ -244,7 +265,8 @@ async function main() {
   let deleted = 0;
 
   for (const line of targeted) {
-    const cleanText = line.plain.trim();
+    const speakAs = speakAsByLineId.get(line.id);
+    const cleanText = (speakAs ?? line.plain).trim();
     const voice = getGeminiVoiceForRole(line.role);
 
     // Two buckets of "unbakeable": hard-skipped (below MIN_BAKE_LINE_CHARS)
@@ -259,7 +281,7 @@ async function main() {
     }
 
     const preamble =
-      cleanText.length >= MIN_PREAMBLE_LINE_CHARS
+      !speakAs && cleanText.length >= MIN_PREAMBLE_LINE_CHARS
         ? preambleByRole[line.role] ?? ""
         : "";
 

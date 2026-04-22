@@ -54,6 +54,7 @@ import {
   validateVoiceCast,
   type VoiceCastFile,
 } from "../src/lib/voice-cast";
+import { hashLineText, isValidSpeakAs } from "../src/lib/styles";
 
 // ============================================================
 // Encryption (Node crypto — binary layout matches Web Crypto
@@ -388,7 +389,35 @@ async function main() {
   console.error(`  Roles:    ${Object.keys(doc.roles).join(", ")}`);
 
   if (withAudio) {
-    await bakeAudioIntoDoc(doc, fallbackMode, voiceCast);
+    // Build the speakAs-by-lineId map from the styles payload (if any).
+    // This enables bake-time prompt-vs-display separation for lines whose
+    // ritually-correct plain text is too short or too stochastic to bake
+    // reliably. The map stays local to the bake — never written to .mram.
+    const speakAsByLineId = new Map<number, string>();
+    if (stylesPayload) {
+      const speakAsByHash = new Map<string, string>();
+      for (const entry of stylesPayload.styles) {
+        if (entry.speakAs && isValidSpeakAs(entry.speakAs)) {
+          speakAsByHash.set(entry.lineHash, entry.speakAs);
+        } else if (entry.speakAs) {
+          console.error(
+            `Warning: invalid speakAs for lineHash ${entry.lineHash.slice(0, 12)}… (dropped)`,
+          );
+        }
+      }
+      if (speakAsByHash.size > 0) {
+        for (const line of doc.lines) {
+          if (!line.plain || !line.role) continue;
+          const hash = await hashLineText(line.plain);
+          const sa = speakAsByHash.get(hash);
+          if (sa) speakAsByLineId.set(line.id, sa);
+        }
+        console.error(
+          `  speakAs overrides: ${speakAsByLineId.size} line(s) will bake on instructional prompts`,
+        );
+      }
+    }
+    await bakeAudioIntoDoc(doc, fallbackMode, voiceCast, speakAsByLineId);
   }
 
   console.error("Encrypting...");
@@ -420,7 +449,22 @@ async function bakeAudioIntoDoc(
   doc: MRAMDocument,
   fallbackMode: FallbackMode,
   voiceCast: VoiceCastFile | undefined,
+  speakAsByLineId: Map<number, string> = new Map(),
 ): Promise<void> {
+  // Resolve the text that gets sent to Gemini TTS for a given line.
+  // When a speakAs override is registered for this line, it takes the
+  // place of `line.plain` as the prompt text, the cache-key text, and
+  // the hard-skip / preamble threshold input. When no override is set,
+  // behavior is identical to the pre-speakAs path.
+  const bakeTextFor = (line: { id: number; plain: string }): string => {
+    const override = speakAsByLineId.get(line.id);
+    return (override ?? line.plain).trim();
+  };
+  // Lines with a speakAs override skip the voice-cast preamble: the
+  // instructional prompt is already explicit ("Say only X") and the
+  // additional role-card preamble tends to confuse Gemini into speaking
+  // the preamble content or ignoring the instruction.
+  const hasSpeakAs = (lineId: number) => speakAsByLineId.has(lineId);
   // Pool of API keys. Prefer GOOGLE_GEMINI_API_KEYS (comma-separated)
   // when set — the render loop rotates through keys on 429, effectively
   // multiplying the daily preview-model quota by pool size. Falls back
@@ -589,17 +633,17 @@ async function bakeAudioIntoDoc(
   let preToRender = 0;
   const preSkipShort: { id: number; role: string; text: string }[] = [];
   for (const line of spokenLines) {
-    const cleanText = line.plain.trim();
-    if (cleanText.length < MIN_BAKE_LINE_CHARS) {
-      preSkipShort.push({ id: line.id, role: line.role, text: cleanText });
+    const bakeText = bakeTextFor(line);
+    if (bakeText.length < MIN_BAKE_LINE_CHARS) {
+      preSkipShort.push({ id: line.id, role: line.role, text: bakeText });
       continue;
     }
     const voice = getGeminiVoiceForRole(line.role);
     const preamble =
-      cleanText.length >= MIN_PREAMBLE_LINE_CHARS
+      !hasSpeakAs(line.id) && bakeText.length >= MIN_PREAMBLE_LINE_CHARS
         ? preambleByRole[line.role] ?? ""
         : "";
-    if (isLineCached(cleanText, line.style, voice, preamble)) {
+    if (isLineCached(bakeText, line.style, voice, preamble)) {
       preCached++;
     } else {
       preToRender++;
@@ -659,7 +703,7 @@ async function bakeAudioIntoDoc(
 
   for (const line of spokenLines) {
     const voice = getGeminiVoiceForRole(line.role);
-    const cleanText = line.plain.trim();
+    const cleanText = bakeTextFor(line);
     let statusLabel = "";
     let thisLineModel: string | undefined;
     // Cache key for this line's render, captured from the onProgress
@@ -686,8 +730,11 @@ async function bakeAudioIntoDoc(
     // Skip the preamble for utterances too short to carry character
     // direction — the preamble:content ratio confuses Gemini's
     // classifier and causes empty-audio-stream regressions.
+    // Also skip when speakAs is set: the instructional prompt is already
+    // explicit, and layering the role preamble on top tends to make
+    // Gemini speak the preamble instead of following the instruction.
     const preamble =
-      cleanText.length >= MIN_PREAMBLE_LINE_CHARS
+      !hasSpeakAs(line.id) && cleanText.length >= MIN_PREAMBLE_LINE_CHARS
         ? preambleByRole[line.role] ?? ""
         : "";
 
