@@ -41,6 +41,8 @@ import { hashedUserFromEmail } from "@/lib/hash-user";
 export const runtime = "nodejs";
 
 const ALLOWED_ORIGIN_SUFFIXES = [
+  "masonicmentor.app",
+  "www.masonicmentor.app",
   "masonic-ritual-ai-mentor.vercel.app",
   "localhost:3000",
   "localhost:3001",
