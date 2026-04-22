@@ -1,3 +1,17 @@
+---
+gsd_state_version: 1.0
+milestone: v1.0
+milestone_name: milestone
+status: "Phase 2 live in production; Amanda actively using iPhone Safari flow; 4 UAT passed + 4 blocked (real-use-pending); Phase 1 UAT: 2 items still deferred"
+last_updated: "2026-04-22T03:30:30.162Z"
+progress:
+  total_phases: 7
+  completed_phases: 2
+  total_plans: 16
+  completed_plans: 16
+  percent: 100
+---
+
 # State: Masonic Ritual AI Mentor — v1 Invited-Lodge Milestone
 
 **Last updated:** 2026-04-22 (Phase 2 merged; masonicmentor.app custom domain live)
@@ -23,6 +37,7 @@
 ```
 
 **Production URLs (both serving Phase 2 code):**
+
 - https://masonicmentor.app (custom domain, TLS auto-provisioned)
 - https://masonic-ritual-ai-mentor.vercel.app (Vercel alias, kept)
 
@@ -98,6 +113,7 @@ None.
 **Resumption cue:** Next action: `/gsd-discuss-phase 2` to begin Phase 2 (Safety Floor — SAFETY-01..09). The 2 deferred UAT items run at Shannon's pacing; they do NOT block Phase 2 planning or execution, but MUST close before outside-lodge invitations.
 
 **Critical context for next agent:**
+
 1. Brownfield milestone — do NOT re-build existing pilot capability (see PROJECT.md Validated)
 2. Phase 2 (Safety Floor) introduces paid-route rate limiting, audit log, budget caps, emergency kill switch. Dependency: Phase 2 benefits from HYGIENE-02's AI SDK v6 bump (commit 005dc82) but does not require rewriting `/api/rehearsal-feedback` — that's Phase 5 COACH-02.
 3. Pending Phase 1 manual verification (both in `01-HUMAN-UAT.md`):
