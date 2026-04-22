@@ -12,6 +12,8 @@ import {
  * *.vercel.app so we pattern-match the subdomain.
  */
 const ALLOWED_ORIGIN_SUFFIXES = [
+  "masonicmentor.app",
+  "www.masonicmentor.app",
   "masonic-ritual-ai-mentor.vercel.app",
   "localhost:3000",
   "localhost:3001",
