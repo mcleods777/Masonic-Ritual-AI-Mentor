@@ -21,7 +21,7 @@ must_haves:
     - "renderLineAudio and every other caller of computeCacheKey (including scripts/invalidate-mram-cache.ts) pass the actual model being used — no stale call sites"
     - "A one-shot migration helper copies existing ~/.cache/masonic-mram-audio/ *.opus files into rituals/_bake-cache/ on first run, via fs.cp recursive+filter; old location preserved for rollback; migration skips if new cache has any .opus entry"
     - "DEFAULT_MODELS order is pinned with an explicit rationale comment citing D-12 (AUTHOR-03): gemini-3.1-flash-tts-preview first, older previews as fallback chain, env-overridable via GEMINI_TTS_MODELS"
-    - "Tests assert: (1) CACHE_KEY_VERSION === 'v3', (2) different modelIds produce different cache keys, (3) deterministic output for identical inputs, (4) migration is one-shot (skips when NEW has an entry), (5) migration copies (doesn't move) when NEW is empty and OLD exists, (6) no-op when OLD doesn't exist"
+    - "Tests assert: (1) CACHE_KEY_VERSION === 'v3', (2) different modelIds produce different cache keys, (3) deterministic output for identical inputs, (4) migration is one-shot (skips when NEW has an entry), (5) migration COPIES (doesn't move) when NEW is empty and OLD has .opus entries — byte-identical copy, OLD preserved, (6) no-op when OLD doesn't exist, (7) migrateLegacyCacheIfNeeded signature is `(cacheDir, oldDir = OLD_CACHE_DIR)` — tests inject tmp oldDir so they never touch the real user cache"
   artifacts:
     - path: scripts/render-gemini-audio.ts
       provides: "cache dir → rituals/_bake-cache/, CACHE_KEY_VERSION = v3, computeCacheKey(text, style, voice, modelId, preamble), one-shot fs.cp migration helper, DEFAULT_MODELS rationale comment"
@@ -279,25 +279,31 @@ const CACHE_KEY_VERSION = "v3";
  * combo that was latently equivalent to a v3 key).
  */
 let migrationRan = false;
-async function migrateLegacyCacheIfNeeded(cacheDir: string): Promise<void> {
+async function migrateLegacyCacheIfNeeded(
+  cacheDir: string,
+  oldDir: string = OLD_CACHE_DIR,  // default to real legacy path; tests pass a tmp dir
+): Promise<void> {
   if (migrationRan) return;
   migrationRan = true;
   if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
   const hasAny = fs.readdirSync(cacheDir).some((f) => f.endsWith(".opus"));
   if (hasAny) return;
-  if (!fs.existsSync(OLD_CACHE_DIR)) return;
-  const files = fs.readdirSync(OLD_CACHE_DIR).filter((f) => f.endsWith(".opus"));
+  if (!fs.existsSync(oldDir)) return;
+  const files = fs.readdirSync(oldDir).filter((f) => f.endsWith(".opus"));
   if (files.length === 0) return;
   console.error(
-    `[AUTHOR-01] migrating legacy cache ${OLD_CACHE_DIR} → ${cacheDir} ` +
+    `[AUTHOR-01] migrating legacy cache ${oldDir} → ${cacheDir} ` +
       `(${files.length} entries; old location preserved for rollback)`,
   );
-  await fs.promises.cp(OLD_CACHE_DIR, cacheDir, {
+  await fs.promises.cp(oldDir, cacheDir, {
     recursive: true,
-    filter: (src) => src === OLD_CACHE_DIR || src.endsWith(".opus"),
+    filter: (src) => src === oldDir || src.endsWith(".opus"),
   });
   console.error(`[AUTHOR-01] migrated ${files.length} entries.`);
 }
+
+// Expose a test-hook to reset the one-shot guard between tests.
+export function __resetMigrationFlagForTests(): void { migrationRan = false; }
 ```
 
 Export the migration helper so tests can inject test cache dirs:
@@ -417,7 +423,7 @@ Fix any compile errors before proceeding.
 Commit: `author-01: bump cache key to v3, add modelId to key material, migrate legacy cache`
   </action>
   <verify>
-    <automated>grep -q 'CACHE_KEY_VERSION = "v3"' scripts/render-gemini-audio.ts && grep -q 'rituals/_bake-cache' scripts/render-gemini-audio.ts && grep -q 'modelId: string' scripts/render-gemini-audio.ts && grep -q 'migrateLegacyCacheIfNeeded' scripts/render-gemini-audio.ts && grep -q 'AUTHOR-03 D-12' scripts/render-gemini-audio.ts && npx tsc --noEmit</automated>
+    <automated>grep -q 'CACHE_KEY_VERSION = "v3"' scripts/render-gemini-audio.ts && grep -q 'rituals/_bake-cache' scripts/render-gemini-audio.ts && grep -q 'modelId: string' scripts/render-gemini-audio.ts && grep -q 'migrateLegacyCacheIfNeeded' scripts/render-gemini-audio.ts && grep -q 'AUTHOR-03 D-12' scripts/render-gemini-audio.ts && grep -qE 'DEFAULT_MODELS|modelId' scripts/invalidate-mram-cache.ts && npx tsc --noEmit</automated>
   </verify>
   <acceptance_criteria>
     - `grep 'CACHE_KEY_VERSION = "v3"' scripts/render-gemini-audio.ts` returns exactly 1 match.
@@ -477,12 +483,13 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { computeCacheKey, migrateLegacyCacheIfNeeded } from "../render-gemini-audio";
+import { computeCacheKey, migrateLegacyCacheIfNeeded, __resetMigrationFlagForTests } from "../render-gemini-audio";
 
 // Helper: fresh tmp dir per test, cleaned in afterEach.
 let tmpRoot: string;
 beforeEach(() => {
   tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "bake-cache-test-"));
+  __resetMigrationFlagForTests(); // allow per-test migrations
 });
 afterEach(() => {
   try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch {}
@@ -524,33 +531,93 @@ describe("migrateLegacyCacheIfNeeded (AUTHOR-01 D-01)", () => {
     // Seed new cache with an existing .opus; migration should no-op.
     const seededKey = "a".repeat(64);
     fs.writeFileSync(path.join(tmpRoot, `${seededKey}.opus`), Buffer.from("seeded"));
-    const before = fs.readdirSync(tmpRoot).sort();
-    await migrateLegacyCacheIfNeeded(tmpRoot);
-    const after = fs.readdirSync(tmpRoot).sort();
-    expect(after).toEqual(before);
+    const oldTmp = fs.mkdtempSync(path.join(os.tmpdir(), "bake-old-"));
+    try {
+      // Even with an OLD populated with files, migration must skip because NEW has an entry.
+      fs.writeFileSync(path.join(oldTmp, "b".repeat(64) + ".opus"), Buffer.from("leg"));
+      const before = fs.readdirSync(tmpRoot).sort();
+      await migrateLegacyCacheIfNeeded(tmpRoot, oldTmp);
+      const after = fs.readdirSync(tmpRoot).sort();
+      expect(after).toEqual(before);
+    } finally {
+      try { fs.rmSync(oldTmp, { recursive: true, force: true }); } catch {}
+    }
   });
 
-  it("no-ops silently when OLD_CACHE_DIR does not exist or is empty", async () => {
-    // New cache is empty tmp dir; OLD_CACHE_DIR is the real path (may or may not exist
-    // on the test machine). The helper must not throw in either case.
-    await expect(migrateLegacyCacheIfNeeded(tmpRoot)).resolves.not.toThrow();
-    // If OLD has entries, they copied. If not, NEW is still empty. Either way no error.
+  it("COPIES .opus entries from OLD to NEW when NEW is empty and OLD has entries (load-bearing)", async () => {
+    // The core AUTHOR-01 D-01 guarantee: developers with a pre-Phase-3 legacy
+    // cache at ~/.cache/masonic-mram-audio/ get their entries copied (not moved)
+    // into rituals/_bake-cache/ on first bake.
+    const oldTmp = fs.mkdtempSync(path.join(os.tmpdir(), "bake-old-"));
+    try {
+      const key1 = "a".repeat(64);
+      const key2 = "b".repeat(64);
+      fs.writeFileSync(path.join(oldTmp, `${key1}.opus`), Buffer.from("AAA"));
+      fs.writeFileSync(path.join(oldTmp, `${key2}.opus`), Buffer.from("BBB"));
+      // Also put a non-.opus file to confirm filter skips it.
+      fs.writeFileSync(path.join(oldTmp, "unrelated.txt"), "noise");
+
+      expect(fs.readdirSync(tmpRoot)).toEqual([]); // NEW starts empty
+
+      await migrateLegacyCacheIfNeeded(tmpRoot, oldTmp);
+
+      // BOTH .opus files present in NEW.
+      const newFiles = fs.readdirSync(tmpRoot).sort();
+      expect(newFiles).toContain(`${key1}.opus`);
+      expect(newFiles).toContain(`${key2}.opus`);
+      // Byte-identical copy.
+      expect(fs.readFileSync(path.join(tmpRoot, `${key1}.opus`))).toEqual(Buffer.from("AAA"));
+      expect(fs.readFileSync(path.join(tmpRoot, `${key2}.opus`))).toEqual(Buffer.from("BBB"));
+      // Filter excluded the non-opus file.
+      expect(newFiles).not.toContain("unrelated.txt");
+      // COPY (not move): OLD still has the files.
+      expect(fs.existsSync(path.join(oldTmp, `${key1}.opus`))).toBe(true);
+      expect(fs.existsSync(path.join(oldTmp, `${key2}.opus`))).toBe(true);
+    } finally {
+      try { fs.rmSync(oldTmp, { recursive: true, force: true }); } catch {}
+    }
+  });
+
+  it("no-ops silently when OLD does not exist", async () => {
+    const nonexistentOld = path.join(tmpRoot, "does-not-exist");
+    await expect(migrateLegacyCacheIfNeeded(tmpRoot, nonexistentOld)).resolves.not.toThrow();
+    expect(fs.readdirSync(tmpRoot)).toEqual([]); // NEW untouched
+  });
+
+  it("no-ops silently when OLD exists but is empty", async () => {
+    const emptyOld = fs.mkdtempSync(path.join(os.tmpdir(), "bake-empty-old-"));
+    try {
+      await expect(migrateLegacyCacheIfNeeded(tmpRoot, emptyOld)).resolves.not.toThrow();
+      expect(fs.readdirSync(tmpRoot)).toEqual([]);
+    } finally {
+      try { fs.rmSync(emptyOld, { recursive: true, force: true }); } catch {}
+    }
   });
 
   it("creates the cache dir if missing", async () => {
     const missingDir = path.join(tmpRoot, "does-not-exist-yet");
-    expect(fs.existsSync(missingDir)).toBe(false);
-    await migrateLegacyCacheIfNeeded(missingDir);
-    expect(fs.existsSync(missingDir)).toBe(true);
+    const emptyOld = fs.mkdtempSync(path.join(os.tmpdir(), "bake-empty-old-"));
+    try {
+      expect(fs.existsSync(missingDir)).toBe(false);
+      await migrateLegacyCacheIfNeeded(missingDir, emptyOld);
+      expect(fs.existsSync(missingDir)).toBe(true);
+    } finally {
+      try { fs.rmSync(emptyOld, { recursive: true, force: true }); } catch {}
+    }
   });
 
   it("is idempotent across repeated calls (module-level guard)", async () => {
-    // First call may migrate (or no-op). Second call must no-op regardless.
-    await migrateLegacyCacheIfNeeded(tmpRoot);
-    const after1 = fs.readdirSync(tmpRoot).sort();
-    await migrateLegacyCacheIfNeeded(tmpRoot);
-    const after2 = fs.readdirSync(tmpRoot).sort();
-    expect(after2).toEqual(after1);
+    // First call runs (empty OLD → no-op); second call short-circuits on migrationRan.
+    const emptyOld = fs.mkdtempSync(path.join(os.tmpdir(), "bake-empty-old-"));
+    try {
+      await migrateLegacyCacheIfNeeded(tmpRoot, emptyOld);
+      const after1 = fs.readdirSync(tmpRoot).sort();
+      await migrateLegacyCacheIfNeeded(tmpRoot, emptyOld);
+      const after2 = fs.readdirSync(tmpRoot).sort();
+      expect(after2).toEqual(after1);
+    } finally {
+      try { fs.rmSync(emptyOld, { recursive: true, force: true }); } catch {}
+    }
   });
 });
 
@@ -567,7 +634,7 @@ describe("AUTHOR-03 D-12 DEFAULT_MODELS rationale comment", () => {
 });
 ```
 
-**NOTE on migration "copy from OLD to NEW" integration test:** writing a full end-to-end test that seeds OLD_CACHE_DIR (a user-home path) risks polluting the developer's actual cache. The cases above (skip-when-NEW-populated, no-op-when-OLD-missing, idempotence) cover the important invariants without touching the real OLD_CACHE_DIR. A full copy test can be added later by refactoring `migrateLegacyCacheIfNeeded` to accept an `oldDir` parameter too — out of scope for Phase 3 (PATTERNS.md §migration treats OLD_CACHE_DIR as a module constant).
+**NOTE on migration testing:** `migrateLegacyCacheIfNeeded` now accepts `oldDir` as a 2nd parameter (defaults to real `OLD_CACHE_DIR`). Tests pass isolated tmp dirs for both NEW and OLD — never touches the developer's real `~/.cache/masonic-mram-audio/`. The load-bearing copy test is now in scope.
 
 Commit: `author-01: test cache v3 bump + modelId key participation + migration idempotency`
   </action>
@@ -576,9 +643,9 @@ Commit: `author-01: test cache v3 bump + modelId key participation + migration i
   </verify>
   <acceptance_criteria>
     - Test file has no `it.todo(` remaining: `grep -c "it.todo(" scripts/__tests__/render-gemini-audio-cache.test.ts` returns 0.
-    - `npx vitest run --no-coverage scripts/__tests__/render-gemini-audio-cache.test.ts` exits 0 with ≥ 10 tests passing.
+    - `npx vitest run --no-coverage scripts/__tests__/render-gemini-audio-cache.test.ts` exits 0 with ≥ 12 tests passing.
     - All five "computeCacheKey" tests pass (length, determinism, modelId-sensitivity, text-sensitivity, voice-sensitivity).
-    - All four "migrateLegacyCacheIfNeeded" tests pass (one-shot skip, no-op on missing OLD, creates dir, idempotent).
+    - All six "migrateLegacyCacheIfNeeded" tests pass (one-shot skip with OLD populated, load-bearing COPY when NEW empty + OLD has entries, no-op on missing OLD, no-op on empty OLD, creates dir, idempotent).
     - The D-12 rationale-comment regression test passes.
     - `npx vitest run --no-coverage` (full suite) exits 0 — no regression anywhere.
   </acceptance_criteria>

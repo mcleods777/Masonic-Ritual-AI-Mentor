@@ -244,7 +244,7 @@ describe("dev-guard (D-15)", () => {
 Commit: `author-08: extract dev-guard.ts shared dev-only guard (D-15)`
   </action>
   <verify>
-    <automated>npx vitest run --no-coverage src/lib/__tests__/dev-guard.test.ts</automated>
+    <automated>grep -q "\[DEV-GUARD\]" src/lib/dev-guard.ts && npx vitest run --no-coverage src/lib/__tests__/dev-guard.test.ts</automated>
   </verify>
   <acceptance_criteria>
     - `src/lib/dev-guard.ts` exists and contains both `export function isDev` and `export function assertDevOnly` — verified: `grep -cE "^export function (isDev|assertDevOnly)" src/lib/dev-guard.ts` returns 2.

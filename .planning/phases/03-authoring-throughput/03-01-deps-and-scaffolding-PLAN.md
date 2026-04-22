@@ -15,6 +15,7 @@ files_modified:
   - scripts/__tests__/bake-all.test.ts
   - scripts/__tests__/preview-bake.test.ts
   - scripts/__tests__/render-gemini-audio-cache.test.ts
+  - scripts/__tests__/bake-helpers.test.ts
 autonomous: true
 requirements: [AUTHOR-01, AUTHOR-02, AUTHOR-05, AUTHOR-06, AUTHOR-08, AUTHOR-09, AUTHOR-10]
 tags: [deps, scaffolding, wave-0, gitignore, bake-cache]
@@ -26,7 +27,7 @@ must_haves:
     - "package.json scripts includes `bake-all` and `preview-bake` entries"
     - ".gitignore contains `rituals/_bake-cache/` entry (root gitignore — belt-and-suspenders)"
     - "rituals/_bake-cache/ directory exists with a self-documenting .gitignore inside it"
-    - "Six Wave 0 test scaffold files exist and all fail with a clear TODO marker — they will turn green as Plans 02-08 implement the features they describe"
+    - "Seven Wave 0 test scaffold files exist and all fail with a clear TODO marker — they will turn green as Plans 02-08 implement the features they describe (six existing + scripts/__tests__/bake-helpers.test.ts for Plan 06 pure math helpers)"
     - "`npm install` exits 0 (lockfile updates cleanly, no peer conflicts)"
   artifacts:
     - path: package.json
@@ -56,6 +57,9 @@ must_haves:
     - path: scripts/__tests__/render-gemini-audio-cache.test.ts
       provides: "Wave 0 scaffold for AUTHOR-01 cache key v3 bump + migration — implemented by Plan 05"
       contains: "CACHE_KEY_VERSION"
+    - path: scripts/__tests__/bake-helpers.test.ts
+      provides: "Wave 0 scaffold for AUTHOR-06 pure bake math (median, anomaly, word-diff) — implemented by Plan 06"
+      contains: "computeMedianSecPerChar"
   key_links:
     - from: package.json
       to: node_modules
@@ -220,7 +224,8 @@ author-infra: install p-limit, music-metadata, fake-indexeddb + bake-cache gitig
     src/lib/__tests__/author-validation.test.ts,
     scripts/__tests__/bake-all.test.ts,
     scripts/__tests__/preview-bake.test.ts,
-    scripts/__tests__/render-gemini-audio-cache.test.ts
+    scripts/__tests__/render-gemini-audio-cache.test.ts,
+    scripts/__tests__/bake-helpers.test.ts
   </files>
   <read_first>
     .planning/phases/03-authoring-throughput/03-VALIDATION.md §Wave 0 Requirements (authoritative list of test files needed),
@@ -433,24 +438,58 @@ describe("render-gemini-audio legacy cache migration (AUTHOR-01 D-01)", () => {
 });
 ```
 
+Create `scripts/__tests__/bake-helpers.test.ts` (node env — pure math):
+```typescript
+// @vitest-environment node
+/**
+ * Wave 0 scaffold for AUTHOR-06 pure math helpers extracted into
+ * scripts/lib/bake-helpers.ts (computeMedianSecPerChar, isDurationAnomaly,
+ * wordDiff). Implemented by Plan 06 (03-06). These are load-bearing
+ * functions (ritual-median + >3×/<0.3× anomaly + STT word-diff) — unit
+ * regression coverage replaces "run-a-bake-to-see" validation.
+ */
+import { describe, it } from "vitest";
+
+describe("computeMedianSecPerChar (AUTHOR-06 D-10 Pitfall 6)", () => {
+  it.todo("returns correct median for odd-length sample set (Plan 06)");
+  it.todo("returns correct median for even-length sample set (average of two middles)");
+  it.todo("handles charCount=0 without dividing by zero");
+});
+
+describe("isDurationAnomaly (AUTHOR-06 D-10)", () => {
+  it.todo("ratio <0.3× of median triggers anomaly (Plan 06)");
+  it.todo("ratio >3× of median triggers anomaly");
+  it.todo("ratio within [0.3, 3] band does not trigger anomaly");
+  it.todo("exact 3.0× is NOT anomalous (strict > threshold)");
+  it.todo("exact 0.3× is NOT anomalous (strict < threshold)");
+});
+
+describe("wordDiff (AUTHOR-07 D-11)", () => {
+  it.todo("returns empty missed + inserted for identical strings (Plan 06)");
+  it.todo("identifies missed words (in expected, not in actual)");
+  it.todo("identifies inserted words (in actual, not in expected)");
+  it.todo("is case-insensitive (whisper output vs authored text)");
+});
+```
+
 Commit:
 ```
-author-infra: scaffold wave 0 tests for idb-schema, dev-guard, author-validation, bake-all, preview-bake, cache
+author-infra: scaffold wave 0 tests for idb-schema, dev-guard, author-validation, bake-all, preview-bake, cache, bake-helpers
 ```
   </action>
   <verify>
-    <automated>test -f src/lib/__tests__/idb-schema.test.ts && test -f src/lib/__tests__/dev-guard.test.ts && test -f src/lib/__tests__/author-validation.test.ts && test -f scripts/__tests__/bake-all.test.ts && test -f scripts/__tests__/preview-bake.test.ts && test -f scripts/__tests__/render-gemini-audio-cache.test.ts && npx vitest run --no-coverage src/lib/__tests__/idb-schema.test.ts src/lib/__tests__/dev-guard.test.ts src/lib/__tests__/author-validation.test.ts scripts/__tests__/bake-all.test.ts scripts/__tests__/preview-bake.test.ts scripts/__tests__/render-gemini-audio-cache.test.ts 2>&1 | grep -E "todo|passed"</automated>
+    <automated>test -f src/lib/__tests__/idb-schema.test.ts && test -f src/lib/__tests__/dev-guard.test.ts && test -f src/lib/__tests__/author-validation.test.ts && test -f scripts/__tests__/bake-all.test.ts && test -f scripts/__tests__/preview-bake.test.ts && test -f scripts/__tests__/render-gemini-audio-cache.test.ts && test -f scripts/__tests__/bake-helpers.test.ts && npx vitest run --no-coverage src/lib/__tests__/idb-schema.test.ts src/lib/__tests__/dev-guard.test.ts src/lib/__tests__/author-validation.test.ts scripts/__tests__/bake-all.test.ts scripts/__tests__/preview-bake.test.ts scripts/__tests__/render-gemini-audio-cache.test.ts scripts/__tests__/bake-helpers.test.ts 2>&1 | grep -E "todo|passed"</automated>
   </verify>
   <acceptance_criteria>
-    - All six scaffold files exist (six `test -f ...` checks pass).
-    - Every file starts with a `// @vitest-environment` pragma (grep finds one per file): `grep -l "@vitest-environment" src/lib/__tests__/idb-schema.test.ts src/lib/__tests__/dev-guard.test.ts src/lib/__tests__/author-validation.test.ts scripts/__tests__/bake-all.test.ts scripts/__tests__/preview-bake.test.ts scripts/__tests__/render-gemini-audio-cache.test.ts` returns 6 lines.
+    - All seven scaffold files exist (seven `test -f ...` checks pass).
+    - Every file starts with a `// @vitest-environment` pragma (grep finds one per file): `grep -l "@vitest-environment" src/lib/__tests__/idb-schema.test.ts src/lib/__tests__/dev-guard.test.ts src/lib/__tests__/author-validation.test.ts scripts/__tests__/bake-all.test.ts scripts/__tests__/preview-bake.test.ts scripts/__tests__/render-gemini-audio-cache.test.ts scripts/__tests__/bake-helpers.test.ts` returns 7 lines.
     - Every file contains at least one `it.todo(` marker (grep `-c "it.todo(" <file>` returns ≥ 1 for each).
-    - `npx vitest run --no-coverage src/lib/__tests__/idb-schema.test.ts src/lib/__tests__/dev-guard.test.ts src/lib/__tests__/author-validation.test.ts scripts/__tests__/bake-all.test.ts scripts/__tests__/preview-bake.test.ts scripts/__tests__/render-gemini-audio-cache.test.ts` exits 0 (Vitest treats `it.todo` as passing, not failing — confirms files compile cleanly).
+    - `npx vitest run --no-coverage src/lib/__tests__/idb-schema.test.ts src/lib/__tests__/dev-guard.test.ts src/lib/__tests__/author-validation.test.ts scripts/__tests__/bake-all.test.ts scripts/__tests__/preview-bake.test.ts scripts/__tests__/render-gemini-audio-cache.test.ts scripts/__tests__/bake-helpers.test.ts` exits 0 (Vitest treats `it.todo` as passing, not failing — confirms files compile cleanly).
     - `npx vitest run --no-coverage` full-suite still exits 0 (no regression in existing tests).
     - Every scaffold cites its implementing plan in the header (grep `"Plan 0"` hits every file).
   </acceptance_criteria>
   <done>
-    Six test scaffolds committed as a single `author-infra:` commit. Full test suite still green (todo counts rise). Every downstream plan (02-08) has a concrete test file it can `vi.resetModules` + fill in; the Nyquist validation contract for Phase 3 is materialized.
+    Seven test scaffolds committed as a single `author-infra:` commit. Full test suite still green (todo counts rise). Every downstream plan (02-08) has a concrete test file it can `vi.resetModules` + fill in; the Nyquist validation contract for Phase 3 is materialized.
   </done>
 </task>
 
@@ -486,7 +525,7 @@ author-infra: scaffold wave 0 tests for idb-schema, dev-guard, author-validation
 - Three new npm packages installed at exact versions (p-limit@^7.3.0, music-metadata@^11.12.3, fake-indexeddb@^6.2.5).
 - Two new package.json script entries exist (`bake-all`, `preview-bake`).
 - `rituals/_bake-cache/` directory exists; root `.gitignore` has the entry; nested `.gitignore` excludes everything except itself.
-- Six Wave 0 test scaffold files exist, each with correct @vitest-environment pragma and at least one `it.todo()` marker, each citing its implementing plan.
+- Seven Wave 0 test scaffold files exist, each with correct @vitest-environment pragma and at least one `it.todo()` marker, each citing its implementing plan.
 - Full test suite still exits 0.
 - Downstream Plans 02-08 can start without re-installing any dep or creating any test file.
 </success_criteria>
