@@ -144,6 +144,51 @@ if (errors.length > 0 || !result.structureOk) process.exit(1);
 No `kind: "bake-ratio-outlier"` added — the severity-filter is already the bake-vs-UI-warning discriminator. The `[D-08 bake-band]` message prefix is for human-readable logs, not programmatic filtering.
 
 Dialogue parser reference (src/lib/dialogue-format.ts): `parseDialogue(source)` returns `{ nodes: DialogueNode[], warnings: DialogueWarning[] }`. `DialogueNode.kind === "line"` nodes carry `{ speaker, isAction, text }`.
+
+**Test fixture format — `dialogueSource()` output (pinned, verified against src/lib/dialogue-format.ts):**
+
+The test helper `dialogueSource(speaker, text, isAction?)` returns a LITERAL markdown string in exactly this shape:
+
+```md
+## Section 1
+
+WM: Brethren, let us commence.
+```
+
+For an action line (`isAction=true`):
+
+```md
+## Section 1
+
+WM: [rises]
+```
+
+This shape is verified against `src/lib/dialogue-format.ts`:
+- `SPEAKER_RE = /^([A-Za-z][A-Za-z0-9/]*):\s+(.+)$/` — requires a space after the colon.
+- `H2_RE = /^## (.+)$/` — section header required so the line parser starts emitting `kind: "line"` nodes (everything before the first `##` is swallowed into the preamble, per the parser's `if (!seenFirstSection)` branch).
+- `BRACKETED_RE = /^\[(.+)\]$/` applied to the speaker's text — so `WM: [rises]` becomes `{kind: "line", speaker: "WM", text: "rises", isAction: true}`.
+
+The helper below is the EXACT body that produces a parseable, non-empty `nodes: []` output from `parseDialogue()`:
+
+```typescript
+function dialogueSource(speaker: string, text: string, isAction = false): string {
+  const body = isAction ? `${speaker}: [${text}]` : `${speaker}: ${text}`;
+  return `## Section 1\n\n${body}\n`;
+}
+```
+
+This is NOT a hedge or a "needs tuning" starting point — it is the production shape. Sanity-check in `src/lib/__tests__/dialogue-format.test.ts:125-130`:
+
+```typescript
+it("handles compound speakers with slash (WM/Chaplain)", () => {
+  const doc = parseDialogue("## S\nWM/Chaplain: Let us pray.\n");
+  const lines = doc.nodes.filter((n) => n.kind === "line");
+  expect(lines).toHaveLength(1);
+  // ...
+});
+```
+
+The shape `## S\n<SPEAKER>: <TEXT>\n` is the minimum parseable ritual. `dialogueSource()` uses `## Section 1\n\n<SPEAKER>: <TEXT>\n` (one extra blank line for readability — the parser ignores blanks). Both shapes parse. No executor-side tuning required.
 </interfaces>
 </context>
 
@@ -219,20 +264,26 @@ Dialogue parser reference (src/lib/dialogue-format.ts): `parseDialogue(source)` 
         }
 ```
 
-**Step 2 — fill in `src/lib/__tests__/author-validation.test.ts`** (replacing Plan-01 `it.todo` stubs). Keep the `@vitest-environment node` pragma. Use `parseDialogue` to construct DialogueDocument fixtures from markdown source strings (matches how the /author UI calls the validator):
+**Step 2 — fill in `src/lib/__tests__/author-validation.test.ts`** (replacing Plan-01 `it.todo` stubs). Keep the `@vitest-environment node` pragma. Use `parseDialogue` (via the `dialogueSource()` helper defined below) to construct DialogueDocument fixtures from markdown source strings — the fixture format is FIXED and verified against `src/lib/dialogue-format.ts` (see `<interfaces>` "Test fixture format" section above). Use the helper verbatim:
 
 ```typescript
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { validatePair } from "../author-validation";
 
-// Helpers: build dialogue markdown for a single spoken line pair.
-// Format follows src/lib/dialogue-format.ts: speaker on its own line then
-// a blank, then the text, then blank. For tests we use sections to ensure
-// parse succeeds even for minimal inputs.
+/**
+ * Build a minimal parseable dialogue markdown string for a single
+ * spoken (or action) line. Format is verified against
+ * src/lib/dialogue-format.ts:
+ *   - SPEAKER_RE requires "SPEAKER: " (colon + space).
+ *   - H2_RE requires a "## " section header before line parsing starts.
+ *   - BRACKETED_RE on the text flags an action line.
+ *
+ * This is the pinned fixture shape — no executor-side tuning required.
+ * parseDialogue("## Section 1\n\nWM: hello\n") yields:
+ *   { nodes: [{kind:"section",...}, {kind:"line",speaker:"WM",text:"hello",isAction:false,...}], ... }
+ */
 function dialogueSource(speaker: string, text: string, isAction = false): string {
-  // Minimal parseable dialogue with a section wrapper; format matches
-  // rituals/*-dialogue.md in the repo.
   const body = isAction ? `${speaker}: [${text}]` : `${speaker}: ${text}`;
   return `## Section 1\n\n${body}\n`;
 }
@@ -381,7 +432,7 @@ describe("author-validation cipher/plain parity (AUTHOR-05 D-08)", () => {
 });
 ```
 
-**NOTE on fixture construction:** If `parseDialogue` requires specific markdown formatting, the `dialogueSource()` helper may need tuning. The executor should read `src/lib/dialogue-format.ts` to confirm the minimal parseable shape. If `parseDialogue` needs more than `## Section + speaker: text`, use the actual format the `/author` UI feeds in — grep `src/app/author/page.tsx` for example inputs, or copy a small snippet from `rituals/<any>-dialogue.md` and `rituals/<any>-dialogue-cipher.md` and substitute in only the line text for each test case.
+**Fixture shape is pinned — no runtime tuning.** The `dialogueSource()` helper above is the final form. It has been verified against `src/lib/dialogue-format.ts`'s `SPEAKER_RE`, `H2_RE`, and `BRACKETED_RE`. The example `parseDialogue("## S\nWM/Chaplain: Let us pray.\n")` in `src/lib/__tests__/dialogue-format.test.ts:125-130` confirms that "## SECTION + speaker: text + newline" parses to a non-empty `nodes: []` with `kind: "line"` entries. The executor should NOT modify the helper body — write the test file with the body verbatim and run it on the first attempt.
 
 Commit: `author-05: add D-08 bake-band word-ratio hard-fail to author-validation`
   </action>
@@ -394,13 +445,14 @@ Commit: `author-05: add D-08 bake-band word-ratio hard-fail to author-validation
     - `grep "wordRatio" src/lib/author-validation.ts` returns ≥ 2 (declaration + condition).
     - The band constants `0.5` and `2.0` both appear: `grep -cE "(0\.5|2\.0)" src/lib/author-validation.ts | awk '$1 >= 2 { print; }' | wc -l` returns 1 (at least 2 matches across the file).
     - Test file has no `.todo` remaining: `grep -c "it.todo(" src/lib/__tests__/author-validation.test.ts` returns 0.
-    - `npx vitest run --no-coverage src/lib/__tests__/author-validation.test.ts` exits 0 with 10+ tests passing.
+    - Test file uses the pinned fixture helper: `grep -q "function dialogueSource" src/lib/__tests__/author-validation.test.ts` and `grep -q "## Section 1" src/lib/__tests__/author-validation.test.ts` both match.
+    - `npx vitest run --no-coverage src/lib/__tests__/author-validation.test.ts` exits 0 with 10+ tests passing ON FIRST RUN (no "needs tuning" iteration expected).
     - `npm run build` exits 0.
     - Full test suite green: `npx vitest run --no-coverage` exits 0.
     - The existing soft character-ratio warning still fires in the author UI analog (the "preserves the existing character-ratio WARNING" test case proves this).
   </acceptance_criteria>
   <done>
-    `author-validation.ts` hard-fails bakes on plain/cipher word-count drift outside [0.5×, 2×]; the existing soft character-ratio warning is preserved for the /author UI; full unit test coverage with 10+ passing cases; Plan 06 and Plan 07 can call `validatePair()` and filter by `severity === "error"` for the bake-refusal gate.
+    `author-validation.ts` hard-fails bakes on plain/cipher word-count drift outside [0.5×, 2×]; the existing soft character-ratio warning is preserved for the /author UI; full unit test coverage with 10+ passing cases using the pinned `dialogueSource()` helper; Plan 06 and Plan 07 can call `validatePair()` and filter by `severity === "error"` for the bake-refusal gate.
   </done>
 </task>
 
@@ -424,7 +476,7 @@ Commit: `author-05: add D-08 bake-band word-ratio hard-fail to author-validation
 </threat_model>
 
 <verification>
-- `npx vitest run --no-coverage src/lib/__tests__/author-validation.test.ts` — 10+ tests pass.
+- `npx vitest run --no-coverage src/lib/__tests__/author-validation.test.ts` — 10+ tests pass on first run.
 - `npx vitest run --no-coverage` (full suite) — no regression in /author UI unit tests or any other consumer of `validatePair`.
 - `npm run build` — TypeScript compile clean.
 - Grep assertions (see acceptance_criteria) confirm the new block is present and the old warning is preserved.
@@ -433,7 +485,7 @@ Commit: `author-05: add D-08 bake-band word-ratio hard-fail to author-validation
 <success_criteria>
 - `src/lib/author-validation.ts` hard-fails with `severity: "error"` + `kind: "ratio-outlier"` + `[D-08 bake-band]` message prefix when plain/cipher word-count ratio is outside [0.5×, 2×].
 - Existing soft character-ratio warning (at lines 192-203) is preserved verbatim; /author UI soft-warning UX unchanged.
-- `src/lib/__tests__/author-validation.test.ts` covers: speaker mismatch, action mismatch, both ends of the word-ratio band, within-band acceptance, exact-boundary acceptance, word-vs-char distinction, warning preservation, well-formed pair, and empty-cipher guard.
+- `src/lib/__tests__/author-validation.test.ts` covers: speaker mismatch, action mismatch, both ends of the word-ratio band, within-band acceptance, exact-boundary acceptance, word-vs-char distinction, warning preservation, well-formed pair, and empty-cipher guard — using the pinned `dialogueSource()` helper that works on first run.
 - Plan 06 and Plan 07 can `import { validatePair } from "../src/lib/author-validation"` and filter by `severity === "error"` to decide whether to abort the bake.
 </success_criteria>
 
@@ -443,5 +495,6 @@ After completion, create `.planning/phases/03-authoring-throughput/03-04-SUMMARY
 - Test count breakdown (structural / bake-band / regression / edge cases)
 - Sample validator output on a deliberately-corrupted pair (include the `[D-08 bake-band]` message text)
 - Confirmation that the existing warning path still fires for one canonical /author UI case
+- Confirmation that `dialogueSource()` worked on first run (no fixture tuning required)
 - Commit SHA
 </output>

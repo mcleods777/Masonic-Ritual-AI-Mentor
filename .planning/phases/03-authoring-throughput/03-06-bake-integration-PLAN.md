@@ -6,9 +6,11 @@ wave: 3
 depends_on: [04, 05]
 files_modified:
   - scripts/build-mram-from-dialogue.ts
+  - scripts/lib/resume-state.ts
+  - scripts/__tests__/bake-helpers.test.ts
 autonomous: true
-requirements: [AUTHOR-04, AUTHOR-05, AUTHOR-06, AUTHOR-07]
-tags: [bake-pipeline, short-line, google-tts, validator-gate, duration-anomaly, stt-verify]
+requirements: [AUTHOR-02, AUTHOR-04, AUTHOR-05, AUTHOR-06, AUTHOR-07]
+tags: [bake-pipeline, short-line, google-tts, validator-gate, duration-anomaly, stt-verify, resume-state, line-level]
 
 must_haves:
   truths:
@@ -19,10 +21,19 @@ must_haves:
     - "Google TTS short-line call sends ONLY {text, voiceName, languageCode} — NO preamble, NO style directive, NO voice-cast scene. Prevents the voice-cast-scene-leaks-into-audio failure mode from cross-contaminating the short-line engine (Pitfall 4)"
     - "Google voice mapping uses the existing GOOGLE_ROLE_VOICES table via getGoogleVoiceForRole() from src/lib/tts-cloud.ts — no re-invention; tonally matched to Gemini roles by existing curation"
     - "Short-line audio uses Google's `OGG_OPUS` audioEncoding — native Opus-in-Ogg, byte-compatible with Gemini's post-ffmpeg Opus path (Assumption A3). No ffmpeg transcode for short-line audio"
+    - "Accepts three new CLI args for D-06 line-level resume: --resume-state-path <path> (state file location), --ritual-slug <slug> (identifies this bake), --skip-line-ids <id1,id2,...> (lines already completed in a prior interrupted run). Shared types live in scripts/lib/resume-state.ts (imported by Plan 07's bake-all.ts)"
+    - "When --resume-state-path is provided, build-mram-from-dialogue.ts writes _RESUME.json atomically (tmp+rename via writeResumeStateAtomic) AFTER EVERY COMPLETED LINE — lineId moves from inFlightLineIds to completedLineIds. Before each render, lineId is added to inFlightLineIds + atomic-written so a crash mid-render leaves a recoverable state file. This is the concrete D-06 mechanism — per-line granularity, not per-ritual"
+    - "When --skip-line-ids is provided, any line whose ID is in the set is skipped entirely (no render, no embed, no anomaly check). In-flight-but-not-completed lines from a prior crash are NOT in --skip-line-ids — they retry"
   artifacts:
     - path: scripts/build-mram-from-dialogue.ts
-      provides: "bake pipeline with pre-render validator gate, short-line Google TTS route, post-render duration-anomaly detector, optional STT verify roll-up; all bake-time correctness gates (AUTHOR-04/05/06/07) wired in"
+      provides: "bake pipeline with pre-render validator gate, short-line Google TTS route, post-render duration-anomaly detector, optional STT verify roll-up, line-level _RESUME.json state writes (D-06); all bake-time correctness gates (AUTHOR-02/04/05/06/07) wired in"
       contains: "googleTtsBakeCall"
+    - path: scripts/lib/resume-state.ts
+      provides: "shared ResumeState type + atomic read/write helpers, imported by both build-mram-from-dialogue.ts (writer) and bake-all.ts (reader)"
+      contains: "writeResumeStateAtomic"
+    - path: scripts/__tests__/bake-helpers.test.ts
+      provides: "unit tests for the ResumeState helpers — atomic write round-trip, missing-file null return, .tmp non-leak"
+      contains: "writeResumeStateAtomic"
   key_links:
     - from: scripts/build-mram-from-dialogue.ts
       to: src/lib/author-validation.ts
@@ -40,14 +51,18 @@ must_haves:
       to: "Groq Whisper API (https://api.groq.com/openai/v1/audio/transcriptions)"
       via: "--verify-audio only: direct multipart/form-data call with GROQ_API_KEY from env (RESEARCH recommendation over /api/transcribe)"
       pattern: "api.groq.com/openai/v1/audio/transcriptions"
+    - from: scripts/build-mram-from-dialogue.ts
+      to: scripts/lib/resume-state.ts
+      via: "imports ResumeState type + writeResumeStateAtomic helper; calls it before/after every line render"
+      pattern: "writeResumeStateAtomic"
 ---
 
 <objective>
-Wire the four bake-time correctness gates into `scripts/build-mram-from-dialogue.ts`: (1) **pre-render validator gate** (AUTHOR-05 D-08) — call `validatePair()` before any API activity; bail on severity-error issues; (2) **short-line Google TTS route** (AUTHOR-04 D-09) — replace the current hard-skip behavior for lines under `MIN_BAKE_LINE_CHARS` with a direct Google Cloud TTS REST call that returns native Opus bytes embeddable verbatim in the .mram; (3) **audio-duration anomaly detector** (AUTHOR-06 D-10) — post-render, parse Opus via music-metadata, maintain a rolling per-ritual median sec-per-char, hard-fail any line >3× or <0.3× the median with a structured error; (4) **--verify-audio STT round-trip** (AUTHOR-07 D-11) — opt-in flag that pipes each Opus through Groq Whisper directly, warns on word-diff > 2 words (default threshold), never hard-fails the bake.
+Wire the five Phase-3 bake-time gates into `scripts/build-mram-from-dialogue.ts`: (1) **pre-render validator gate** (AUTHOR-05 D-08) — call `validatePair()` before any API activity; bail on severity-error issues; (2) **short-line Google TTS route** (AUTHOR-04 D-09) — replace the current hard-skip behavior for lines under `MIN_BAKE_LINE_CHARS` with a direct Google Cloud TTS REST call that returns native Opus bytes embeddable verbatim in the .mram; (3) **audio-duration anomaly detector** (AUTHOR-06 D-10) — post-render, parse Opus via music-metadata, maintain a rolling per-ritual median sec-per-char, hard-fail any line >3× or <0.3× the median with a structured error; (4) **--verify-audio STT round-trip** (AUTHOR-07 D-11) — opt-in flag that pipes each Opus through Groq Whisper directly, warns on word-diff > 2 words (default threshold), never hard-fails the bake; (5) **line-level _RESUME.json writes** (AUTHOR-02 D-06) — accept `--resume-state-path / --ritual-slug / --skip-line-ids` CLI args, write state atomically after every completed line, and skip lines whose IDs are in the skip set. Shared ResumeState types live in `scripts/lib/resume-state.ts` so Plan 07's orchestrator can read the same shape.
 
-Purpose: per D-08/D-09/D-10/D-11, the Phase 3 bake pipeline gains four correctness gates that catch the historical failure modes in a single pass: corrupted cipher/plain pairs, silently-dropped ultra-short lines, voice-cast-preamble-leaks manifesting as pathological durations, and Whisper-diff mismatches as a final ship-check. The changes are layered additively onto the existing bake script without touching the Gemini render path (Plan 05 owns that); the short-line hard-skip is replaced end-to-end with a working alternate engine.
+Purpose: per D-06/D-08/D-09/D-10/D-11, the Phase 3 bake pipeline gains five correctness gates that catch the historical failure modes in a single pass: corrupted cipher/plain pairs, silently-dropped ultra-short lines, voice-cast-preamble-leaks manifesting as pathological durations, Whisper-diff mismatches as a final ship-check, and crash-recoverable per-line state. The D-06 mechanism is concrete — build-mram-from-dialogue.ts is the process that knows when a line actually completes, so it writes `_RESUME.json` directly rather than deferring to the orchestrator.
 
-Output: updated `scripts/build-mram-from-dialogue.ts` with the four gates wired; short-line path fully functional via Google TTS REST; duration anomaly detector active; `--verify-audio` flag implemented. No new test file — orchestrator-level tests live in Plan 07 (`scripts/__tests__/bake-all.test.ts`). This plan's validation is integration-level: running a real bake (manual verification per 03-VALIDATION.md §Manual-Only Verifications) + the existing mram-audio-bake test.
+Output: updated `scripts/build-mram-from-dialogue.ts` with the five gates wired; new `scripts/lib/resume-state.ts` with the shared types and atomic helpers; the Plan-01 scaffold at `scripts/__tests__/bake-helpers.test.ts` filled with tests for the resume-state helpers (pure TS, deterministic, runs in < 1s). Orchestrator-level tests live in Plan 07 (`scripts/__tests__/bake-all.test.ts`).
 </objective>
 
 <execution_context>
@@ -70,6 +85,7 @@ Output: updated `scripts/build-mram-from-dialogue.ts` with the four gates wired;
 @src/lib/tts-cloud.ts
 @src/app/api/tts/google/route.ts
 @src/app/api/transcribe/route.ts
+@scripts/__tests__/bake-helpers.test.ts
 
 <interfaces>
 <!-- Existing imports preserved. New imports this plan adds. -->
@@ -79,6 +95,80 @@ New imports at top of scripts/build-mram-from-dialogue.ts:
 import { parseBuffer } from "music-metadata";  // D-10 duration anomaly
 import { validatePair, type PairValidationResult } from "../src/lib/author-validation";  // D-08 gate
 import { getGoogleVoiceForRole, type GoogleVoiceProfile } from "../src/lib/tts-cloud";  // D-09 short-line mapping
+import {
+  type ResumeState,
+  readResumeState,
+  writeResumeStateAtomic,
+} from "./lib/resume-state";  // D-06 line-level state
+```
+
+**Shared ResumeState types (scripts/lib/resume-state.ts — NEW file, imported by Plan 07 too):**
+```typescript
+/**
+ * scripts/lib/resume-state.ts — shared resume-state types + atomic helpers.
+ *
+ * Written by scripts/build-mram-from-dialogue.ts (line-level, per-line
+ * atomic writes). Read by scripts/bake-all.ts (orchestrator) to know which
+ * lineIds completed in a prior interrupted run and pass them via
+ * --skip-line-ids to the next build-mram invocation.
+ *
+ * AUTHOR-02 D-06: per-line granularity (not per-ritual). The writer is
+ * the only process that knows when a line has actually completed (audio
+ * embedded into the in-memory .mram document), so it writes here.
+ */
+
+import * as fs from "node:fs";
+import * as path from "node:path";
+
+export interface ResumeState {
+  /** Slug of the ritual currently being baked. Guards against mixed-ritual resume. */
+  ritual: string;
+  /** Line IDs (in order of completion) that have been fully rendered + embedded. */
+  completedLineIds: string[];
+  /** Line IDs that started rendering but did not complete. Re-tried on resume. */
+  inFlightLineIds: string[];
+  /** Unix ms timestamp — when the current bake invocation started. */
+  startedAt: number;
+}
+
+/**
+ * Read _RESUME.json from `filePath`. Returns null when the file doesn't
+ * exist OR when it's malformed (caller can then re-init from scratch).
+ */
+export function readResumeState(filePath: string): ResumeState | null {
+  if (!fs.existsSync(filePath)) return null;
+  try {
+    const raw = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    if (
+      typeof raw !== "object" ||
+      raw === null ||
+      typeof raw.ritual !== "string" ||
+      !Array.isArray(raw.completedLineIds) ||
+      !Array.isArray(raw.inFlightLineIds) ||
+      typeof raw.startedAt !== "number"
+    ) {
+      return null;
+    }
+    return raw as ResumeState;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Write `state` to `filePath` atomically via tmp+rename (RESEARCH Pattern 6).
+ * A crash mid-write leaves EITHER the old file intact OR the new file
+ * fully written — never a truncated file. `fs.renameSync` is atomic on
+ * POSIX within the same directory; the tmp path is co-located for that
+ * reason.
+ */
+export function writeResumeStateAtomic(filePath: string, state: ResumeState): void {
+  const dir = path.dirname(filePath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const tmp = `${filePath}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
+  fs.renameSync(tmp, filePath);
+}
 ```
 
 **Short-line Google TTS call shape (D-09, RESEARCH Pattern 5):**
@@ -250,9 +340,81 @@ const VERIFY_AUDIO_DIFF_THRESHOLD = Number(process.env.VERIFY_AUDIO_DIFF_THRESHO
 // Warn when wordDiffCount > threshold — "diff > 2 words" = 3+ word mismatches.
 ```
 
-Flag parsing (this plan adds `--verify-audio` to the existing argv parse block):
+**Flag parsing (new args for D-06 resume state, in addition to existing --verify-audio):**
 ```typescript
+// D-06 CLI args — orchestrator-provided when resuming / passing state path.
+// When absent, build-mram runs with no resume-state side effects (pre-D-06 behavior).
 const verifyAudio = process.argv.includes("--verify-audio");
+
+function argValue(flag: string): string | undefined {
+  const idx = process.argv.indexOf(flag);
+  if (idx < 0 || idx + 1 >= process.argv.length) return undefined;
+  const next = process.argv[idx + 1];
+  if (!next || next.startsWith("--")) return undefined;
+  return next;
+}
+
+const resumeStatePath = argValue("--resume-state-path");   // e.g. rituals/_bake-cache/_RESUME.json
+const ritualSlugArg   = argValue("--ritual-slug");         // e.g. "ea-opening"
+const skipLineIdsArg  = argValue("--skip-line-ids");       // e.g. "1,2,5,9"
+const skipLineIds = new Set(
+  (skipLineIdsArg ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+);
+```
+
+**Line-level _RESUME.json flow (AUTHOR-02 D-06):**
+```typescript
+/**
+ * Per-line state writes. Called at two points in the render loop:
+ *   - BEFORE render: add lineId to inFlightLineIds, atomic-write.
+ *   - AFTER successful embed: move lineId from inFlightLineIds to
+ *     completedLineIds, atomic-write.
+ *
+ * A crash BETWEEN these two writes leaves lineId in inFlightLineIds
+ * (but NOT in completedLineIds) — the orchestrator passes
+ * --skip-line-ids=<completedLineIds> on resume, so the in-flight
+ * line is retried from scratch. That is the correct behavior:
+ * in-flight means "we started but didn't finish," so we don't trust
+ * the partial result.
+ */
+
+function ensureResumeState(): ResumeState {
+  // resumeStatePath must be set when this runs — caller guards.
+  const existing = readResumeState(resumeStatePath!);
+  if (existing && existing.ritual === ritualSlugArg) {
+    return existing;
+  }
+  // No state, or state was for a different ritual → initialize fresh.
+  const fresh: ResumeState = {
+    ritual: ritualSlugArg!,
+    completedLineIds: [],
+    inFlightLineIds: [],
+    startedAt: Date.now(),
+  };
+  writeResumeStateAtomic(resumeStatePath!, fresh);
+  return fresh;
+}
+
+// Call sites (conceptual; adapt variable names to match the existing loop):
+// BEFORE each render in the main loop, when resume is active:
+function markLineInFlight(state: ResumeState, lineId: string): void {
+  if (!state.inFlightLineIds.includes(lineId)) {
+    state.inFlightLineIds.push(lineId);
+    writeResumeStateAtomic(resumeStatePath!, state);
+  }
+}
+
+// AFTER successful embedAudioOnLine:
+function markLineCompleted(state: ResumeState, lineId: string): void {
+  state.inFlightLineIds = state.inFlightLineIds.filter((id) => id !== lineId);
+  if (!state.completedLineIds.includes(lineId)) {
+    state.completedLineIds.push(lineId);
+  }
+  writeResumeStateAtomic(resumeStatePath!, state);
+}
 ```
 </interfaces>
 </context>
@@ -702,6 +864,349 @@ Commit: `author-06: add duration-anomaly detector + author-07 --verify-audio STT
   </done>
 </task>
 
+<task type="auto" tdd="true">
+  <name>Task 3: Add line-level _RESUME.json writes (D-06) + shared scripts/lib/resume-state.ts</name>
+  <files>
+    scripts/lib/resume-state.ts,
+    scripts/build-mram-from-dialogue.ts,
+    scripts/__tests__/bake-helpers.test.ts
+  </files>
+  <read_first>
+    scripts/build-mram-from-dialogue.ts (output of Tasks 1 and 2 — locate the render loop and the per-line success branches),
+    .planning/phases/03-authoring-throughput/03-CONTEXT.md §D-06 (line-level resume requirement; completedLineIds / inFlightLineIds semantics; atomic write; ritual mismatch refusal),
+    .planning/phases/03-authoring-throughput/03-RESEARCH.md §Pattern 6 (atomic write tmp+rename; POSIX rename semantics),
+    scripts/__tests__/bake-helpers.test.ts (Plan-01 Wave 0 scaffold — `it.todo` stubs this task replaces with concrete tests).
+  </read_first>
+  <behavior>
+    - writeResumeStateAtomic writes JSON to the target path via a tmp + rename; after a successful write the tmp file does not linger in the target directory.
+    - readResumeState returns null when the file does not exist.
+    - readResumeState returns null when the file exists but is not valid JSON (corruption tolerance — orchestrator will decide whether to re-init or refuse).
+    - readResumeState returns the parsed ResumeState when the file exists and the JSON matches the schema (ritual: string, completedLineIds: string[], inFlightLineIds: string[], startedAt: number).
+    - A write → read round-trip is lossless (values deep-equal after JSON parse).
+    - If --resume-state-path is not set, build-mram-from-dialogue.ts runs with no resume side effects (pre-D-06 behavior).
+    - If --resume-state-path is set but the existing file's `ritual` field does not match --ritual-slug, the helper initializes fresh state for the current ritual (orchestrator-level ritual-mismatch handling lives in Plan 07; at this layer the helper just starts over for the current ritual).
+    - When --skip-line-ids="1,2,5" is passed, the render loop skips lines with those IDs (no render, no embed, no anomaly-state mutation) BUT does NOT mutate completedLineIds for them (the orchestrator is the source of truth for what was completed previously).
+    - BEFORE each render: lineId is added to inFlightLineIds + atomic-written.
+    - AFTER each successful embed: lineId is removed from inFlightLineIds, added to completedLineIds, atomic-written.
+    - The module can be imported from a Vitest test without side effects (no top-level fs writes, no process.argv inspection at module scope).
+  </behavior>
+  <action>
+**Step 1 — Create scripts/lib/resume-state.ts.** New file containing the shared type and helpers verbatim from the `<interfaces>` block above:
+
+```typescript
+/**
+ * scripts/lib/resume-state.ts — shared resume-state types + atomic helpers.
+ *
+ * Written by scripts/build-mram-from-dialogue.ts (line-level, per-line
+ * atomic writes). Read by scripts/bake-all.ts (orchestrator) to know which
+ * lineIds completed in a prior interrupted run and pass them via
+ * --skip-line-ids to the next build-mram invocation.
+ *
+ * AUTHOR-02 D-06: per-line granularity (not per-ritual). The writer is
+ * the only process that knows when a line has actually completed (audio
+ * embedded into the in-memory .mram document), so it writes here.
+ */
+
+import * as fs from "node:fs";
+import * as path from "node:path";
+
+export interface ResumeState {
+  /** Slug of the ritual currently being baked. Guards against mixed-ritual resume. */
+  ritual: string;
+  /** Line IDs (in order of completion) that have been fully rendered + embedded. */
+  completedLineIds: string[];
+  /** Line IDs that started rendering but did not complete. Re-tried on resume. */
+  inFlightLineIds: string[];
+  /** Unix ms timestamp — when the current bake invocation started. */
+  startedAt: number;
+}
+
+/**
+ * Read _RESUME.json from `filePath`. Returns null when the file doesn't
+ * exist OR when it's malformed (caller can then re-init from scratch).
+ */
+export function readResumeState(filePath: string): ResumeState | null {
+  if (!fs.existsSync(filePath)) return null;
+  try {
+    const raw = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    if (
+      typeof raw !== "object" ||
+      raw === null ||
+      typeof raw.ritual !== "string" ||
+      !Array.isArray(raw.completedLineIds) ||
+      !Array.isArray(raw.inFlightLineIds) ||
+      typeof raw.startedAt !== "number"
+    ) {
+      return null;
+    }
+    return raw as ResumeState;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Write `state` to `filePath` atomically via tmp+rename (RESEARCH Pattern 6).
+ * A crash mid-write leaves EITHER the old file intact OR the new file
+ * fully written — never a truncated file. `fs.renameSync` is atomic on
+ * POSIX within the same directory; the tmp path is co-located for that
+ * reason.
+ */
+export function writeResumeStateAtomic(filePath: string, state: ResumeState): void {
+  const dir = path.dirname(filePath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const tmp = `${filePath}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
+  fs.renameSync(tmp, filePath);
+}
+```
+
+**Step 2 — Wire the new CLI args + per-line writes into scripts/build-mram-from-dialogue.ts.**
+
+Add to imports (after Task 1/2 imports):
+```typescript
+import {
+  type ResumeState,
+  readResumeState,
+  writeResumeStateAtomic,
+} from "./lib/resume-state";
+```
+
+Add to argv parsing block:
+```typescript
+function argValue(flag: string): string | undefined {
+  const idx = process.argv.indexOf(flag);
+  if (idx < 0 || idx + 1 >= process.argv.length) return undefined;
+  const next = process.argv[idx + 1];
+  if (!next || next.startsWith("--")) return undefined;
+  return next;
+}
+
+const resumeStatePath = argValue("--resume-state-path");
+const ritualSlugArg   = argValue("--ritual-slug");
+const skipLineIdsArg  = argValue("--skip-line-ids");
+const skipLineIds = new Set(
+  (skipLineIdsArg ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+);
+```
+
+Add state-management helpers near the existing helpers section:
+
+```typescript
+/**
+ * Per-line resume-state manager (AUTHOR-02 D-06).
+ * Only active when --resume-state-path + --ritual-slug are both set.
+ */
+function initResumeStateIfRequested(): ResumeState | null {
+  if (!resumeStatePath || !ritualSlugArg) return null;
+  const existing = readResumeState(resumeStatePath);
+  if (existing && existing.ritual === ritualSlugArg) {
+    return existing;
+  }
+  // No state, or state was for a different ritual → fresh start for THIS ritual.
+  // (Plan 07's orchestrator is responsible for any cross-ritual mismatch refusal
+  // BEFORE spawning this process.)
+  const fresh: ResumeState = {
+    ritual: ritualSlugArg,
+    completedLineIds: [],
+    inFlightLineIds: [],
+    startedAt: Date.now(),
+  };
+  writeResumeStateAtomic(resumeStatePath, fresh);
+  return fresh;
+}
+
+function markLineInFlight(state: ResumeState | null, lineId: string): void {
+  if (!state || !resumeStatePath) return;
+  if (!state.inFlightLineIds.includes(lineId)) {
+    state.inFlightLineIds.push(lineId);
+    writeResumeStateAtomic(resumeStatePath, state);
+  }
+}
+
+function markLineCompleted(state: ResumeState | null, lineId: string): void {
+  if (!state || !resumeStatePath) return;
+  state.inFlightLineIds = state.inFlightLineIds.filter((id) => id !== lineId);
+  if (!state.completedLineIds.includes(lineId)) {
+    state.completedLineIds.push(lineId);
+  }
+  writeResumeStateAtomic(resumeStatePath, state);
+}
+```
+
+Initialize the state once per bake invocation (near `const anomalyState = newAnomalyState();`):
+```typescript
+const resumeState = initResumeStateIfRequested();
+```
+
+Wire `markLineInFlight` / `markLineCompleted` into the render loop. In both branches (Gemini path and Google short-line path):
+
+```typescript
+// At the very top of each per-line iteration (before any work), honor --skip-line-ids:
+const lineIdStr = String(line.id);
+if (skipLineIds.has(lineIdStr)) {
+  continue;
+}
+
+// Immediately BEFORE the API call / render:
+markLineInFlight(resumeState, lineIdStr);
+
+// ... render (Gemini or Google short-line) ...
+
+// Immediately AFTER successful embedAudioOnLine (inside the success branch):
+markLineCompleted(resumeState, lineIdStr);
+```
+
+Treat the Google short-line branch identically — the two helper calls (`markLineInFlight` before `googleTtsBakeCall`, `markLineCompleted` after the embed) are the same pattern. If a line fails rendering, the lineId stays in `inFlightLineIds` — the orchestrator retries it on the next run.
+
+Cleanup note: when `resumeStatePath` is set, the orchestrator is responsible for unlinking `_RESUME.json` after a clean ritual finish (handled in Plan 07). build-mram-from-dialogue.ts does NOT delete the state file — it only writes it.
+
+**Step 3 — Fill scripts/__tests__/bake-helpers.test.ts.** Replace the Plan-01 scaffold with concrete tests of `readResumeState` + `writeResumeStateAtomic`:
+
+```typescript
+// @vitest-environment node
+/**
+ * Tests for scripts/lib/resume-state.ts (AUTHOR-02 D-06).
+ *
+ * Scope: pure file-system unit tests for the shared ResumeState helpers.
+ * Orchestrator-level behavior (ritual mismatch refusal, --skip-line-ids
+ * propagation) is tested in scripts/__tests__/bake-all.test.ts (Plan 07).
+ */
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+
+import {
+  readResumeState,
+  writeResumeStateAtomic,
+  type ResumeState,
+} from "../lib/resume-state";
+
+let tmpRoot: string;
+let stateFile: string;
+
+beforeEach(() => {
+  tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "resume-state-test-"));
+  stateFile = path.join(tmpRoot, "_RESUME.json");
+});
+afterEach(() => {
+  try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch {}
+});
+
+describe("writeResumeStateAtomic + readResumeState (D-06)", () => {
+  it("round-trips the full ResumeState shape losslessly", () => {
+    const state: ResumeState = {
+      ritual: "ea-opening",
+      completedLineIds: ["1", "2", "3"],
+      inFlightLineIds: ["4"],
+      startedAt: 1_700_000_000_000,
+    };
+    writeResumeStateAtomic(stateFile, state);
+    const read = readResumeState(stateFile);
+    expect(read).toEqual(state);
+  });
+
+  it("readResumeState returns null when the file does not exist", () => {
+    expect(readResumeState(stateFile)).toBeNull();
+  });
+
+  it("readResumeState returns null on malformed JSON (corruption tolerance)", () => {
+    fs.writeFileSync(stateFile, "{not valid json");
+    expect(readResumeState(stateFile)).toBeNull();
+  });
+
+  it("readResumeState returns null when schema does not match", () => {
+    // Missing inFlightLineIds — the schema guard in readResumeState returns null.
+    fs.writeFileSync(
+      stateFile,
+      JSON.stringify({ ritual: "x", completedLineIds: [], startedAt: 0 }),
+    );
+    expect(readResumeState(stateFile)).toBeNull();
+  });
+
+  it("atomic write: target file exists, no .tmp lingering after success", () => {
+    const state: ResumeState = {
+      ritual: "x",
+      completedLineIds: [],
+      inFlightLineIds: [],
+      startedAt: Date.now(),
+    };
+    writeResumeStateAtomic(stateFile, state);
+    const entries = fs.readdirSync(tmpRoot);
+    expect(entries).toContain("_RESUME.json");
+    expect(entries.filter((n) => n.endsWith(".tmp"))).toEqual([]);
+  });
+
+  it("atomic write: overwrites an existing state file cleanly", () => {
+    const first: ResumeState = {
+      ritual: "x",
+      completedLineIds: ["1"],
+      inFlightLineIds: [],
+      startedAt: 1,
+    };
+    writeResumeStateAtomic(stateFile, first);
+
+    const second: ResumeState = {
+      ritual: "x",
+      completedLineIds: ["1", "2"],
+      inFlightLineIds: [],
+      startedAt: 1,
+    };
+    writeResumeStateAtomic(stateFile, second);
+
+    expect(readResumeState(stateFile)).toEqual(second);
+    // Still no lingering tmp.
+    expect(fs.readdirSync(tmpRoot).filter((n) => n.endsWith(".tmp"))).toEqual([]);
+  });
+
+  it("creates the parent directory if missing (mkdirSync recursive)", () => {
+    const nested = path.join(tmpRoot, "a", "b", "c", "_RESUME.json");
+    const state: ResumeState = {
+      ritual: "x",
+      completedLineIds: [],
+      inFlightLineIds: [],
+      startedAt: 1,
+    };
+    writeResumeStateAtomic(nested, state);
+    expect(fs.existsSync(nested)).toBe(true);
+    expect(readResumeState(nested)).toEqual(state);
+  });
+});
+```
+
+Commit: `author-02: add scripts/lib/resume-state.ts + line-level _RESUME.json writes in build-mram`
+  </action>
+  <verify>
+    <automated>test -f scripts/lib/resume-state.ts && grep -q "export interface ResumeState" scripts/lib/resume-state.ts && grep -q "writeResumeStateAtomic" scripts/lib/resume-state.ts && grep -q "\.tmp" scripts/lib/resume-state.ts && grep -q "renameSync" scripts/lib/resume-state.ts && grep -q "resume-state-path" scripts/build-mram-from-dialogue.ts && grep -q "writeResumeStateAtomic\\|inFlightLineIds" scripts/build-mram-from-dialogue.ts && grep -q "skip-line-ids" scripts/build-mram-from-dialogue.ts && grep -q "from \"./lib/resume-state\"" scripts/build-mram-from-dialogue.ts && npx tsc --noEmit && npx vitest run --no-coverage scripts/__tests__/bake-helpers.test.ts</automated>
+  </verify>
+  <acceptance_criteria>
+    - `test -f scripts/lib/resume-state.ts` is true (new file created).
+    - `grep -q "export interface ResumeState" scripts/lib/resume-state.ts` (shared type present).
+    - `grep -q "writeResumeStateAtomic" scripts/lib/resume-state.ts` (exported atomic writer).
+    - `grep -q "readResumeState" scripts/lib/resume-state.ts` (exported reader).
+    - `grep -qE "writeFileSync.*\\.tmp|renameSync" scripts/lib/resume-state.ts` (atomic-write mechanism: tmp + rename).
+    - `grep -q "resume-state-path" scripts/build-mram-from-dialogue.ts` (CLI arg recognized).
+    - `grep -q "ritual-slug" scripts/build-mram-from-dialogue.ts` (CLI arg recognized).
+    - `grep -q "skip-line-ids" scripts/build-mram-from-dialogue.ts` (CLI arg recognized).
+    - `grep -qE "writeResumeStateAtomic|inFlightLineIds" scripts/build-mram-from-dialogue.ts` (per-line writes wired).
+    - `grep -q 'from "./lib/resume-state"' scripts/build-mram-from-dialogue.ts` (imports the shared module).
+    - `grep -q "markLineInFlight" scripts/build-mram-from-dialogue.ts` returns ≥ 2 matches (declaration + call).
+    - `grep -q "markLineCompleted" scripts/build-mram-from-dialogue.ts` returns ≥ 2 matches (declaration + call).
+    - `grep -c "it.todo(" scripts/__tests__/bake-helpers.test.ts` returns 0 (scaffold fully replaced).
+    - `npx vitest run --no-coverage scripts/__tests__/bake-helpers.test.ts` exits 0 with 7+ passing tests (round-trip, missing-file, malformed JSON, schema mismatch, no-tmp-leak, overwrite, mkdir-recursive).
+    - `npx tsc --noEmit` exits 0.
+    - `npm run build` exits 0.
+    - Full test suite green: `npx vitest run --no-coverage` exits 0.
+  </acceptance_criteria>
+  <done>
+    scripts/lib/resume-state.ts exists with shared ResumeState + atomic helpers. build-mram-from-dialogue.ts accepts --resume-state-path / --ritual-slug / --skip-line-ids, writes _RESUME.json atomically before AND after every line, and respects --skip-line-ids to skip completed work on resume. Plan 07's orchestrator can import the same types to read state for its pre-spawn decisions.
+  </done>
+</task>
+
 </tasks>
 
 <threat_model>
@@ -712,6 +1217,7 @@ Commit: `author-06: add duration-anomaly detector + author-07 --verify-audio STT
 | Dialogue file pair → bake output | D-08 validator catches cipher/plain drift before any API spend |
 | Short-line bake → Google Cloud TTS | GOOGLE_CLOUD_TTS_API_KEY sent as `?key=` query param; must never appear in logs |
 | --verify-audio → Groq Whisper | GROQ_API_KEY sent as Bearer; ritual text sent as transcription input |
+| _RESUME.json file ↔ build-mram process / orchestrator | crash-window consistency depends on atomic rename |
 
 ## STRIDE Threat Register
 
@@ -721,14 +1227,16 @@ Commit: `author-06: add duration-anomaly detector + author-07 --verify-audio STT
 | T-03-05 | Information Disclosure | GOOGLE_CLOUD_TTS_API_KEY logged to stdout during error path | mitigate | googleTtsBakeCall() redacts `?key=<value>` via `.replace(/[?&]key=[^&"'\s]*/g, "?key=REDACTED")` before throwing. Body-slice limited to 500 chars to bound leak surface. |
 | T-03-06 | Information Disclosure | --verify-audio sends ritual dialogue text to Groq Whisper → data minimization concern | mitigate | Opt-in flag, default off, documented in header JSDoc per D-11. Shannon explicitly enables on the final pre-ship pass per ritual (typically 1 run per ritual, ~155 lines × ~$0.000065 = ~$0.01). Transcription request goes only to Groq (existing Phase 2 provider; already handles ritual audio via /api/transcribe). |
 | T-03-04b | Tampering | voice-cast scene preamble leaks into short-line Google TTS audio (Pitfall 4) | mitigate | googleTtsBakeCall() sends `input: { text }` only — no preamble, no style directive. Pitfall 4 in RESEARCH.md explicitly flags this. Additional guard: short-line branch does NOT read `preambleByRole` or `line.style`. |
+| T-03-10 | Tampering | partial _RESUME.json write (power loss mid-write) → unreadable state file on resume | mitigate | writeResumeStateAtomic uses tmp+rename (`fs.renameSync` is atomic on POSIX within the same directory). A crash DURING writeFileSync leaves the OLD _RESUME.json intact; a crash AFTER writeFileSync but BEFORE renameSync leaves the OLD file intact plus an orphan .tmp (readResumeState never reads .tmp). Plan 07's orchestrator treats unreadable state as "start fresh" rather than auto-delete (safer — preserves forensic evidence). |
 </threat_model>
 
 <verification>
 - `npx tsc --noEmit` — exits 0.
 - `npm run build` — exits 0.
-- `npx vitest run --no-coverage` — full suite exits 0 (no new tests in this plan; orchestrator-level tests land in Plan 07).
-- Grep assertions (acceptance_criteria above) confirm all four gates wired.
-- Integration smoke test (manual, during execution): run `npx tsx scripts/build-mram-from-dialogue.ts` against one small test ritual and verify validator runs before API calls, short lines get Google audio, and duration anomaly detector produces no false positives on a 3-5 line ritual (since samples.length < 30 → skip per Pitfall 6).
+- `npx vitest run --no-coverage` — full suite exits 0 (new bake-helpers.test.ts adds 7+ tests; orchestrator-level tests land in Plan 07).
+- `npx vitest run --no-coverage scripts/__tests__/bake-helpers.test.ts` — 7+ passing tests covering the ResumeState helpers.
+- Grep assertions (acceptance_criteria above) confirm all five gates wired.
+- Integration smoke test (manual, during execution): run `npx tsx scripts/build-mram-from-dialogue.ts --resume-state-path /tmp/rs.json --ritual-slug test-ritual` against one small test ritual and (a) verify validator runs before API calls, (b) short lines get Google audio, (c) `_RESUME.json` is written after every line with the lineId appearing in completedLineIds, (d) duration anomaly detector produces no false positives on a 3-5 line ritual (since samples.length < 30 → skip per Pitfall 6).
 </verification>
 
 <success_criteria>
@@ -736,15 +1244,20 @@ Commit: `author-06: add duration-anomaly detector + author-07 --verify-audio STT
 - Lines shorter than MIN_BAKE_LINE_CHARS route to googleTtsBakeCall() and produce embedded audio (no more silent drop).
 - After each rendered line (Gemini or Google), addAndCheckAnomaly() runs; first 30 lines per ritual skip the check; subsequent lines fail the bake on >3× or <0.3× median ratio.
 - --verify-audio flag collects per-line word-diff counts and prints a warn-only summary at the end; never fails the bake.
+- `scripts/lib/resume-state.ts` exists with exported `ResumeState` interface + `readResumeState` + `writeResumeStateAtomic`.
+- `build-mram-from-dialogue.ts` accepts `--resume-state-path`, `--ritual-slug`, `--skip-line-ids` CLI args; writes `_RESUME.json` atomically after every completed line (inFlightLineIds → completedLineIds).
+- `--skip-line-ids` skips matching lineIds entirely (no render, no embed, no anomaly mutation).
 - Neither GOOGLE_CLOUD_TTS_API_KEY nor GROQ_API_KEY appears in any error path output.
-- Full test suite still green.
+- Full test suite still green; new `scripts/__tests__/bake-helpers.test.ts` adds 7+ passing tests for the resume-state helpers.
 </success_criteria>
 
 <output>
 After completion, create `.planning/phases/03-authoring-throughput/03-06-SUMMARY.md` documenting:
-- All four gates wired with exact line references added to build-mram-from-dialogue.ts
+- All five gates wired with exact line references added to build-mram-from-dialogue.ts
 - The GOOGLE_ROLE_VOICES mapping used (source: src/lib/tts-cloud.ts:288-337)
+- The new scripts/lib/resume-state.ts module shape (ResumeState interface + exports)
 - Measured duration-anomaly threshold behavior on a sample bake (if Shannon ran one — else note "to be measured in Phase 4")
 - Confirmation that --verify-audio is opt-in and never hard-fails
-- Commit SHAs for both commits
+- Confirmation that a sample line-level _RESUME.json write round-trips through readResumeState cleanly
+- Commit SHAs for all three commits
 </output>
