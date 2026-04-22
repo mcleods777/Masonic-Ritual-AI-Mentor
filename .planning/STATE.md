@@ -1,6 +1,6 @@
 # State: Masonic Ritual AI Mentor — v1 Invited-Lodge Milestone
 
-**Last updated:** 2026-04-21 (Phase 2 planned; 9 plans ready to execute)
+**Last updated:** 2026-04-21 (Phase 2 shipped — PR #68)
 
 ## Project Reference
 
@@ -13,16 +13,16 @@
 ## Current Position
 
 **Milestone:** v1 invited-lodge
-**Phase:** Phase 2 planned (9 plans across 8 waves)
-**Plan:** 9 PLAN.md files ready
-**Status:** Phase 1 code-complete + 2 UAT pending; Phase 2 ready for `/gsd-execute-phase 2`
-**Progress:** 1/7 phases complete
+**Phase:** Phase 2 SHIPPED (PR #68 open against `main`)
+**Plan:** 9/9 complete (all SUMMARYs landed)
+**Status:** Phase 2 code-complete + 4 UAT passed + 4 UAT blocked (real-use-pending); Phase 1 UAT: 2 items still deferred
+**Progress:** 2/7 phases shipped (1 merged, 1 PR open)
 
 ```
-[██░░░░░░░░░░░░░░░░░░] 14% (1/7 phases)
+[█████░░░░░░░░░░░░░░░] 29% (2/7 phases)
 ```
 
-**Next action:** `/gsd-execute-phase 2` to run 9 plans in wave order (W1: 01 audit-log infra → W2: 02 rate-limit + paid-route-guard → W3: 05 client-token → W4: 08 kill-switch UX → W5: 03 wire guard into 9 paid routes → W6: 09 defense-in-depth tests → W7: 04 cron + Resend + lookup CLI → W8: 06 session ceiling + 07 wake-lock parallel). Per CONTEXT D-21, create a new `gsd/phase-2-safety-floor` branch from the current `gsd/phase-1-pre-invite-hygiene` tip before code changes. The 2 deferred Phase 1 UAT items remain open (do not block Phase 2 execution).
+**Next action:** Merge PR #68 (https://github.com/mcleods777/Masonic-Ritual-AI-Mentor/pull/68) when CI passes, then `/gsd-progress` to route to Phase 3 (Authoring Throughput). Amanda is actively using the production deploy on iPhone Safari as of 2026-04-21; Resend-domain-unverified bug caught + fixed (`masonicmentor.app` now verified with Resend; `MAGIC_LINK_FROM_EMAIL=mentor@masonicmentor.app`).
 
 ## Phase Map
 
