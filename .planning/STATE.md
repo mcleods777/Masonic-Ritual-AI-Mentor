@@ -1,6 +1,6 @@
 # State: Masonic Ritual AI Mentor — v1 Invited-Lodge Milestone
 
-**Last updated:** 2026-04-21 (Phase 2 shipped — PR #68)
+**Last updated:** 2026-04-22 (Phase 2 merged; masonicmentor.app custom domain live)
 
 ## Project Reference
 
@@ -13,16 +13,25 @@
 ## Current Position
 
 **Milestone:** v1 invited-lodge
-**Phase:** Phase 2 SHIPPED (PR #68 open against `main`)
-**Plan:** 9/9 complete (all SUMMARYs landed)
-**Status:** Phase 2 code-complete + 4 UAT passed + 4 UAT blocked (real-use-pending); Phase 1 UAT: 2 items still deferred
-**Progress:** 2/7 phases shipped (1 merged, 1 PR open)
+**Phase:** Phase 2 MERGED to main (PR #68 → merge commit `d2e02cc`, 2026-04-22)
+**Plan:** 9/9 complete
+**Status:** Phase 2 live in production; Amanda actively using iPhone Safari flow; 4 UAT passed + 4 blocked (real-use-pending); Phase 1 UAT: 2 items still deferred
+**Progress:** 2/7 phases shipped
 
 ```
 [█████░░░░░░░░░░░░░░░] 29% (2/7 phases)
 ```
 
-**Next action:** Merge PR #68 (https://github.com/mcleods777/Masonic-Ritual-AI-Mentor/pull/68) when CI passes, then `/gsd-progress` to route to Phase 3 (Authoring Throughput). Amanda is actively using the production deploy on iPhone Safari as of 2026-04-21; Resend-domain-unverified bug caught + fixed (`masonicmentor.app` now verified with Resend; `MAGIC_LINK_FROM_EMAIL=mentor@masonicmentor.app`).
+**Production URLs (both serving Phase 2 code):**
+- https://masonicmentor.app (custom domain, TLS auto-provisioned)
+- https://masonic-ritual-ai-mentor.vercel.app (Vercel alias, kept)
+
+**LODGE_ALLOWLIST** (8 pilot addresses, production-live):
+mcleods777@gmail.com, ajw71681@gmail.com (Amanda), wadeburger@rocketmail.com, bslashstewart@gmail.com, hagiller@gmail.com, flynmcgilvray93@gmail.com, hellostevenbecker@msn.com (note: msn deliverability caveat — may need gmail swap if reports inbox issues), justincopeland67@gmail.com
+
+**Resend sending domain:** `masonicmentor.app` verified via Cloudflare DNS (DKIM+SPF+DMARC); `MAGIC_LINK_FROM_EMAIL=mentor@masonicmentor.app`.
+
+**Next action:** Pause / new session. Route to Phase 3 (Authoring Throughput — AUTHOR-01..10) via `/gsd-progress` when ready. Amanda's naturally using the app will passively validate the 4 blocked Phase 2 UAT items (client-token refresh, wake-lock 30min, session ceiling, iPhone Private Relay long-tail).
 
 ## Phase Map
 
