@@ -81,7 +81,7 @@ Plans:
   7. Shannon can scrub baked lines in a browser against `localhost:8883` before re-encrypting a `.mram`
 **Plans**: 8 plans
 Plans:
-- [ ] 03-01-deps-and-scaffolding-PLAN.md — wave 0: install p-limit/music-metadata/fake-indexeddb + gitignore + wave-0 test scaffolds
+- [x] 03-01-deps-and-scaffolding-PLAN.md — wave 0: install p-limit/music-metadata/fake-indexeddb + gitignore + wave-0 test scaffolds (2026-04-23, commits 77c07c0 + 73e350c)
 - [ ] 03-02-idb-schema-PLAN.md — AUTHOR-10: extract idb-schema.ts single source of truth + feedbackTraces store + dual-open test
 - [ ] 03-03-dev-guard-PLAN.md — D-15: extract shared dev-guard.ts + refactor /author/page.tsx to use isDev()
 - [ ] 03-04-author-validation-PLAN.md — AUTHOR-05 D-08: add bake-band word-ratio hard-fail to cipher/plain parity validator

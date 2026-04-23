@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-04-22T13:39:12.407Z"
+last_updated: "2026-04-23T15:01:09.493Z"
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 24
-  completed_plans: 16
-  percent: 67
+  completed_plans: 17
+  percent: 71
 ---
 
 # State: Masonic Ritual AI Mentor — v1 Invited-Lodge Milestone
@@ -27,12 +27,12 @@ progress:
 ## Current Position
 
 Phase: 03 (Authoring Throughput) — EXECUTING
-Plan: 1 of 8
+Plan: 2 of 8 (Plan 01 complete: commits `77c07c0` + `73e350c`; SUMMARY at `.planning/phases/03-authoring-throughput/03-01-SUMMARY.md`)
 **Milestone:** v1 invited-lodge
 **Phase:** Phase 2 MERGED to main (PR #68 → merge commit `d2e02cc`, 2026-04-22)
-**Plan:** 9/9 complete
+**Plan:** Phase 2 9/9 complete; Phase 3 1/8 complete
 **Status:** Executing Phase 03
-**Progress:** 2/7 phases shipped
+**Progress:** [███████░░░] 71%
 
 ```
 [█████░░░░░░░░░░░░░░░] 29% (2/7 phases)
@@ -48,7 +48,7 @@ mcleods777@gmail.com, ajw71681@gmail.com (Amanda), wadeburger@rocketmail.com, bs
 
 **Resend sending domain:** `masonicmentor.app` verified via Cloudflare DNS (DKIM+SPF+DMARC); `MAGIC_LINK_FROM_EMAIL=mentor@masonicmentor.app`.
 
-**Next action:** Pause / new session. Route to Phase 3 (Authoring Throughput — AUTHOR-01..10) via `/gsd-progress` when ready. Amanda's naturally using the app will passively validate the 4 blocked Phase 2 UAT items (client-token refresh, wake-lock 30min, session ceiling, iPhone Private Relay long-tail).
+**Next action:** Phase 3 Plan 03-02 (idb-schema extraction, AUTHOR-10). Plan 03-01 landed on `gsd/phase-3-authoring-throughput` — three deps installed (p-limit/music-metadata/fake-indexeddb), bake-cache dir+gitignore plumbed, 7 Wave 0 test scaffolds committed, vitest config updated to discover `scripts/__tests__/`. Plans 02-08 can run; no blockers.
 
 ## Phase Map
 
@@ -83,6 +83,8 @@ mcleods777@gmail.com, ajw71681@gmail.com (Amanda), wadeburger@rocketmail.com, bs
 | `mentor-v1` is the default variant; `roast-v1` is hidden A/B-only | Research convergence: roast persona appears to BE the quality gap | Research SUMMARY.md |
 | Defer Upstash/Redis migration | Pilot scale (≤10 lodges) doesn't justify; in-memory with documented swap path | Research STACK.md |
 | Reject third-party LLM body-observability for v1 | Langfuse/Helicone/LangSmith ingest full prompt+completion — even 1-2 expected ritual words violates the client-only data plane invariant | Research ARCHITECTURE.md |
+| Phase 3 gitignore uses glob form `rituals/_bake-cache/*` + `!rituals/_bake-cache/.gitignore` | Plain directory form would ignore the nested self-documenting .gitignore the same decision D-01 asks to track; glob form satisfies both layers of the belt-and-suspenders pattern | Plan 03-01 execution |
+| Phase 3 vitest.config.ts include glob extended to `scripts/**/*.test.{ts,tsx}` | Plans 05-08 put their test scaffolds under `scripts/__tests__/`; without this entry, vitest silently filters them out even when passed as explicit file args | Plan 03-01 execution |
 
 ### Open Questions / Todos
 
@@ -110,9 +112,9 @@ None.
 
 ## Session Continuity
 
-**Last significant action:** Phase 1 executed via `/gsd-execute-phase 1` on 2026-04-21. All 7 HYGIENE plans landed on branch `gsd/phase-1-pre-invite-hygiene` (13 commits: 7 `hygiene-NN:` + 5 `docs(01-NN):` metadata + 1 `test(01):` UAT). Verifier returned `human_needed` — 5/7 ✓ VERIFIED (HYGIENE-01, 02, 03, 04, 06), 2/7 ⏸ DEFERRED (HYGIENE-05 iPhone test, HYGIENE-07 runbook rehearsal). Shannon approved phase close on 2026-04-21. `01-HUMAN-UAT.md` tracks the 2 deferred items.
+**Last significant action:** Phase 3 Plan 01 (deps + scaffolding) executed on 2026-04-23. Two commits on `gsd/phase-3-authoring-throughput`: `77c07c0` installed p-limit@7.3.0 + music-metadata@11.12.3 + fake-indexeddb@6.2.5 and plumbed `rituals/_bake-cache/` with both root + nested gitignore layers; `73e350c` scaffolded seven Wave 0 RED-with-todo test files across `src/lib/__tests__/` and `scripts/__tests__/` and extended `vitest.config.ts` `include` glob to discover the new `scripts/__tests__/` directory. Two Rule-3 deviations (vitest include glob extension, `@ts-expect-error` on `fake-indexeddb/auto` import) both folded into Task 2 commit; documented in `03-01-SUMMARY.md`. Mid-flight branch-checkout interference (external process switched to `docs/pilot-email-banner-no-select` and back) recovered via cherry-pick + `git update-ref` to restore docs/pilot... to its origin tip — no work lost.
 
-**Resumption cue:** Next action: `/gsd-discuss-phase 2` to begin Phase 2 (Safety Floor — SAFETY-01..09). The 2 deferred UAT items run at Shannon's pacing; they do NOT block Phase 2 planning or execution, but MUST close before outside-lodge invitations.
+**Resumption cue:** Next action: Plan 03-02 (idb-schema extraction, AUTHOR-10). Plan 02's scaffold test `src/lib/__tests__/idb-schema.test.ts` already exists with correct `@vitest-environment jsdom` pragma and 3 `it.todo()` markers; Plan 02 turns the todos into real assertions against the new `src/lib/idb-schema.ts` module. `fake-indexeddb` is installed. No blockers.
 
 **Critical context for next agent:**
 
@@ -131,3 +133,4 @@ None.
 *Phase 1 executed: 2026-04-21 (7/7 plans landed, 5/7 verified + 2/7 deferred-human)*
 *Phase 2 context gathered: 2026-04-21*
 *Phase 2 planned: 2026-04-21 (9 plans, 8 waves, checker iteration 2 passed)*
+*Phase 3 Plan 01 executed: 2026-04-23 (2/2 tasks, 2 commits, 8 files created, 4 modified, ~10min)*
