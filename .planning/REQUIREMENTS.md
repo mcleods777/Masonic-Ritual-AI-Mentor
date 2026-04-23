@@ -73,7 +73,7 @@ Solo-author tooling so Shannon can bake five rituals worth of content without sp
 - [ ] **AUTHOR-05**: `src/lib/author-validation.ts` cipher/plain parity validator enforces same speaker, same action tags, and a word-count ratio band per line — bake refuses on failure
 - [ ] **AUTHOR-06**: Audio-duration-anomaly detector flags any baked line whose duration is implausibly short or long given its text length (catches voice-cast preamble leak into the audio)
 - [ ] **AUTHOR-07**: Optional STT round-trip diff per line in bake pipeline — cheap last-line-of-defense against audio that doesn't match the text
-- [ ] **AUTHOR-08**: `scripts/preview-bake.ts` localhost-only server streams cached Opus for in-editor scrubbing before re-encrypting `.mram`; dev-guard identical to `/author/_guard.ts`
+- [ ] **AUTHOR-08**: `scripts/preview-bake.ts` localhost-only server streams cached Opus for in-editor scrubbing before re-encrypting `.mram`; dev-guard identical to `/author/_guard.ts` (Plan 03-03 landed the dev-guard primitive at `src/lib/dev-guard.ts` + rewired `/author/page.tsx` — commits 4eda2b4 + a61a47d; Plan 03-08 will land the preview-bake.ts server that imports `assertDevOnly()` from it)
 - [ ] **AUTHOR-09**: `p-limit` concurrency cap on parallel Gemini TTS calls in `build-mram-from-dialogue.ts`
 - [x] **AUTHOR-10**: `src/lib/idb-schema.ts` extracted as the single source of truth for `DB_VERSION` shared between `storage.ts` and `voice-storage.ts`; also houses the new `feedbackTraces` store (Phase 3 Plan 02, commits 43774bd + a90ffe2)
 
@@ -200,7 +200,7 @@ Each v1 requirement maps to exactly one phase. Populated by `gsd-roadmapper` on 
 | AUTHOR-05 | Phase 3 | Pending |
 | AUTHOR-06 | Phase 3 | Pending |
 | AUTHOR-07 | Phase 3 | Pending |
-| AUTHOR-08 | Phase 3 | Pending |
+| AUTHOR-08 | Phase 3 | Partial (Plan 03-03 landed dev-guard primitive; Plan 03-08 will land preview-bake.ts server) |
 | AUTHOR-09 | Phase 3 | Pending |
 | AUTHOR-10 | Phase 3 | Complete (03-02, 2026-04-23) |
 | ADMIN-01 | Phase 6 | Pending |

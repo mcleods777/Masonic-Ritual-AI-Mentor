@@ -83,7 +83,7 @@ Plans:
 Plans:
 - [x] 03-01-deps-and-scaffolding-PLAN.md — wave 0: install p-limit/music-metadata/fake-indexeddb + gitignore + wave-0 test scaffolds (2026-04-23, commits 77c07c0 + 73e350c)
 - [x] 03-02-idb-schema-PLAN.md — AUTHOR-10: extract idb-schema.ts single source of truth + feedbackTraces store + dual-open test (2026-04-23, commits 43774bd + a90ffe2)
-- [ ] 03-03-dev-guard-PLAN.md — D-15: extract shared dev-guard.ts + refactor /author/page.tsx to use isDev()
+- [x] 03-03-dev-guard-PLAN.md — D-15: extract shared dev-guard.ts + refactor /author/page.tsx to use isDev()
 - [ ] 03-04-author-validation-PLAN.md — AUTHOR-05 D-08: add bake-band word-ratio hard-fail to cipher/plain parity validator
 - [ ] 03-05-cache-migration-PLAN.md — AUTHOR-01 + AUTHOR-03: bump cache key to v3, add modelId, move cache to rituals/_bake-cache/, one-shot migration, lock DEFAULT_MODELS order
 - [ ] 03-06-bake-integration-PLAN.md — AUTHOR-04/05/06/07: wire validator gate + short-line Google TTS + duration-anomaly detector + --verify-audio into build-mram-from-dialogue.ts

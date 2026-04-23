@@ -3,18 +3,18 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-04-23T16:58:36.233Z"
+last_updated: "2026-04-23T18:27:11.245Z"
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 24
-  completed_plans: 18
-  percent: 75
+  completed_plans: 19
+  percent: 79
 ---
 
 # State: Masonic Ritual AI Mentor — v1 Invited-Lodge Milestone
 
-**Last updated:** 2026-04-23 (Phase 3 Plan 02 landed — idb-schema extracted)
+**Last updated:** 2026-04-23 (Phase 3 Plan 03 landed — dev-guard.ts extracted)
 
 ## Project Reference
 
@@ -27,12 +27,12 @@ progress:
 ## Current Position
 
 Phase: 03 (Authoring Throughput) — EXECUTING
-Plan: 3 of 8 (Plans 01 + 02 complete; SUMMARIES at `.planning/phases/03-authoring-throughput/03-01-SUMMARY.md` + `03-02-SUMMARY.md`)
+Plan: 4 of 8 (Plans 01 + 02 + 03 complete; SUMMARIES at `.planning/phases/03-authoring-throughput/03-01-SUMMARY.md`, `03-02-SUMMARY.md`, `03-03-SUMMARY.md`)
 **Milestone:** v1 invited-lodge
 **Phase:** Phase 2 MERGED to main (PR #68 → merge commit `d2e02cc`, 2026-04-22)
-**Plan:** Phase 2 9/9 complete; Phase 3 2/8 complete
+**Plan:** Phase 2 9/9 complete; Phase 3 3/8 complete
 **Status:** Executing Phase 03
-**Progress:** [████████░░] 75%
+**Progress:** [████████░░] 79%
 
 ```
 [█████░░░░░░░░░░░░░░░] 29% (2/7 phases)
@@ -48,7 +48,7 @@ mcleods777@gmail.com, ajw71681@gmail.com (Amanda), wadeburger@rocketmail.com, bs
 
 **Resend sending domain:** `masonicmentor.app` verified via Cloudflare DNS (DKIM+SPF+DMARC); `MAGIC_LINK_FROM_EMAIL=mentor@masonicmentor.app`.
 
-**Next action:** Phase 3 Plan 03-03 (dev-guard extraction, D-15). Plan 03-02 landed on `gsd/phase-3-authoring-throughput` — `src/lib/idb-schema.ts` is now the single source of truth for DB_NAME, DB_VERSION=5, all 6 store constants, shared openDB(), and the PII-free FeedbackTrace interface. `storage.ts` and `voice-storage.ts` both import from it (lockstep dance gone). 414 tests passing, 0 regressions. Plans 03-08 can run; no blockers.
+**Next action:** Phase 3 Plan 03-04 (author-validation bake-band, D-08). Plan 03-03 landed on `gsd/phase-3-authoring-throughput` — `src/lib/dev-guard.ts` is now the single source of truth for dev-only refusal semantics (D-15). Exports `isDev()` (non-throwing, for UI) + `assertDevOnly()` (throws with `[DEV-GUARD]` prefix in production, for Node scripts). `/author/page.tsx` rewired to use `isDev()`; inline NODE_ENV check removed; banner JSX byte-identical. 422 tests passing (+8 dev-guard tests vs Plan 02 baseline), 0 regressions, build clean. Plans 03-04 through 03-08 can run; no blockers.
 
 ## Phase Map
 
@@ -87,6 +87,8 @@ mcleods777@gmail.com, ajw71681@gmail.com (Amanda), wadeburger@rocketmail.com, bs
 | Phase 3 vitest.config.ts include glob extended to `scripts/**/*.test.{ts,tsx}` | Plans 05-08 put their test scaffolds under `scripts/__tests__/`; without this entry, vitest silently filters them out even when passed as explicit file args | Plan 03-01 execution |
 | `voice-storage.ts` re-exports `AUDIO_CACHE_STORE` after migration to `idb-schema.ts` | `src/lib/tts-cloud.ts:1036-1040` imports `AUDIO_CACHE_STORE` from voice-storage pre-D-16; preserving the re-export avoids a grep-and-replace across the codebase while D-16 still eliminates the inline constant. | Plan 03-02 execution |
 | Plan 02 test case 3 (consumer parity) simplified to repeated-openDB() | Post-Task-2 both `storage.ts` and `voice-storage.ts` call the same `openDB()` — a storage-first-then-voice-first dance would be tautological. Repeated-open still proves the idempotent-upgrade invariant. | Plan 03-02 execution |
+| Plan 03-03 used `@/lib/dev-guard` alias import in `/author/page.tsx` | Matches existing `@/lib/dialogue-to-mram` + `@/lib/mram-format` imports at lines 29-30; alias resolves cleanly in Next.js build; no fallback to relative path needed. | Plan 03-03 execution |
+| dev-guard.ts: two-flavor API (`isDev` non-throwing for UI, `assertDevOnly` throwing for scripts) | Call-site ergonomics differ: React components render a graceful banner (need boolean); Node scripts should fail-fast at module load (need throw). Reading `process.env.NODE_ENV` at call time (not import time) lets tests mutate env between cases. | Plan 03-03 execution |
 
 ### Open Questions / Todos
 
@@ -114,9 +116,9 @@ None.
 
 ## Session Continuity
 
-**Last significant action:** Phase 3 Plan 02 (idb-schema extraction, AUTHOR-10) executed on 2026-04-23. Two commits on `gsd/phase-3-authoring-throughput`: `43774bd` created `src/lib/idb-schema.ts` (single source of truth: DB_NAME, DB_VERSION=5, 6 store constants, `openDB()`, `FeedbackTrace` interface) and filled the Wave 0 `idb-schema.test.ts` scaffold with 5 passing tests (DB_VERSION constant, all-6-stores-alphabetical, repeated-open parity, v4→v5 data-preserving migration, FeedbackTrace PII-shape check); `a90ffe2` refactored `src/lib/storage.ts` and `src/lib/voice-storage.ts` to import from `./idb-schema` (removed ~120 lines of duplicated inline DB constants + inline openDB + obsolete lockstep comment). voice-storage re-exports `AUDIO_CACHE_STORE` to preserve the pre-D-16 import path used by `tts-cloud.ts`. Full suite: 414 passing + 58 todo; build clean; zero regressions. One Rule-3 deviation (reworded a comment to avoid literal `indexedDB.open(` grep false-positive) documented in `03-02-SUMMARY.md`.
+**Last significant action:** Phase 3 Plan 03 (dev-guard extraction, AUTHOR-08 / D-15) executed on 2026-04-23. Two commits on `gsd/phase-3-authoring-throughput`: `4eda2b4` created `src/lib/dev-guard.ts` (33 lines, exports `isDev()` non-throwing + `assertDevOnly()` throwing with `[DEV-GUARD]` prefix) and filled the Wave 0 `dev-guard.test.ts` scaffold with 8 passing tests (4 `isDev()` + 4 `assertDevOnly()` covering dev/test/prod/unset NODE_ENV); `a61a47d` rewired `src/app/author/page.tsx` to import `isDev` from `@/lib/dev-guard` and changed `if (isProduction)` → `if (!isDev())`, removing the inline `const isProduction = process.env.NODE_ENV === "production"` line. Banner JSX preserved byte-for-byte (className, whitespace, text verbatim). Plan 08 (preview-bake.ts) now has a ready-to-import `assertDevOnly()`. Full suite: 422 passing + 54 todo; build clean; zero regressions. Zero deviations — plan executed exactly as written.
 
-**Resumption cue:** Next action: Plan 03-03 (dev-guard extraction, D-15). The Wave 0 scaffold `src/lib/__tests__/dev-guard.test.ts` is ready; Plan 03-03 will create `src/lib/dev-guard.ts` with `isDev()` / `assertDevOnly()` exports, then rewire `src/app/author/page.tsx:220-233` to use `isDev()`. No blockers.
+**Resumption cue:** Next action: Plan 03-04 (author-validation bake-band, D-08). Wave 0 scaffolding is already in place from Plan 01. No blockers.
 
 **Critical context for next agent:**
 
@@ -137,3 +139,4 @@ None.
 *Phase 2 planned: 2026-04-21 (9 plans, 8 waves, checker iteration 2 passed)*
 *Phase 3 Plan 01 executed: 2026-04-23 (2/2 tasks, 2 commits, 8 files created, 4 modified, ~10min)*
 *Phase 3 Plan 02 executed: 2026-04-23 (2/2 tasks, 2 commits, 1 file created, 3 modified, ~5min)*
+*Phase 3 Plan 03 executed: 2026-04-23 (2/2 tasks, 2 commits, 1 file created, 2 modified, ~8min)*
