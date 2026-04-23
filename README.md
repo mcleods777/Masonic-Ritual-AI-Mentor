@@ -145,6 +145,15 @@ npx tsx scripts/build-mram-from-dialogue.ts \
 
 It reads two parallel dialogue files (plain + cipher) with matching speaker structure, plus an optional `{prefix}-styles.json` sidecar with per-line Gemini style tags. Passphrase is prompted interactively (never accepted on the command line).
 
+**Optional expiration flags** (also work on the legacy `scripts/build-mram.ts`):
+
+| Flag | Description |
+|------|-------------|
+| `--expires <ISO-date>` | Hard expiration timestamp (e.g. `2026-12-31` or `2026-12-31T23:59:59Z`). After this moment the file will not decrypt, even with the correct passphrase. |
+| `--expires-in <duration>` | Relative expiration from build time. Supports `d` (days), `h` (hours), `m` (minutes): `90d`, `72h`, `45m`. |
+
+The expiration timestamp lives inside the encrypted payload and is covered by AES-GCM's auth tag, so it cannot be edited without the lodge passphrase. Expired files show a specific "request a fresh .mram file from your lodge" message on upload instead of a passphrase retry. Files built without an `--expires*` flag never expire — the feature is opt-in.
+
 **With pre-rendered audio (recommended for pilot distribution):**
 
 ```bash
@@ -214,6 +223,47 @@ Runs ea-opening, ea-initiation, and ea-closing back-to-back with a single passph
 **Voice maps:** [`docs/VOICE-MAPS.md`](./docs/VOICE-MAPS.md) is the canonical reference for which voice each Masonic role gets on every supported TTS engine, plus the gender guardrails that keep female voices out of ritual/lecture audio.
 
 Legacy `build-mram.ts` (single-file paired format) still works for older ritual sources.
+
+### Rotating .mram Files (new passphrase or new expiry)
+
+When a .mram file expires or the lodge passphrase is being changed, `rotate-mram.ts` re-encrypts an existing file with a new passphrase and/or new expiry. It generates a fresh salt and IV every rotation.
+
+```bash
+npx tsx scripts/rotate-mram.ts <input.mram> <output.mram> [options]
+```
+
+**Passphrase options (prefer `*-file` forms):**
+
+| Flag | Description |
+|------|-------------|
+| `--old-pass-file <path>` | Read current passphrase from a file (must be `chmod 600`). |
+| `--new-pass-file <path>` | Read new passphrase from a file (must be `chmod 600`). |
+| `--old-pass <pass>` | Current passphrase on CLI. **INSECURE** — leaks to `ps` and shell history. Use `--old-pass-file` for anything but one-off local testing. |
+| `--new-pass <pass>` | New passphrase on CLI. Same caveat. |
+
+If you pass neither, the script prompts interactively. On a TTY the input is masked as `*`.
+
+**Expiry options:**
+
+| Flag | Description |
+|------|-------------|
+| `--expires <ISO-date>` | Set a new hard expiration timestamp. |
+| `--expires-in <duration>` | Set a new expiration relative to now: `90d`, `72h`, `45m`. |
+| `--no-expires` | Remove the `expiresAt` field entirely. |
+| `--keep-expires` | Keep the existing `expiresAt` value (default). |
+
+Exactly one expiry flag may be passed. Rotation intentionally bypasses the expiration check on read — reissuing an already-expired file is the main use case — and logs the previous expiry status so the operator sees what was unlocked. Input and output paths must differ so a crash mid-rotate cannot destroy the original.
+
+**Example (recommended, no passphrase on the command line):**
+
+```bash
+echo -n "old123" > /tmp/old.pass && chmod 600 /tmp/old.pass
+echo -n "new456" > /tmp/new.pass && chmod 600 /tmp/new.pass
+npx tsx scripts/rotate-mram.ts rituals/ea-opening.mram out.mram \
+    --old-pass-file /tmp/old.pass --new-pass-file /tmp/new.pass \
+    --expires-in 90d
+shred -u /tmp/old.pass /tmp/new.pass
+```
 
 ---
 

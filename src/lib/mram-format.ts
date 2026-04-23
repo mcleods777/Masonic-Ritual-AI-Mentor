@@ -35,6 +35,16 @@ export interface MRAMMetadata {
   ceremony: string;
   checksum: string; // SHA-256 of JSON.stringify(lines)
   /**
+   * Optional expiration timestamp (ISO 8601 string, e.g. "2026-12-31T23:59:59Z").
+   * When present, `decryptMRAM` refuses to decrypt the file after this moment.
+   *
+   * Protection model: the field lives inside the authenticated ciphertext and
+   * is covered by AES-GCM's auth tag, so it cannot be edited without the
+   * passphrase. Anyone who knows the passphrase can of course re-encrypt with
+   * a new date, so this is a "do the right thing" gate rather than DRM.
+   */
+  expiresAt?: string;
+  /**
    * Voice cast used when audio was baked into the file (v3+).
    * Keys are role codes ("WM", "SW", ...), values are Gemini prebuilt
    * voice names ("Alnilam", "Charon", ...). When present, the client
@@ -50,6 +60,27 @@ export interface MRAMMetadata {
    * codecs (e.g., "mp3-64k-mono") without breaking old readers.
    */
   audioFormat?: "opus-32k-mono";
+}
+
+// ============================================================
+// Errors
+// ============================================================
+
+/**
+ * Thrown by `decryptMRAM` when the file carries an `expiresAt` metadata field
+ * that is in the past. Distinct from a wrong-passphrase error so callers can
+ * show a specific message.
+ */
+export class MRAMExpiredError extends Error {
+  readonly expiredAt: Date;
+  constructor(expiredAt: Date) {
+    super(
+      `This ritual file expired on ${expiredAt.toISOString()}. ` +
+        `Request a fresh .mram file from your lodge.`
+    );
+    this.name = "MRAMExpiredError";
+    this.expiredAt = expiredAt;
+  }
 }
 
 export interface MRAMSection {
@@ -263,6 +294,20 @@ export async function decryptMRAM(
     throw new Error(
       "Checksum mismatch. The file contents may have been altered."
     );
+  }
+
+  // Enforce expiration if set. Checked AFTER checksum so a corrupted file
+  // always surfaces the integrity error, not a stale date from garbage bytes.
+  if (doc.metadata.expiresAt) {
+    const expiresAt = new Date(doc.metadata.expiresAt);
+    if (Number.isNaN(expiresAt.getTime())) {
+      throw new Error(
+        `Invalid expiresAt value in file metadata: ${doc.metadata.expiresAt}`
+      );
+    }
+    if (expiresAt.getTime() <= Date.now()) {
+      throw new MRAMExpiredError(expiresAt);
+    }
   }
 
   return doc;
