@@ -3,6 +3,7 @@ import { Cinzel, Lato } from "next/font/google";
 import "./globals.css";
 import Navigation from "@/components/Navigation";
 import PilotBanner from "@/components/PilotBanner";
+import DegradedModeBanner from "@/components/DegradedModeBanner";
 
 const cinzel = Cinzel({
   subsets: ["latin"],
@@ -42,6 +43,7 @@ export default function RootLayout({
     <html lang="en" className="dark">
       <body className={`antialiased min-h-screen ${cinzel.variable} ${lato.variable}`}>
         <PilotBanner />
+        <DegradedModeBanner />
         <Navigation />
         <main className="pt-4 md:pt-20 pb-20 md:pb-4 px-4 max-w-5xl mx-auto">
           {children}

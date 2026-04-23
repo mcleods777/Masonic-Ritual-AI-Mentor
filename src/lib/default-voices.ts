@@ -1,46 +1,65 @@
 /**
  * Default voice profiles shipped with the app.
  *
- * These are pre-generated Deepgram Aura-2 male voice samples stored as
- * static files in public/voices/. They load automatically on first visit
- * and serve as Voxtral ref_audio.
+ * Two groups: character voices (rustic/regional) and Deepgram Aura-2 voices
+ * (neutral male). All are stored as static files in public/voices/ and load
+ * automatically on first visit as Voxtral ref_audio.
  *
- * Defaults ship with NO explicit role assignment — the voice-selection
- * logic in tts-cloud.ts falls back to deterministic round-robin across
- * the voice list, keyed by the role's group index. With 7 default voices
- * and 10 role groups, the first 7 officers each get a distinct voice and
- * the remaining three wrap back to the start of the list.
+ * Defaults ship UNASSIGNED — no role is pre-bound to any voice. They sit
+ * in the Voices page as available pool entries. Users can manually assign
+ * one to a role via the Voices page, and the unassigned remainder serves
+ * as the round-robin pool for the Voxtral fallback when Gemini fails.
  *
- * Users can override by recording their own voice and assigning a role on
- * the Voices page. User voices take priority over defaults.
+ * This is the post-pilot model: Gemini is the default playback engine,
+ * Voxtral is a fallback (or per-role override when a Brother records their
+ * own clone). The 15 ship voices give Voxtral something to say while the
+ * Brother decides what to record.
  */
 
 import {
   listVoices,
   saveVoice,
-  assignVoiceRole,
   type LocalVoice,
 } from "./voice-storage";
 
-/** Default voice definitions — all male Aura-2 voices. */
+/**
+ * Default voice definitions — character voices first, then Aura-2.
+ *
+ * `version` is optional. Bump it when the underlying audio file at `/voices/...`
+ * is replaced with a better recording: existing installs will re-download and
+ * overwrite, preserving any role the user assigned. Omit = version 1.
+ */
 const DEFAULT_VOICES = [
-  { name: "Zeus",    file: "/voices/zeus.mp3",    description: "Commanding, deep" },
-  { name: "Orion",   file: "/voices/orion.mp3",   description: "Clear, steady" },
-  { name: "Arcas",   file: "/voices/arcas.mp3",   description: "Measured" },
-  { name: "Orpheus", file: "/voices/orpheus.mp3", description: "Warm" },
-  { name: "Apollo",  file: "/voices/apollo.mp3",  description: "Bright, articulate" },
-  { name: "Hermes",  file: "/voices/hermes.mp3",  description: "Smooth, resonant" },
-  { name: "Atlas",   file: "/voices/atlas.mp3",   description: "Steady, grounded" },
+  { name: "Normal Shannon",        file: "/voices/normal-shannon.wav",       mimeType: "audio/wav",  description: "Shannon, natural delivery",     duration: 10 },
+  { name: "Shannon South African", file: "/voices/shannon-south-african.wav", mimeType: "audio/wav",  description: "Shannon, South African accent", duration: 6 },
+  { name: "Sith Lord Shannon",     file: "/voices/sith-lord-shannon.wav",    mimeType: "audio/wav",  description: "Shannon, commanding Sith tone", duration: 7 },
+  { name: "Crazy German",          file: "/voices/crazy-german.wav",         mimeType: "audio/wav",  description: "German accent, theatrical — short lines only (clone quiets on long lines)" },
+  { name: "Jebidiah",              file: "/voices/jebidiah.wav",             mimeType: "audio/wav",  description: "Rustic, backwoods" },
+  { name: "Old Man",               file: "/voices/old-man.wav",              mimeType: "audio/wav",  description: "Weathered, aged" },
+  { name: "Scottish Man",          file: "/voices/scottish-man.wav",         mimeType: "audio/wav",  description: "Scottish brogue" },
+  { name: "Southern Gentleman",    file: "/voices/southern-gentleman.wav",   mimeType: "audio/wav",  description: "Southern drawl, genteel" },
+  { name: "Zeus",                  file: "/voices/zeus.mp3",                 mimeType: "audio/mpeg", description: "Commanding, deep" },
+  { name: "Orion",                 file: "/voices/orion.mp3",                mimeType: "audio/mpeg", description: "Clear, steady" },
+  { name: "Arcas",                 file: "/voices/arcas.mp3",                mimeType: "audio/mpeg", description: "Measured" },
+  { name: "Orpheus",               file: "/voices/orpheus.mp3",              mimeType: "audio/mpeg", description: "Warm" },
+  { name: "Apollo",                file: "/voices/apollo.mp3",               mimeType: "audio/mpeg", description: "Bright, articulate" },
+  { name: "Hermes",                file: "/voices/hermes.mp3",               mimeType: "audio/mpeg", description: "Smooth, resonant" },
+  { name: "Atlas",                 file: "/voices/atlas.mp3",                mimeType: "audio/mpeg", description: "Steady, grounded" },
 ] as const;
+
+/** Stable id for a default voice, by name. */
+function defaultVoiceId(name: string): string {
+  return `default-${name.toLowerCase()}`;
+}
 
 /** Check if default voices are already loaded in IndexedDB. */
 async function defaultsLoaded(): Promise<boolean> {
   const voices = await listVoices();
-  const names = new Set(voices.map((v) => v.name));
-  return DEFAULT_VOICES.some((d) => names.has(d.name));
+  const ids = new Set(voices.map((v) => v.id));
+  return DEFAULT_VOICES.some((d) => ids.has(defaultVoiceId(d.name)));
 }
 
-/** Fetch an mp3 file and return it as a base64 string. */
+/** Fetch an audio file and return it as a base64 string. */
 async function fetchAsBase64(url: string): Promise<string> {
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`Failed to fetch ${url}: ${resp.status}`);
@@ -61,31 +80,58 @@ async function fetchAsBase64(url: string): Promise<string> {
 export async function ensureDefaultVoices(): Promise<{
   loaded: number;
   skipped: number;
-  migrated: number;
+  refreshed: number;
 }> {
   const existing = await listVoices();
-  const existingNames = new Set(existing.map((v) => v.name));
+  // Index by id so a renamed default is not re-created on next visit, and
+  // version comparison can find the stored entry for a given default.
+  const existingById = new Map(existing.map((v) => [v.id, v]));
 
   let loaded = 0;
   let skipped = 0;
+  let refreshed = 0;
 
   for (const def of DEFAULT_VOICES) {
-    if (existingNames.has(def.name)) {
-      skipped++;
+    const id = defaultVoiceId(def.name);
+    const stored = existingById.get(id);
+    const canonicalVersion = "version" in def ? (def.version as number) : 1;
+
+    if (stored) {
+      const storedVersion = stored.version ?? 1;
+      if (storedVersion >= canonicalVersion) {
+        skipped++;
+        continue;
+      }
+      // Stored version is stale — re-fetch audio and overwrite, preserving
+      // the user's role assignment and any rename.
+      try {
+        const audioBase64 = await fetchAsBase64(def.file);
+        const refreshedVoice: LocalVoice = {
+          ...stored,
+          audioBase64,
+          mimeType: def.mimeType,
+          duration: "duration" in def ? (def.duration as number) : stored.duration,
+          version: canonicalVersion,
+        };
+        await saveVoice(refreshedVoice);
+        refreshed++;
+      } catch (err) {
+        console.warn(`Failed to refresh default voice ${def.name}:`, err);
+      }
       continue;
     }
 
     try {
       const audioBase64 = await fetchAsBase64(def.file);
       const voice: LocalVoice = {
-        id: `default-${def.name.toLowerCase()}`,
+        id,
         name: def.name,
         audioBase64,
-        mimeType: "audio/mpeg",
-        duration: 5,
-        // role intentionally omitted — defaults ship unassigned so the
-        // round-robin fallback handles role → voice mapping.
+        mimeType: def.mimeType,
+        duration: "duration" in def ? (def.duration as number) : 5,
+        role: undefined, // ships unassigned; user assigns via Voices page
         createdAt: 0, // epoch = default voice, distinguishes from user-recorded
+        version: canonicalVersion,
       };
       await saveVoice(voice);
       loaded++;
@@ -94,22 +140,34 @@ export async function ensureDefaultVoices(): Promise<{
     }
   }
 
-  // Migration: earlier versions shipped defaults with explicit role assignments
-  // (WM, SW, JW, ...). Clear those so existing installs also get round-robin.
-  // Only touches default voices (createdAt === 0) — user-recorded voices
-  // (createdAt > 0) keep whatever role the user assigned.
-  let migrated = 0;
-  for (const v of existing) {
-    if (v.createdAt === 0 && v.role) {
-      await assignVoiceRole(v.id, undefined);
-      migrated++;
-    }
-  }
-
-  return { loaded, skipped, migrated };
+  return { loaded, skipped, refreshed };
 }
 
 /** Get the list of default voice names (for UI to mark them). */
 export function getDefaultVoiceNames(): string[] {
   return DEFAULT_VOICES.map((d) => d.name);
+}
+
+/**
+ * Clear role assignments on all default voices, back to unassigned. Useful
+ * if a user wants to reset their setup without deleting the voices.
+ *
+ * User-recorded voices (createdAt > 0) are never touched. Returns the count
+ * of default voices whose role was cleared.
+ */
+export async function resetDefaultVoiceRoles(): Promise<{ changed: number }> {
+  const existing = await listVoices();
+  const byId = new Map(existing.map((v) => [v.id, v]));
+  let changed = 0;
+
+  for (const def of DEFAULT_VOICES) {
+    const id = defaultVoiceId(def.name);
+    const stored = byId.get(id);
+    if (!stored) continue;
+    if (stored.role === undefined) continue;
+    await saveVoice({ ...stored, role: undefined });
+    changed++;
+  }
+
+  return { changed };
 }

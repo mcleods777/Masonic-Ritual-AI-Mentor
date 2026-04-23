@@ -27,6 +27,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+bake.log
 
 # env files
 .env
@@ -65,3 +66,4 @@ files/
 .claude/skills/gstack/.agents/
 .claude/skills/gstack/.factory/
 .gstack/
+.env.vercel-temp

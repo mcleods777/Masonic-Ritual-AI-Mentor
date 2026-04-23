@@ -25,8 +25,9 @@ flowchart TB
     end
 
     subgraph External["External Services (optional)"]
-        Claude["Claude Haiku\nRehearsal feedback\n(plain text only)"]
+        Llama["Llama 3.3 (Groq)\nRehearsal feedback\n(plain text only)"]
         Whisper["Groq Whisper\nSpeech-to-text"]
+        Gemini["Gemini 3.1 Flash TTS\nDefault engine\n(3-model fallback)"]
         Voxtral["Voxtral (Mistral)\nVoice cloning TTS"]
         Deepgram["Deepgram Aura-2\nFast TTS voices"]
         Eleven["ElevenLabs\nPremium TTS voices"]
@@ -34,9 +35,10 @@ flowchart TB
         Kokoro["Kokoro (self-hosted)\nFree TTS"]
     end
 
-    Rehearsal -->|"AI feedback"| Claude
+    Rehearsal -->|"AI feedback"| Llama
     Rehearsal -->|"Speech input"| Whisper
     Voices -->|"Voice cloning"| Voxtral
+    Listen -->|"TTS"| Gemini
     Listen -->|"TTS"| Voxtral
     Listen -->|"TTS"| Deepgram
     Listen -->|"TTS"| Eleven
@@ -74,16 +76,19 @@ Hear the full ceremony read aloud with a unique AI voice for each officer. The s
 ### Progress Tracking
 Track your accuracy over time, see trends, identify persistent trouble spots, and celebrate streaks.
 
-### Voice AI (6 TTS Engines)
+### Voice AI (7 TTS Engines)
 
 | Engine | Type | Voices | Cost |
 |--------|------|--------|------|
-| **Voxtral (Mistral)** | Cloud + voice cloning | Clone any voice from 3s audio | ~$0.016/1K chars |
+| **Gemini 3.1 Flash TTS** *(default)* | Cloud, expressive | Per-role male voices (Alnilam, Charon, Algenib, Fenrir, etc.) with prompt-tag direction | Preview pricing |
+| **Voxtral (Mistral)** | Cloud + voice cloning | Clone any voice from 3s audio; 15 default character voices ship in the pool | ~$0.016/1K chars |
 | **ElevenLabs** | Cloud | 10 distinct male voices | Premium |
 | **Deepgram Aura-2** | Cloud | 7 distinct voices (Zeus, Orion, etc.) | Pay-per-use |
 | **Google Cloud TTS** | Cloud | Neural2 voices with pitch control | Pay-per-use |
 | **Kokoro** | Self-hosted | Multiple voices, free | Free (self-hosted) |
 | **Browser** | Built-in | Pitch/rate differentiation | Free |
+
+Gemini is the default engine. When Gemini hits its preview-tier daily quota, the route silently falls back across `gemini-3.1-flash-tts-preview` → `gemini-2.5-flash-preview-tts` → `gemini-2.5-pro-preview-tts`. If all three Gemini models are throttled, the client falls back to Voxtral (drawing from the 15 default character voices) → Google Cloud Neural2 → browser TTS.
 
 Each engine maps distinct voices to Masonic officer roles:
 
@@ -112,8 +117,10 @@ Each engine maps distinct voices to Masonic officer roles:
 - Voice recordings stored locally in IndexedDB, only sent with TTS requests
 - API keys stay server-side (Next.js API routes)
 - Anthropic does not train on API data
-- No user accounts or tracking
 - .mram file is never stored — only re-encrypted data
+- **Pilot allowlist + magic-link auth** — only emails on `LODGE_ALLOWLIST` get sign-in links; no passwords, no accounts beyond a session cookie
+- **Per-IP and per-email rate limiting** on magic-link issuance (5/hr per IP, 3/hr per email) using `x-vercel-forwarded-for` for trustworthy IP attribution
+- **Strict CSP + security headers** on every response (`X-Frame-Options: DENY`, `frame-ancestors 'none'`, locked `Permissions-Policy`, HSTS preload)
 
 ---
 
@@ -127,30 +134,95 @@ Ritual files use the `.mram` (Masonic Ritual AI Mentor) encrypted format. Each f
 
 ### Building .mram Files
 
+Two build scripts. `build-mram-from-dialogue.ts` is the current recommended path:
+
 ```bash
-npx tsx scripts/build-mram.ts <input.md> <output.mram> [passphrase] [options]
+npx tsx scripts/build-mram-from-dialogue.ts \
+  rituals/{prefix}-dialogue.md \
+  rituals/{prefix}-dialogue-cipher.md \
+  rituals/{prefix}.mram
 ```
 
-**Options:**
+It reads two parallel dialogue files (plain + cipher) with matching speaker structure, plus an optional `{prefix}-styles.json` sidecar with per-line Gemini style tags. Passphrase is prompted interactively (never accepted on the command line).
+
+**Optional expiration flags** (also work on the legacy `scripts/build-mram.ts`):
 
 | Flag | Description |
 |------|-------------|
 | `--expires <ISO-date>` | Hard expiration timestamp (e.g. `2026-12-31` or `2026-12-31T23:59:59Z`). After this moment the file will not decrypt, even with the correct passphrase. |
 | `--expires-in <duration>` | Relative expiration from build time. Supports `d` (days), `h` (hours), `m` (minutes): `90d`, `72h`, `45m`. |
 
-The expiration timestamp lives inside the encrypted payload and is covered by the AES-GCM auth tag, so it cannot be edited without the lodge passphrase. Expired files show a specific "request a fresh .mram file from your lodge" message on upload instead of a passphrase retry. Files built without an `--expires*` flag never expire — the feature is opt-in.
+The expiration timestamp lives inside the encrypted payload and is covered by AES-GCM's auth tag, so it cannot be edited without the lodge passphrase. Expired files show a specific "request a fresh .mram file from your lodge" message on upload instead of a passphrase retry. Files built without an `--expires*` flag never expire — the feature is opt-in.
 
-Input format: a markdown file where each spoken line appears twice — cipher first, then plain:
+**With pre-rendered audio (recommended for pilot distribution):**
 
-```markdown
-### Section Title
-
-WM: * Bro. S.W., p. t. s. y. t. a. p. a. M.
-WM: * Brother Senior Warden, proceed to satisfy yourself that all present are Masons.
-
-SW: * Bros. S. & J.D., p. t. s. y. t. a. p. a. M.
-SW: * Brothers Senior & Junior Deacons, proceed to satisfy yourselves that all present are Masons.
+```bash
+GOOGLE_GEMINI_API_KEY=... \
+npx tsx scripts/build-mram-from-dialogue.ts \
+  rituals/ea-initiation-dialogue.md \
+  rituals/ea-initiation-dialogue-cipher.md \
+  rituals/ea-initiation.mram \
+  --with-audio
 ```
+
+`--with-audio` renders every spoken line to Opus (32 kbps mono) via Gemini 3.1 Flash TTS using the canonical `GEMINI_ROLE_VOICES` cast, and embeds the audio in the encrypted .mram payload. At playback time, the client plays these bytes directly — **zero Gemini API calls per Brother per rehearsal, ever**. File grows from ~50 KB to ~6 MB per ritual.
+
+Requirements:
+- `ffmpeg` in PATH (for Opus encoding)
+- `GOOGLE_GEMINI_API_KEY` env var
+- Your own quota (the script uses the same 3-model fallback chain as the app: 3.1-flash → 2.5-flash → 2.5-pro; on all-models-429 it sleeps until midnight PT and auto-resumes)
+
+Per-line Opus bytes are cached at `~/.cache/masonic-mram-audio/` so interrupted runs resume cleanly. A 150-line ritual takes ~13 minutes end-to-end when the full chain is available.
+
+**Quality-tier consistency (`--on-fallback`):** If 3.1-flash runs out of quota mid-ritual, the bake normally falls back to the 2.5-flash / 2.5-pro tier silently. Mixing tiers inside one ritual produces audibly inconsistent voice quality line-to-line, so the build script detects the first fallback and acts based on `--on-fallback`:
+
+```bash
+# Default: prompt once on first fallback (interactive)
+npx tsx scripts/build-mram-from-dialogue.ts <plain> <cipher> <out> --with-audio
+
+# Abort immediately on any fallback (exit code 2, cache preserved)
+npx tsx scripts/build-mram-from-dialogue.ts <plain> <cipher> <out> --with-audio --on-fallback=abort
+
+# Keep going on the lower tier without prompting (good for CI)
+npx tsx scripts/build-mram-from-dialogue.ts <plain> <cipher> <out> --with-audio --on-fallback=continue
+
+# Overnight bake: lock to preferred model, sleep until midnight PT if
+# daily quota exhausts, auto-resume. Start before bed, wake up done.
+npx tsx scripts/build-mram-from-dialogue.ts <plain> <cipher> <out> --with-audio --on-fallback=wait
+```
+
+**On abort, the contaminated cache entry is removed.** The line that was just rendered on the fallback tier gets its cache file deleted before exit, so when you re-run after midnight PT:
+
+- All lines rendered on the preferred tier before the drop → cache hits, zero API cost
+- The triggering line → fresh render on the preferred tier
+- All subsequent lines → fresh render on the preferred tier
+
+Result: uniform premium bake, paying only for the unrendered lines on your next run.
+
+The final summary prints a per-model tally so you can see exactly how many lines each model served:
+
+```
+Audio bake complete:
+  Rendered via API:  150
+    Per-model breakdown:
+      gemini-3.1-flash-tts-preview        120 lines  (preferred)
+      gemini-2.5-flash-preview-tts         30 lines  (fallback)
+  Cache hits:        0
+```
+
+**Convenience wrapper for the full EA degree:**
+
+```bash
+GOOGLE_GEMINI_API_KEY=... npx tsx scripts/bake-first-degree.ts [--on-fallback=ask|continue|abort]
+```
+
+Runs ea-opening, ea-initiation, and ea-closing back-to-back with a single passphrase prompt. Skips any ritual whose source dialogue files aren't present. Use `BAKE_SKIP=ea-closing` to exclude specific rituals. `--on-fallback` is passed through to each child build — if you choose abort (or the default prompt picks abort), the wrapper halts the whole sequence rather than producing a degraded second/third ritual. Total wall time ~25-30 minutes when the cache is cold; near-instant when fully cached.
+
+**Full reference:** [`docs/BAKE-WORKFLOW.md`](./docs/BAKE-WORKFLOW.md) is the canonical doc for the bake pipeline — every CLI flag, every environment variable, cache semantics, tier-drop handling, resume guarantees, exit codes, and typical workflows. When in doubt, look there first.
+
+**Voice maps:** [`docs/VOICE-MAPS.md`](./docs/VOICE-MAPS.md) is the canonical reference for which voice each Masonic role gets on every supported TTS engine, plus the gender guardrails that keep female voices out of ritual/lecture audio.
+
+Legacy `build-mram.ts` (single-file paired format) still works for older ritual sources.
 
 ### Rotating .mram Files (new passphrase or new expiry)
 
@@ -203,7 +275,7 @@ shred -u /tmp/old.pass /tmp/new.pass
 | Styling | Tailwind CSS v4 |
 | AI Feedback | Llama 3.3 on Groq (streaming) |
 | Speech-to-Text | Groq Whisper (server-side) + Browser Web Speech API |
-| Text-to-Speech | Voxtral, ElevenLabs, Deepgram Aura-2, Google Cloud TTS, Kokoro, Browser |
+| Text-to-Speech | Gemini 3.1 Flash TTS (default), Voxtral, ElevenLabs, Deepgram Aura-2, Google Cloud TTS, Kokoro, Browser |
 | Voice Cloning | Voxtral (Mistral) via ref_audio zero-shot cloning |
 | Text Comparison | jsdiff + Double Metaphone + Levenshtein distance |
 | Ritual Format | .mram encrypted binary (AES-256-GCM + PBKDF2) |
@@ -219,9 +291,20 @@ shred -u /tmp/old.pass /tmp/new.pass
 src/
 ├── app/
 │   ├── api/
+│   │   ├── auth/magic-link/
+│   │   │   ├── request/route.ts         # Issue magic-link (per-IP/per-email rate limit)
+│   │   │   └── verify/route.ts          # Verify token, set session cookie
+│   │   ├── author/                      # Local-only ritual review tool API
+│   │   │   ├── _guard.ts                # Loopback / dev-only access guard
+│   │   │   ├── list/route.ts            # List dialogue + cipher pairs in rituals/
+│   │   │   ├── pair/route.ts            # GET/POST a plain+cipher pair with validation
+│   │   │   ├── mram/route.ts            # Build encrypted .mram from a pair
+│   │   │   ├── pair/route.ts            # Atomic write-back + re-validation
+│   │   │   └── suggest-styles/route.ts  # Per-line LLM style suggestions
 │   │   ├── rehearsal-feedback/route.ts  # Llama 3.3 streaming feedback
 │   │   ├── transcribe/route.ts          # Groq Whisper STT proxy
 │   │   └── tts/
+│   │       ├── gemini/route.ts          # Gemini 3.1 Flash TTS — default engine, 3-model fallback chain
 │   │       ├── voxtral/
 │   │       │   ├── route.ts             # Voxtral TTS proxy (voice_id or ref_audio)
 │   │       │   ├── voices/route.ts      # List/create Mistral voice profiles
@@ -232,34 +315,43 @@ src/
 │   │       ├── google/route.ts          # Google Cloud TTS proxy
 │   │       ├── kokoro/route.ts          # Kokoro self-hosted TTS proxy
 │   │       └── engines/route.ts         # TTS engine availability check
+│   ├── author/page.tsx                  # Local-only side-by-side ritual editor (dev-only)
 │   ├── voices/page.tsx                  # Voice recording & management
 │   ├── practice/page.tsx                # Practice mode (solo + rehearsal + listen)
 │   ├── progress/page.tsx                # Performance tracking dashboard
 │   ├── upload/page.tsx                  # .mram file upload page
 │   ├── walkthrough/page.tsx             # Visual how-it-works guide
+│   ├── signin/page.tsx                  # Magic-link sign-in page (pilot allowlist)
 │   ├── layout.tsx                       # Root layout with Navigation
 │   ├── page.tsx                         # Home page
 │   └── middleware.ts                    # Redirects / to landing page
 ├── components/
 │   ├── DiffDisplay.tsx                  # Color-coded word-by-word diff
 │   ├── DocumentUpload.tsx               # .mram file upload + passphrase entry
+│   ├── GeminiPreloadPanel.tsx           # Unmounted — silent on-mount preload now lives in Listen/Rehearsal directly
 │   ├── ListenMode.tsx                   # Full ceremony playback with TTS
 │   ├── Navigation.tsx                   # Mobile bottom bar + desktop top nav
 │   ├── PerformanceTracker.tsx           # Accuracy trends & streaks
 │   ├── PracticeMode.tsx                 # Solo section practice
 │   ├── RehearsalMode.tsx                # Call-and-response with AI voices
-│   └── TTSEngineSelector.tsx            # Voice engine selection dropdown
-├── middleware.ts                         # Root redirect to Pretext landing page
+│   └── TTSEngineSelector.tsx            # Unmounted — default is baked Gemini + per-role Voxtral override
+├── middleware.ts                         # Root redirect + auth gate + CORS + shared-secret check
 └── lib/
-    ├── default-voices.ts                # Pre-baked Aura-2 voice loader (7 male voices)
-    ├── voice-storage.ts                 # IndexedDB storage + export/import for voice recordings
+    ├── auth.ts                          # JWT magic-link tokens + session cookie
+    ├── rate-limit.ts                    # In-memory sliding-window limiter (Vercel-trusted IP)
+    ├── default-voices.ts                # 15 default Voxtral voices (unassigned, fallback pool)
+    ├── voice-storage.ts                 # IndexedDB voices store + audioCache for Gemini output
     ├── audio-utils.ts                   # WAV encoding + audio normalization
-    ├── tts-cloud.ts                     # Cloud TTS engines + voice role mapping
-    ├── text-to-speech.ts                # TTS engine abstraction + routing
+    ├── tts-cloud.ts                     # Cloud TTS engines + voice role mapping + Gemini cache
+    ├── text-to-speech.ts                # TTS engine abstraction + routing (Gemini default)
     ├── speech-to-text.ts                # STT engines (Whisper + Browser)
     ├── text-comparison.ts               # 5-layer comparison pipeline
     ├── mram-format.ts                   # .mram encrypt/decrypt/conversion
-    ├── storage.ts                       # Encrypted IndexedDB (v3: + voices store)
+    ├── storage.ts                       # Encrypted IndexedDB (v4: + audioCache store)
+    ├── styles.ts                        # Per-line style tag schema (Gemini prompt-tags)
+    ├── dialogue-format.ts               # Parse paired plain+cipher dialogue files
+    ├── dialogue-to-mram.ts              # Compile dialogue + styles into MRAMDocument
+    ├── author-validation.ts             # Shared client/server validation for /author
     ├── performance-history.ts           # Practice session history tracking
     ├── document-parser.ts               # Role display names + text parsing
     └── gavel-sound.ts                   # Synthesized gavel knock via Web Audio
@@ -267,10 +359,19 @@ src/
 public/
 ├── landing.html                         # Pretext-powered interactive landing page
 ├── pretext.js                           # Vendored Pretext library (30KB)
-└── voices/                              # Pre-baked default voice samples (7 male Aura-2)
+└── voices/                              # 15 default Voxtral voices (8 character + 7 Aura-2)
+
+rituals/                                  # Local-only — ritual source files (.mram gitignored)
+├── {prefix}-dialogue.md                 # Plain-text dialogue
+├── {prefix}-dialogue-cipher.md          # Cipher-text dialogue (parallel structure)
+├── {prefix}-styles.json                 # Per-line Gemini style tags (optional)
+└── {prefix}.mram                        # Built encrypted artifact (local-only, never committed)
 
 scripts/
 ├── build-mram.ts                        # CLI: build .mram files from paired markdown
+├── build-mram-from-dialogue.ts          # CLI: build .mram from dialogue + cipher + styles + optional pre-rendered Gemini audio
+├── bake-first-degree.ts                   # CLI: bake all EA (1st degree) rituals back-to-back with one passphrase prompt
+├── render-gemini-audio.ts               # Opus rendering pipeline (Gemini SSE → ffmpeg → cache)
 └── benchmark-tts.ts                     # TTS engine benchmark (TTFB + total response time)
 ```
 
@@ -297,12 +398,20 @@ Add your API keys to `.env`:
 # Required — AI feedback + speech-to-text
 GROQ_API_KEY=                    # Llama 3.3 feedback + Whisper STT
 
-# Pick one or more TTS engines
+# TTS engines — Gemini is the default; rest are fallbacks or alternatives
+GOOGLE_GEMINI_API_KEY=           # Gemini 3.1 Flash TTS — default playback engine
+GEMINI_TTS_MODELS=               # Optional: comma-separated override of model fallback chain
 MISTRAL_API_KEY=                 # Voxtral — voice cloning, half-cost
 DEEPGRAM_API_KEY=                # Aura-2 — fast, natural
 ELEVENLABS_API_KEY=              # Premium — ultra-realistic
 GOOGLE_CLOUD_TTS_API_KEY=        # Neural2 voices
 KOKORO_TTS_URL=                  # Self-hosted, free
+
+# Pilot auth (optional — only set if running an allowlisted pilot)
+LODGE_ALLOWLIST=                 # Comma-separated emails allowed to sign in
+RESEND_API_KEY=                  # Email provider for magic-link delivery
+MAGIC_LINK_FROM_EMAIL=           # From: address for magic-link emails
+MAGIC_LINK_BASE_URL=             # Base URL for magic-link callbacks (defaults to request origin)
 ```
 
 ```bash
@@ -364,6 +473,7 @@ Shannon McLeod, a Freemason who got tired of practicing ritual by reading from a
 
 | Service | What It Does | Model |
 |---------|-------------|-------|
+| **Google** | Default TTS (per-role male voices with prompt-tag direction) | Gemini 3.1 Flash TTS (preview) |
 | **Groq** | AI rehearsal feedback (tells you what you got right/wrong) | Llama 3.3 70B |
 | **Groq** | Speech-to-text (transcribes your spoken ritual) | Whisper Large v3 |
 | **Mistral** | Voice cloning TTS (clones a brother's voice from 3s of audio) | Voxtral Mini TTS |
@@ -388,11 +498,15 @@ Shannon McLeod, a Freemason who got tired of practicing ritual by reading from a
 - **Feb-Mar 2026** — Added 6 TTS engines, rehearsal mode with multi-officer voices, voice cloning, listen mode, performance tracking.
 - **Mar 2026** — Switched AI feedback from Claude Haiku to Llama 3.3 on Groq (faster, free tier). Added Voxtral voice cloning. Reduced TTS latency with streaming.
 - **Apr 2026** — Design review (C+ → B+ design score), mobile-first redesign, voice export/import, TTS benchmark tooling, dead voice model cleanup. Pretext-powered interactive landing page with Masonic symbols and real-time text reflow. Pre-baked default voices (7 male Aura-2). Feedback voice selector in rehearsal mode.
+- **Apr 18, 2026** — Ritual review tool at `/author` (local-only side-by-side editor with shared client/server validation). Gemini 3.1 Flash TTS becomes the default engine, with a 3-model fallback chain inside the route (3.1-flash → 2.5-flash → 2.5-pro) so preview-tier daily caps don't break playback. Magic-link auth + pilot allowlist + per-IP / per-email rate limiting. Strict CSP and security headers. 15 default Voxtral character voices repurposed as the unassigned fallback pool — they sit there for the Voxtral fallback path and users can assign one to a role anytime.
+- **Apr 19, 2026** — Audio bake-in at build time. `scripts/build-mram-from-dialogue.ts --with-audio` renders every spoken line via Gemini 3.1 Flash TTS, Opus-encodes at 32 kbps mono, and embeds the bytes in the encrypted .mram. Brothers receiving a baked file hit zero Gemini API calls per rehearsal — audio plays from the file, not the network. Single-passphrase wrapper `scripts/bake-first-degree.ts` bakes all three EA rituals back-to-back. Voice recording prompts rewritten to 10 generic prose passages (no ritual content) so Brothers capture a real prosodic range without exposing ritual. CSP fix to allow Google Fonts (Cinzel + Cormorant Garamond load on pilot devices). Voice cards show a "Default" badge instead of the 12/31/1969 epoch date.
 
 ### By the Numbers
 
-- **~169 commits** across the project
-- **67 automated tests** (Vitest)
-- **6 TTS engines** supported (Voxtral, Deepgram, ElevenLabs, Google, Kokoro, Browser)
+- **226 automated tests** (Vitest)
+- **7 TTS engines** supported (Gemini 3.1 Flash TTS as default, Voxtral, Deepgram, ElevenLabs, Google, Kokoro, Browser)
+- **3-model Gemini fallback chain** inside the route (3.1-flash → 2.5-flash → 2.5-pro)
+- **Build-time audio bake-in** (`--with-audio`) — pre-rendered Opus audio embedded in the encrypted .mram; zero API calls per Brother per rehearsal
 - **5-layer text comparison** (normalization, word diff, phonetic, fuzzy, scoring)
 - **0 user accounts required** — everything stays in your browser
+- **Magic-link auth + per-IP/per-email rate limiting** for the pilot allowlist

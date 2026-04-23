@@ -21,6 +21,7 @@ vi.mock("resend", () => ({
 
 import { POST } from "../route";
 import { NextRequest } from "next/server";
+import { __resetRateLimitForTests } from "@/lib/rate-limit";
 
 function makeRequest(body: unknown): NextRequest {
   return new NextRequest(new URL("http://localhost:3000/api/auth/magic-link/request"), {
@@ -41,6 +42,7 @@ describe("POST /api/auth/magic-link/request", () => {
       "brother.one@example.com, brother.two@example.com";
     process.env.RESEND_API_KEY = "re_test_fake";
     process.env.MAGIC_LINK_FROM_EMAIL = "mentor@example.com";
+    __resetRateLimitForTests();
   });
 
   afterEach(() => {
@@ -113,5 +115,41 @@ describe("POST /api/auth/magic-link/request", () => {
       makeRequest({ email: "brother.one@example.com" }),
     );
     expect(res.status).toBe(500);
+  });
+
+  it("rate-limits per email after 3 requests in the window", async () => {
+    for (let i = 0; i < 3; i++) {
+      const res = await POST(
+        makeRequest({ email: "brother.one@example.com" }),
+      );
+      expect(res.status).toBe(200);
+    }
+    const blocked = await POST(
+      makeRequest({ email: "brother.one@example.com" }),
+    );
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get("Retry-After")).toBeTruthy();
+  });
+
+  it("rate-limits per IP after 5 requests across different emails", async () => {
+    // Different emails from same IP (default "unknown" in tests). The
+    // per-email limit is 3, so we need at least 2 distinct emails to
+    // reach the 5-request IP cap without tripping the email cap first.
+    const emails = [
+      "brother.one@example.com", // allowlisted, 3 hits
+      "stranger@example.com",    // non-allowlisted, 2 hits = 5 total
+    ];
+    await POST(makeRequest({ email: emails[0] }));
+    await POST(makeRequest({ email: emails[0] }));
+    await POST(makeRequest({ email: emails[0] }));
+    await POST(makeRequest({ email: emails[1] }));
+    const fifth = await POST(makeRequest({ email: emails[1] }));
+    expect(fifth.status).toBe(200);
+
+    // 6th request from same IP with a fresh email should 429 on the IP cap
+    const blocked = await POST(
+      makeRequest({ email: "another@example.com" }),
+    );
+    expect(blocked.status).toBe(429);
   });
 });

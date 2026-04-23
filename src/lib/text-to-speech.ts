@@ -25,21 +25,29 @@ import {
   speakKokoroAsRole,
   speakVoxtral,
   speakVoxtralAsRole,
+  speakGemini,
+  speakGeminiAsRole,
   stopCloudAudio,
   isCloudAudioPlaying,
+  getUserRecordedRefAudioForRole,
 } from "./tts-cloud";
 
 // ============================================================
 // Engine selection
 // ============================================================
 
-export type TTSEngineName = "browser" | "elevenlabs" | "google-cloud" | "deepgram" | "kokoro" | "voxtral";
+export type TTSEngineName = "browser" | "elevenlabs" | "google-cloud" | "deepgram" | "kokoro" | "voxtral" | "gemini";
 
-const TTS_ENGINE_STORAGE_KEY = "tts-engine";
+// Key-bumped 2026-04-20: the old "tts-engine" key is left dormant on
+// returning users' disks (~15 bytes orphan data, accepted). Bumping the
+// key name means any stale non-gemini value set via the retired dropdown
+// is ignored on next load and every user converges to the baked Gemini
+// default.
+const TTS_ENGINE_STORAGE_KEY = "tts-engine-v2";
 
-let currentEngine: TTSEngineName = "voxtral";
+let currentEngine: TTSEngineName = "gemini";
 
-// Restore persisted engine on module load (client only)
+// Restore persisted engine on module load (client only).
 if (typeof window !== "undefined") {
   const stored = localStorage.getItem(TTS_ENGINE_STORAGE_KEY);
   if (
@@ -48,7 +56,8 @@ if (typeof window !== "undefined") {
     stored === "google-cloud" ||
     stored === "deepgram" ||
     stored === "kokoro" ||
-    stored === "voxtral"
+    stored === "voxtral" ||
+    stored === "gemini"
   ) {
     currentEngine = stored;
   }
@@ -363,6 +372,7 @@ export async function speak(
       case "deepgram": return speakDeepgram(text);
       case "kokoro": return speakKokoro(text);
       case "voxtral": return speakVoxtral(text);
+      case "gemini": return speakGemini(text);
       default: return speakBrowser(text, options);
     }
   };
@@ -397,13 +407,50 @@ export async function speak(
 
 /**
  * Speak text as a specific officer role using the current engine.
- * Falls back to Google Cloud → Browser if the primary engine fails.
+ * Falls back through Voxtral → Google Cloud → Browser if the primary
+ * engine fails.
+ *
+ * The `style` param is an optional Gemini 3.1 Flash TTS audio tag
+ * ("gravely", "reverently", etc.) — consumed only by the Gemini engine
+ * and silently ignored by every other engine. Source: `section.style`
+ * populated from the .mram file via mramToSections().
+ *
+ * The `embeddedAudio` param is optional pre-rendered Opus audio baked
+ * into the .mram at build time (v3+ files). When present AND the user
+ * is playing with the Gemini engine (not overridden by a user-recorded
+ * Voxtral clone), the client plays these bytes directly — zero API call.
+ * When absent, the existing /api/tts/gemini + IndexedDB cache path
+ * handles the line. Source: `section.audio`.
  */
 export async function speakAsRole(
   text: string,
   role: string,
-  voiceMap?: Map<string, RoleVoiceProfile>
+  voiceMap?: Map<string, RoleVoiceProfile>,
+  style?: string,
+  embeddedAudio?: string,
 ): Promise<void> {
+  // Per-role Voxtral override: if the Brother recorded their own voice
+  // and assigned it to this role, that clone plays regardless of the
+  // currently-active engine. Default shipped voices don't trigger this
+  // (see getUserRecordedRefAudioForRole for why).
+  if (currentEngine !== "voxtral") {
+    const userClone = await getUserRecordedRefAudioForRole(role);
+    if (userClone) {
+      try {
+        await speakVoxtral(text, userClone);
+        lastTTSError = null;
+        return;
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") throw err;
+        console.warn(
+          `Voxtral override for role ${role} failed, falling through to ${currentEngine}:`,
+          err,
+        );
+        // Fall through to the normal engine dispatch.
+      }
+    }
+  }
+
   const primary = () => {
     switch (currentEngine) {
       case "elevenlabs": return speakElevenLabsAsRole(text, role);
@@ -411,6 +458,7 @@ export async function speakAsRole(
       case "deepgram": return speakDeepgramAsRole(text, role);
       case "kokoro": return speakKokoroAsRole(text, role);
       case "voxtral": return speakVoxtralAsRole(text, role);
+      case "gemini": return speakGeminiAsRole(text, role, style, embeddedAudio);
       default: {
         const profile = voiceMap?.get(role) || getVoiceForRole(role);
         return speakBrowser(text, {
@@ -434,20 +482,37 @@ export async function speakAsRole(
 
     if (currentEngine === "browser" || currentEngine === "google-cloud") throw err;
 
-    // Try Google Cloud as fallback (better quality than browser)
+    // Fallback chain: prefer Voxtral (voice-cloning, good quality, has the
+    // user's character voices). Then Google Cloud Neural2. Then browser as
+    // last resort. Previous version went straight to Google Cloud — that
+    // made Gemini failures silently robotic because Google Cloud's generic
+    // voices are the "robot-adjacent" ones in this stack.
+    //
+    // Each inner catch must re-throw AbortError so a user-initiated stop
+    // (clicking a different line) doesn't silently fall through to the
+    // next engine. Without this guard, a rapid click would abort the
+    // current fetch, the inner catch would swallow the AbortError, and
+    // the next engine would start a fresh AbortController and play audio
+    // that overlaps with the newly-requested line.
     try {
-      await speakGoogleCloudAsRole(text, role);
-    } catch {
-      // Google also failed — try browser as last resort
+      await speakVoxtralAsRole(text, role);
+    } catch (e1) {
+      if (e1 instanceof DOMException && e1.name === "AbortError") throw e1;
       try {
-        const profile = voiceMap?.get(role) || getVoiceForRole(role);
-        await speakBrowser(text, {
-          pitch: profile.pitch,
-          rate: profile.rate,
-          voiceName: profile.voiceName,
-        });
-      } catch {
-        throw err;
+        await speakGoogleCloudAsRole(text, role);
+      } catch (e2) {
+        if (e2 instanceof DOMException && e2.name === "AbortError") throw e2;
+        try {
+          const profile = voiceMap?.get(role) || getVoiceForRole(role);
+          await speakBrowser(text, {
+            pitch: profile.pitch,
+            rate: profile.rate,
+            voiceName: profile.voiceName,
+          });
+        } catch (e3) {
+          if (e3 instanceof DOMException && e3.name === "AbortError") throw e3;
+          throw err;
+        }
       }
     }
   }
@@ -474,44 +539,3 @@ export function isSpeaking(): boolean {
   return false;
 }
 
-/**
- * Speak a correction with context:
- * "You said [wrong]. The correct words are: [right]"
- */
-export async function speakCorrection(
-  wrongWord: string,
-  correctPhrase: string,
-  options?: TTSOptions
-): Promise<void> {
-  const message = `You said "${wrongWord}". The correct words are: ${correctPhrase}`;
-  await speak(message, options);
-}
-
-/**
- * Speak encouragement after a practice session
- */
-export async function speakFeedback(
-  accuracy: number,
-  options?: TTSOptions
-): Promise<void> {
-  let message: string;
-
-  if (accuracy >= 95) {
-    message =
-      "Excellent work, Brother. Your recitation is nearly perfect. Keep practicing and you will have it memorized in no time.";
-  } else if (accuracy >= 85) {
-    message =
-      "Very good work. You have most of the words correct. Focus on the highlighted trouble spots and try again.";
-  } else if (accuracy >= 70) {
-    message =
-      "Good effort. You are making solid progress. Review the sections marked in red and practice those parts specifically.";
-  } else if (accuracy >= 50) {
-    message =
-      "Keep at it, Brother. Memorization takes time and repetition. Try working through smaller sections at a time.";
-  } else {
-    message =
-      "No worries. Everyone starts somewhere. Try practicing a shorter section first, then build up to the full passage.";
-  }
-
-  await speak(message, options);
-}

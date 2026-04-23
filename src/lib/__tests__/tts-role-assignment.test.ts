@@ -1,5 +1,33 @@
 import { describe, it, expect } from "vitest";
-import { roleToGroup, VOXTRAL_ROLE_OPTIONS } from "../tts-cloud";
+import {
+  roleToGroup,
+  VOXTRAL_ROLE_OPTIONS,
+  GEMINI_ROLE_VOICES,
+  getGeminiVoiceForRole,
+} from "../tts-cloud";
+
+/**
+ * Known-female Gemini voices per Google's published roster. Masonry is a
+ * men's fraternity — none of these voices should ever be the selected
+ * voice for any Masonic role, lecture, narrator, or feedback line.
+ * This set must stay in sync with GEMINI_FEMALE_VOICES in tts-cloud.ts.
+ */
+const FEMALE_GEMINI_VOICES = new Set([
+  "Kore",
+  "Zephyr",
+  "Aoede",
+  "Callirrhoe",
+  "Autonoe",
+  "Despina",
+  "Erinome",
+  "Laomedeia",
+  "Leda",
+  "Pulcherrima",
+  "Sulafat",
+  "Vindemiatrix",
+  "Achernar",
+  "Gacrux",
+]);
 
 describe("roleToGroup", () => {
   it("maps WM and aliases to group 0", () => {
@@ -52,9 +80,19 @@ describe("roleToGroup", () => {
 
   it("maps candidate/brother to group 9", () => {
     expect(roleToGroup("Candidate")).toBe(9);
+    expect(roleToGroup("C")).toBe(9);
     expect(roleToGroup("BR")).toBe(9);
     expect(roleToGroup("Bro")).toBe(9);
-    expect(roleToGroup("Narrator")).toBe(9);
+  });
+
+  it("maps stewards to group 10", () => {
+    expect(roleToGroup("Steward")).toBe(10);
+    expect(roleToGroup("SS")).toBe(10);
+    expect(roleToGroup("JS")).toBe(10);
+  });
+
+  it("maps narrator to group 11 (split from candidate)", () => {
+    expect(roleToGroup("Narrator")).toBe(11);
   });
 
   it("returns -1 for unknown roles", () => {
@@ -64,14 +102,58 @@ describe("roleToGroup", () => {
   });
 });
 
+describe("getGeminiVoiceForRole — no female voices anywhere", () => {
+  it("never returns a female voice for any role in GEMINI_ROLE_VOICES", () => {
+    for (const [role, voice] of Object.entries(GEMINI_ROLE_VOICES)) {
+      expect(FEMALE_GEMINI_VOICES.has(voice), `role ${role} mapped to female voice ${voice}`).toBe(false);
+    }
+  });
+
+  it("returns a male voice for every known officer role (exact match)", () => {
+    const roles = ["WM", "SW", "JW", "SD", "JD", "Sec", "Trs", "Ch", "Marshal", "Steward", "Candidate", "Narrator"];
+    for (const role of roles) {
+      const voice = getGeminiVoiceForRole(role);
+      expect(FEMALE_GEMINI_VOICES.has(voice), `role ${role} resolved to female voice ${voice}`).toBe(false);
+    }
+  });
+
+  it("returns a male voice for every Voxtral role-group alias", () => {
+    const aliases = [
+      "W.M.", "W. M.", "ALL", "All", "SW/WM", "WM/Chaplain",
+      "S.W.", "S. W.",
+      "J.W.", "J. W.",
+      "S.D.", "S. D.", "S(orJ)D", "S/J D",
+      "J.D.", "J. D.",
+      "S/Sec", "Sec.", "S",
+      "Chap", "Chap.", "PRAYER", "Prayer",
+      "Tr", "Treas", "Treas.",
+      "T", "Tyler",
+      "C", "BR", "Bro", "Bro.", "Voucher", "Vchr",
+      "SS", "JS",
+    ];
+    for (const role of aliases) {
+      const voice = getGeminiVoiceForRole(role);
+      expect(FEMALE_GEMINI_VOICES.has(voice), `alias ${role} resolved to female voice ${voice}`).toBe(false);
+    }
+  });
+
+  it("returns a male voice for unknown / unmapped roles (lecture speaker fallback)", () => {
+    const unmapped = ["Lecturer", "Lecture", "Explanatory", "Past Master", "PM", "GuestSpeaker", "", "???"];
+    for (const role of unmapped) {
+      const voice = getGeminiVoiceForRole(role);
+      expect(FEMALE_GEMINI_VOICES.has(voice), `unmapped role "${role}" resolved to female voice ${voice}`).toBe(false);
+    }
+  });
+});
+
 describe("VOXTRAL_ROLE_OPTIONS", () => {
   it("has an empty-value auto option first", () => {
     expect(VOXTRAL_ROLE_OPTIONS[0].value).toBe("");
     expect(VOXTRAL_ROLE_OPTIONS[0].label).toContain("Auto");
   });
 
-  it("has 12 options total (auto + 11 roles)", () => {
-    expect(VOXTRAL_ROLE_OPTIONS.length).toBe(12);
+  it("has 13 options total (auto + 12 roles)", () => {
+    expect(VOXTRAL_ROLE_OPTIONS.length).toBe(13);
   });
 
   it("includes all major officer roles", () => {

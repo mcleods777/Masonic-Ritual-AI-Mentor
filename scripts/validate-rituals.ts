@@ -31,38 +31,50 @@ import {
 } from "../src/lib/dialogue-format";
 
 const RITUALS_DIR = path.resolve(__dirname, "..", "rituals");
-const DEFAULT_PLAIN_FILE = path.join(RITUALS_DIR, "ea-opening-dialogue.md");
-const DEFAULT_CIPHER_FILE = path.join(
-  RITUALS_DIR,
-  "ea-opening-dialogue-cipher.md",
-);
 
-// Accept `<plain.md> <cipher.md>` as positional arguments, default to the
-// EA opening pair when no args are given. Lets the script validate any
-// future ritual's dialogue files without editing the script.
-function parseArgs(): { plainFile: string; cipherFile: string } {
+interface RitualPair {
+  plainFile: string;
+  cipherFile: string;
+  /** True when the pair came from directory discovery (missing files ok). */
+  isDefault: boolean;
+}
+
+// With no args, discover every `{slug}-dialogue.md` in rituals/ and pair it
+// with `{slug}-dialogue-cipher.md`. With 2 args, validate that explicit pair.
+// Explicit paths fail loudly if missing; discovered pairs skip gracefully
+// (ritual files are gitignored, some may be absent on a fresh checkout).
+function parseArgs(): RitualPair[] {
   const args = process.argv.slice(2);
-  if (args.length === 0) {
-    return { plainFile: DEFAULT_PLAIN_FILE, cipherFile: DEFAULT_CIPHER_FILE };
+  if (args.length === 2) {
+    return [
+      {
+        plainFile: path.resolve(args[0]),
+        cipherFile: path.resolve(args[1]),
+        isDefault: false,
+      },
+    ];
   }
-  if (args.length !== 2) {
+  if (args.length !== 0) {
     console.error(
       "Usage: npx tsx scripts/validate-rituals.ts [<plain.md> <cipher.md>]",
     );
     console.error(
-      "  Defaults to rituals/ea-opening-dialogue{,-cipher}.md when no args given.",
+      "  No args: validates every rituals/{slug}-dialogue{,-cipher}.md pair.",
     );
     process.exit(1);
   }
-  const [plainArg, cipherArg] = args;
-  // Resolve to absolute so error messages are unambiguous
-  return {
-    plainFile: path.resolve(plainArg),
-    cipherFile: path.resolve(cipherArg),
-  };
+  const files = fs
+    .readdirSync(RITUALS_DIR)
+    .filter(
+      (f) => f.endsWith("-dialogue.md") && !f.endsWith("-dialogue-cipher.md"),
+    )
+    .sort();
+  return files.map((f) => ({
+    plainFile: path.join(RITUALS_DIR, f),
+    cipherFile: path.join(RITUALS_DIR, f.replace(/-dialogue\.md$/, "-dialogue-cipher.md")),
+    isDefault: true,
+  }));
 }
-
-const { plainFile: PLAIN_FILE, cipherFile: CIPHER_FILE } = parseArgs();
 
 const ok = (msg: string) => console.log(`  ✓ ${msg}`);
 const warn = (msg: string) => console.log(`  ! ${msg}`);
@@ -116,18 +128,15 @@ function padL(s: string, width: number): string {
   return s.length >= width ? s : " ".repeat(width - s.length) + s;
 }
 
-function main() {
-  header("=== Loading ritual files ===");
-  // If the user passed explicit paths, "not found" is a hard failure.
-  // If we're using defaults, missing files may be expected (gitignored).
-  const usingDefaults =
-    PLAIN_FILE === DEFAULT_PLAIN_FILE && CIPHER_FILE === DEFAULT_CIPHER_FILE;
-  const plainSrc = loadOrSkip(PLAIN_FILE, usingDefaults);
-  const cipherSrc = loadOrSkip(CIPHER_FILE, usingDefaults);
+function validatePair(pair: RitualPair): boolean {
+  const { plainFile: PLAIN_FILE, cipherFile: CIPHER_FILE, isDefault } = pair;
+  header(`=== Loading ${path.basename(PLAIN_FILE, "-dialogue.md")} ===`);
+  const plainSrc = loadOrSkip(PLAIN_FILE, isDefault);
+  const cipherSrc = loadOrSkip(CIPHER_FILE, isDefault);
 
   if (!plainSrc || !cipherSrc) {
-    console.log("\nSkipping validation: one or both ritual files missing.");
-    process.exit(0);
+    console.log("  Skipping — one or both files missing.");
+    return true;
   }
   ok(`loaded ${path.relative(process.cwd(), PLAIN_FILE)}`);
   ok(`loaded ${path.relative(process.cwd(), CIPHER_FILE)}`);
@@ -296,7 +305,7 @@ function main() {
 
   // ---------------------------------------------------------------------
   header("=== Writing JSONL sample ===");
-  const jsonlOut = "/tmp/ea-opening-dialogue.jsonl";
+  const jsonlOut = `/tmp/${path.basename(PLAIN_FILE, ".md")}.jsonl`;
   fs.writeFileSync(jsonlOut, jsonl);
   ok(`wrote ${jsonlOut} (${jsonl.split("\n").length - 1} records)`);
   console.log("\n  First 3 records:");
@@ -304,7 +313,20 @@ function main() {
     if (line) console.log(`    ${line}`);
   }
 
-  console.log("\n\x1b[32m✓ All validations passed.\x1b[0m\n");
+  console.log(`\n\x1b[32m✓ ${path.basename(PLAIN_FILE, "-dialogue.md")} passed.\x1b[0m`);
+  return true;
+}
+
+function main() {
+  const pairs = parseArgs();
+  if (pairs.length === 0) {
+    console.log("No ritual dialogue files found in rituals/ — nothing to validate.");
+    process.exit(0);
+  }
+  for (const pair of pairs) {
+    validatePair(pair);
+  }
+  console.log(`\n\x1b[32m✓ All ${pairs.length} ritual(s) validated.\x1b[0m\n`);
 }
 
 main();

@@ -2,7 +2,7 @@
 
 ## Your Private, Voice-Driven Practice Companion
 
-Upload your encrypted ritual file. Practice solo, listen to full ceremonies, rehearse your role with AI officers, and get coaching from Claude — all while keeping your ritual secure with military-grade encryption.
+Upload your encrypted ritual file. Practice solo, listen to full ceremonies, rehearse your role with AI officers, and get instant word-by-word feedback — all while keeping your ritual secure with military-grade encryption.
 
 ---
 
@@ -20,27 +20,24 @@ flowchart TB
         Solo["Solo Practice\nDrill one section\nCipher text shown"]
         Listen["Listen Mode\nHear full ceremony\nCipher text shown"]
         Rehearsal["Rehearsal Mode\nPractice your role\nCipher text shown"]
-        Coach["AI Coach\nChat with Claude\nAsk anything"]
+        Voices["Custom Voices\nRecord & clone\nStored locally"]
         Encrypt --> Solo
         Encrypt --> Listen
         Encrypt --> Rehearsal
-        Encrypt --> Coach
     end
 
     subgraph Cloud["Cloud Services — Optional"]
-        Claude["Claude API\nAI Coaching\nPlain text only"]
-        Google["Google Cloud TTS\nPremium voices"]
-        Eleven["ElevenLabs\nUltra-realistic voices"]
-        Groq["Groq Whisper\nSpeech-to-text"]
+        Gemini["Gemini 3.1 Flash TTS\nDefault engine\n3-model fallback"]
+        Voxtral["Voxtral (Mistral)\nVoice cloning TTS\nref_audio cloning"]
+        Llama["Llama 3.3 (Groq)\nRehearsal feedback\nPlain text only"]
+        Whisper["Groq Whisper\nSpeech-to-text"]
     end
 
-    Coach --> Claude
-    Solo --> Claude
-    Rehearsal --> Claude
-    Listen --> Google
-    Listen --> Eleven
-    Rehearsal --> Google
-    Solo --> Groq
+    Rehearsal --> Llama
+    Rehearsal --> Whisper
+    Voices --> Voxtral
+    Listen --> Gemini
+    Listen --> Voxtral
 
     style Browser fill:#0f172a,stroke:#334155,color:#e2e8f0
     style Cloud fill:#1e1b2e,stroke:#4c1d95,color:#e2e8f0
@@ -54,7 +51,7 @@ flowchart TB
 
 ## 1. Install the App
 
-> **You'll need:** Node.js 18+ and an Anthropic API key ([get one here](https://console.anthropic.com/))
+> **You'll need:** Node.js 18+ and a Groq API key ([get one free here](https://console.groq.com/)). Everything else is optional.
 
 ```bash
 git clone https://github.com/mcleods777/masonic-ritual-ai-mentor.git
@@ -63,10 +60,19 @@ npm install
 cp .env.example .env
 ```
 
-Add your API key to `.env`:
+Add your API keys to `.env`:
 
 ```
-ANTHROPIC_API_KEY=sk-ant-your-key-here
+# Required — AI feedback + speech-to-text
+GROQ_API_KEY=gsk_your-key-here
+
+# TTS engines — Gemini is the default; rest are fallbacks or alternatives
+GOOGLE_GEMINI_API_KEY=           # Gemini 3.1 Flash TTS — default playback engine
+MISTRAL_API_KEY=                 # Voxtral — voice cloning
+DEEPGRAM_API_KEY=                # Aura-2 — fast, natural
+ELEVENLABS_API_KEY=              # Premium — ultra-realistic
+GOOGLE_CLOUD_TTS_API_KEY=        # Neural2 voices
+KOKORO_TTS_URL=                  # Self-hosted, free
 ```
 
 Launch:
@@ -104,7 +110,7 @@ flowchart LR
 > **Cipher:** `B. S.W., p. t. s. y. t. a. p. a. M.`
 > **Plain:** `Brother Senior Warden, proceed to satisfy yourself that all present are Masons.`
 >
-> You always see cipher text on screen. Plain text is only used behind the scenes for AI coaching and accuracy scoring.
+> You always see cipher text on screen. Plain text is only used behind the scenes for AI feedback and accuracy scoring — never shown, never displayed.
 
 ---
 
@@ -195,17 +201,17 @@ flowchart TB
     style Scroll fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
 ```
 
-**Officer voices:**
+**Officer voices (Gemini 3.1 Flash — default engine):**
 
-| Officer | Voice Character |
-|---------|----------------|
-| Worshipful Master | Deep, authoritative |
-| Senior Warden | Clear, measured |
-| Junior Warden | Mid-range, steady |
-| Senior Deacon | Slightly brighter |
-| Junior Deacon | Crisp, distinct |
-| Chaplain | Deepest, slowest |
-| Tyler | Higher, distinct |
+| Officer | Voice | Character |
+|---------|-------|-----------|
+| Worshipful Master | Alnilam | Deep, authoritative |
+| Senior Warden | Charon | Clear, measured |
+| Junior Warden | Algenib | Mid-range, steady |
+| Senior Deacon | Fenrir | Smooth, warm |
+| Junior Deacon | Crisp, distinct | |
+| Chaplain | Reverent, steady | |
+| Tyler | Resonant, laid-back | |
 
 Use **Pause / Resume** anytime. Gavel marks produce synthesized knock sounds. Stage directions appear on screen but aren't spoken.
 
@@ -222,7 +228,7 @@ flowchart TB
     Loop -->|"Other officer's line"| AI["AI reads it aloud\nwith that role's voice"]
     Loop -->|"Your line!"| You["'Your Turn' prompt\nSpeak or type from memory"]
     AI --> Loop
-    You --> Score["Line scored instantly\n5-layer comparison"]
+    You --> Score["Line scored instantly\n5-layer comparison\n+ Llama 3.3 feedback"]
     Score --> Loop
     Loop -->|"Ceremony complete"| Results["Final Results\nOverall accuracy %\nLine-by-line breakdown"]
 
@@ -237,40 +243,39 @@ flowchart TB
 
 > This is the closest thing to rehearsing with your lodge — without needing anyone else to be there.
 
+After each line, Llama 3.3 on Groq streams short feedback on what you missed and why. Only **plain text** is ever sent — cipher text never leaves your device, and grips/passwords/modes of recognition are never part of the corpus the AI sees.
+
 ---
 
-## AI Ritual Coach
+## Custom Voice Cloning
 
-> **Chat with Claude about your specific ritual.**
+> **Record a brother's voice once. Hear him read lines for rehearsal.**
 
 ```mermaid
 flowchart LR
-    Q["Ask a question"] --> Server["Server\nPlain text context only\nCipher never sent"]
-    Server --> Claude["Claude AI\nStreaming response"]
-    Claude --> A["Answer appears\n+ optional TTS readback"]
+    A["Record 3-10s audio\nIn the browser"] --> B["Stored locally\nIndexedDB\nAES-256-GCM"]
+    B --> C["Sent as ref_audio\nwith each Voxtral request"]
+    C --> D["Voxtral clones voice\nat inference time"]
+    D --> E["Plays during rehearsal\nAssigned to officer role"]
 
-    style Q fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
-    style Server fill:#374151,stroke:#9ca3af,color:#e2e8f0
-    style Claude fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
-    style A fill:#14532d,stroke:#4ade80,color:#e2e8f0
+    style A fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style B fill:#14532d,stroke:#4ade80,color:#e2e8f0
+    style C fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+    style D fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+    style E fill:#14532d,stroke:#4ade80,color:#e2e8f0
 ```
 
-Ask anything:
-- *"What does the Senior Warden say after the Worshipful Master's opening?"*
-- *"Quiz me on the Junior Deacon's lines in the opening"*
-- *"Explain the significance of the first section"*
+**How to clone a voice:**
 
-**Choose your model:**
+1. Go to the **Voices** page
+2. Pick an officer role
+3. Tap **Record** and read a 10-second prompt (prompts are generic prose, no ritual content)
+4. Name it ("Brother McLeod - WM") and save
+5. Assign to one or more officer roles
 
-| Model | Best For |
-|-------|---------|
-| **Haiku** | Quick questions, fast responses |
-| **Sonnet** | Balanced speed and depth |
-| **Opus** | Complex questions, detailed explanations |
+The app ships with **15 default Voxtral character voices** as an unassigned fallback pool. When Gemini is throttled, Voxtral steps in using whatever voices you've assigned, or falls through to the default pool. Record your own voices to personalize; leave them blank and the defaults handle it.
 
-> **Privacy:** Only plain text is sent to Claude. Cipher text never leaves your device. Anthropic does not train on API data.
-
-> **Masonic Safety:** The AI will **never** reveal grips, passwords, or modes of recognition. This is enforced at the system prompt level.
+Export/import voice profiles as JSON for backup and cross-device transfer.
 
 ---
 
@@ -282,56 +287,74 @@ Ask anything:
 
 ## Text-to-Speech Engines
 
-Pick the voice quality that works for you:
+Seven TTS engines. Gemini is the default; the rest are fallbacks or alternatives.
 
 ```mermaid
 flowchart TB
-    Need["App needs to speak a line\nUses plain text for TTS"] --> Router{"Voice Engine\nRouter"}
-    Router -->|"Free"| Browser["Browser TTS\nOn-device, works offline\nPitch/rate varies per role"]
-    Router -->|"Premium"| Google["Google Cloud TTS\nNeural2 voices\nDifferent voice per role"]
-    Router -->|"Ultra"| Eleven["ElevenLabs\nHuman-like quality\nUnique voice per role"]
-    Browser --> Audio["Audio output"]
-    Google --> Audio
-    Eleven --> Audio
+    Need["App needs to speak a line"] --> Gemini{"Gemini 3.1 Flash TTS\nDefault engine"}
+    Gemini -->|"OK"| Play["Audio plays"]
+    Gemini -->|"429 / 404"| Fallback["3-model fallback\n3.1-flash → 2.5-flash → 2.5-pro"]
+    Fallback -->|"All exhausted"| Voxtral["Voxtral\n15 default voices in pool"]
+    Voxtral -->|"Down"| GoogleCloud["Google Cloud Neural2"]
+    GoogleCloud -->|"Down"| Browser["Browser TTS\nAlways works"]
 
     style Need fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
-    style Router fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+    style Gemini fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+    style Fallback fill:#78350f,stroke:#fbbf24,color:#e2e8f0
+    style Voxtral fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+    style GoogleCloud fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
     style Browser fill:#14532d,stroke:#4ade80,color:#e2e8f0
-    style Google fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
-    style Eleven fill:#78350f,stroke:#fbbf24,color:#e2e8f0
-    style Audio fill:#374151,stroke:#9ca3af,color:#e2e8f0
+    style Play fill:#14532d,stroke:#4ade80,color:#e2e8f0
 ```
 
-| Engine | Quality | Cost | Setup |
-|--------|---------|------|-------|
-| **Browser TTS** | Good | Free | None — works out of the box |
-| **Google Cloud TTS** | Premium | Pay-per-use | API key required |
-| **ElevenLabs** | Ultra-realistic | Pay-per-use | API key required |
+| Engine | Type | Voices | Cost |
+|--------|------|--------|------|
+| **Gemini 3.1 Flash TTS** *(default)* | Cloud, expressive | Per-role male voices (Alnilam, Charon, etc.) with prompt-tag direction | Preview pricing |
+| **Voxtral (Mistral)** | Cloud + voice cloning | Clone any voice from 3s audio; 15 default character voices in pool | ~$0.016/1K chars |
+| **ElevenLabs** | Cloud | 10 distinct male voices | Premium |
+| **Deepgram Aura-2** | Cloud | 7 distinct voices (Zeus, Orion, etc.) | Pay-per-use |
+| **Google Cloud TTS** | Cloud | Neural2 voices with pitch control | Pay-per-use |
+| **Kokoro** | Self-hosted | Multiple voices, free | Free (self-hosted) |
+| **Browser** | Built-in | Pitch/rate differentiation | Free |
 
-### Setting Up Google Cloud TTS
+### Setting Up Gemini (default)
 
-1. Open [Google Cloud Console](https://console.cloud.google.com/)
-2. Enable **Cloud Text-to-Speech API**
-3. Go to **APIs & Services** then **Credentials** — create an API key
-4. Add to `.env`:
-
-```
-GOOGLE_CLOUD_TTS_API_KEY=your-key-here
-```
-
-5. Restart the app
-
-### Setting Up ElevenLabs
-
-1. Sign up at [elevenlabs.io](https://elevenlabs.io/)
-2. Copy your API key from **Profile**
+1. Create a project at [Google AI Studio](https://aistudio.google.com/)
+2. Create an API key
 3. Add to `.env`:
 
 ```
-ELEVENLABS_API_KEY=your-key-here
+GOOGLE_GEMINI_API_KEY=AIza-your-key-here
 ```
 
-4. Restart the app
+4. Optional — override the fallback chain at runtime:
+
+```
+GEMINI_TTS_MODELS=gemini-3.1-flash-preview-tts,gemini-2.5-flash-preview-tts,gemini-2.5-pro-preview-tts
+```
+
+### Setting Up Voxtral (voice cloning)
+
+1. Sign up at [console.mistral.ai](https://console.mistral.ai/)
+2. Copy your API key
+3. Add to `.env`:
+
+```
+MISTRAL_API_KEY=your-key-here
+```
+
+4. Record voices on the **Voices** page — zero-shot cloning works on the free tier.
+
+### Setting Up the Rest
+
+Add any of these keys to `.env` to enable them. Each engine shows up in the engine dropdown when its key is present.
+
+```
+DEEPGRAM_API_KEY=your-key-here            # Aura-2
+ELEVENLABS_API_KEY=your-key-here          # Premium
+GOOGLE_CLOUD_TTS_API_KEY=your-key-here    # Neural2
+KOKORO_TTS_URL=http://localhost:8880      # Self-hosted
+```
 
 ---
 
@@ -339,8 +362,8 @@ ELEVENLABS_API_KEY=your-key-here
 
 | Engine | Accuracy | Setup |
 |--------|----------|-------|
+| **Groq Whisper** | Excellent — trained with Masonic vocabulary hints | Required for cloud STT |
 | **Browser Speech API** | Good for general speech | None — built into Chrome/Edge |
-| **Groq Whisper** | Excellent — trained with Masonic vocabulary hints | API key required |
 
 ### Setting Up Groq Whisper
 
@@ -351,10 +374,12 @@ ELEVENLABS_API_KEY=your-key-here
 3. Add to `.env`:
 
 ```
-GROQ_API_KEY=your-key-here
+GROQ_API_KEY=gsk_your-key-here
 ```
 
-4. Restart the app
+4. Restart the dev server
+
+The same key powers both Whisper STT and Llama 3.3 rehearsal feedback.
 
 ---
 
@@ -366,18 +391,28 @@ GROQ_API_KEY=your-key-here
 
 > **For lodge secretaries** or anyone who needs to build ritual files from scratch.
 
-## Input Format
+## Input Format — Two Parallel Dialogue Files
 
-Create a markdown file where each spoken line appears **twice** — cipher first, then plain:
+The current recommended path uses two parallel markdown files: plain English and cipher. Speaker structure must match line-for-line.
+
+**`rituals/{prefix}-dialogue.md` (plain):**
 
 ```markdown
 ### Opening the Lodge
 
-WM: * Bro. S.W., p. t. s. y. t. a. p. a. M.
 WM: * Brother Senior Warden, proceed to satisfy yourself that all present are Masons.
 
+SW: * Brothers Senior and Junior Deacons, proceed to satisfy yourselves that all present are Masons.
+```
+
+**`rituals/{prefix}-dialogue-cipher.md` (cipher):**
+
+```markdown
+### Opening the Lodge
+
+WM: * B. S.W., p. t. s. y. t. a. p. a. M.
+
 SW: * Bros. S. & J.D., p. t. s. y. t. a. p. a. M.
-SW: * Brothers Senior & Junior Deacons, proceed to satisfy yourselves that all present are Masons.
 ```
 
 ## Format Rules
@@ -387,26 +422,26 @@ SW: * Brothers Senior & Junior Deacons, proceed to satisfy yourselves that all p
 | **Section heading** | `### Title` | `### Opening the Lodge` |
 | **Speaker line** | `ROLE: text` | `WM: Brother Senior Warden...` |
 | **Gavel mark** | `*` after colon | `WM: * Brother Senior...` |
-| **Stage direction** | `(parentheses)` | `(Senior Deacon rises)` |
-| **Line pairing** | Cipher first, plain second | See example above |
+| **Stage direction** | `[brackets]` or `(parentheses)` | `[Senior Deacon rises]` |
+| **Per-line style tags** | `{prefix}-styles.json` sidecar | Optional — Gemini prompt-tag overrides |
 
 ## The .mram File Structure
 
 ```mermaid
 flowchart LR
-    subgraph File[".mram Binary File"]
+    subgraph File[".mram Binary File (v3)"]
         Magic["4 bytes\nMRAM"]
-        Version["1 byte\nVersion"]
+        Version["1 byte\nVersion (3)"]
         Salt["16 bytes\nSalt"]
         IV["12 bytes\nIV"]
         Payload["Variable\nAES-256-GCM\nEncrypted JSON"]
     end
 
     subgraph JSON["Decrypted Payload"]
-        Meta["Metadata\nJurisdiction\nDegree / Ceremony"]
+        Meta["Metadata\nJurisdiction / Degree / Ceremony\nvoiceCast + audioFormat (v3)"]
         Roles["Roles Map\nWM / SW / JD / etc."]
         Sections["Sections\nOrdered ceremony parts"]
-        Lines["Lines Array\nCipher + Plain + Role\nGavels + Actions"]
+        Lines["Lines Array\nCipher + Plain + Role\nGavels + Actions + Style + Audio"]
     end
 
     Payload -.->|"PBKDF2\n+ passphrase"| JSON
@@ -415,11 +450,68 @@ flowchart LR
     style JSON fill:#14532d,stroke:#4ade80,color:#e2e8f0
 ```
 
+**Format version 3** adds optional per-line Opus audio bytes plus a `voiceCast` map so the client can skip the Gemini API entirely on playback.
+
 ## Build Command
 
 ```bash
-npx tsx scripts/build-mram.ts input.md output.mram "YourLodgePassphrase"
+npx tsx scripts/build-mram-from-dialogue.ts \
+  rituals/{prefix}-dialogue.md \
+  rituals/{prefix}-dialogue-cipher.md \
+  rituals/{prefix}.mram
 ```
+
+Passphrase is prompted interactively — never accepted on the command line.
+
+## Build With Pre-Rendered Audio (recommended for pilot distribution)
+
+```bash
+GOOGLE_GEMINI_API_KEY=... \
+npx tsx scripts/build-mram-from-dialogue.ts \
+  rituals/ea-initiation-dialogue.md \
+  rituals/ea-initiation-dialogue-cipher.md \
+  rituals/ea-initiation.mram \
+  --with-audio
+```
+
+The `--with-audio` flag renders every spoken line to Opus (32 kbps mono) via Gemini 3.1 Flash TTS and embeds the audio in the encrypted .mram payload. At playback time, the client plays these bytes directly — **zero Gemini API calls per Brother per rehearsal, ever**.
+
+Requirements:
+- `ffmpeg` in PATH (for Opus encoding)
+- `GOOGLE_GEMINI_API_KEY` env var
+- Your own Gemini quota (the script uses the 3-model fallback chain; on all-models-429 it sleeps until midnight PT and auto-resumes)
+
+Per-line Opus bytes are cached at `~/.cache/masonic-mram-audio/` so interrupted runs resume cleanly. File size grows from ~50 KB to ~6 MB per ritual.
+
+### Convenience wrapper — all 3 EA rituals
+
+```bash
+GOOGLE_GEMINI_API_KEY=... npx tsx scripts/bake-first-degree.ts \
+  [--on-fallback=ask|continue|abort]
+```
+
+Runs ea-opening, ea-initiation, and ea-closing back-to-back with a single passphrase prompt. Use `BAKE_SKIP=ea-closing` to exclude specific rituals.
+
+### Handling Gemini quota drops mid-bake
+
+If the preferred Gemini model (`gemini-3.1-flash-tts-preview`) runs out of daily quota while you're baking, the script detects the tier drop and asks what to do:
+
+```
+⚠  Quality-tier drop detected at line 47 (WM).
+   Preferred: gemini-3.1-flash-tts-preview
+   Served by: gemini-2.5-flash-preview-tts
+   ...
+   Continue with lower-quality fallback? [y/N]
+```
+
+- **Press N (default):** abort with exit code 2. The contaminated cache entry is deleted. Re-run after midnight PT — premium-tier lines cache-hit, only the triggering line and everything after it re-renders on the preferred tier. Uniform premium bake, minimum rework.
+- **Press Y:** continue with mixed-tier audio. Accept that quality varies line-to-line.
+
+Override the prompt with `--on-fallback=continue` (never prompt, always keep going) or `--on-fallback=abort` (never prompt, always halt).
+
+### Full bake workflow reference
+
+**For the complete reference** — every CLI flag, every environment variable, cache semantics, tier-drop handling, resume guarantees, exit codes, and typical workflows — see `docs/BAKE-WORKFLOW.md` in the repository.
 
 Share the `.mram` file with lodge members. They'll need the passphrase to open it.
 
@@ -442,12 +534,30 @@ Share the `.mram` file with lodge members. They'll need the passphrase to open i
 
 **Required env vars:**
 
-| Variable | Required? |
-|----------|-----------|
-| `ANTHROPIC_API_KEY` | Yes |
-| `GOOGLE_CLOUD_TTS_API_KEY` | No |
-| `ELEVENLABS_API_KEY` | No |
-| `GROQ_API_KEY` | No |
+| Variable | Required? | Purpose |
+|----------|-----------|---------|
+| `GROQ_API_KEY` | Yes | Llama 3.3 feedback + Whisper STT |
+| `GOOGLE_GEMINI_API_KEY` | Recommended | Default TTS engine |
+| `MISTRAL_API_KEY` | Optional | Voxtral voice cloning |
+| `DEEPGRAM_API_KEY` | Optional | Aura-2 TTS |
+| `ELEVENLABS_API_KEY` | Optional | Premium TTS |
+| `GOOGLE_CLOUD_TTS_API_KEY` | Optional | Neural2 TTS |
+
+## Pilot Auth (Optional)
+
+For lodges running a gated pilot, add magic-link auth:
+
+```
+LODGE_ALLOWLIST=brother1@example.com,brother2@example.com
+RESEND_API_KEY=your-resend-key
+MAGIC_LINK_FROM_EMAIL=pilot@yourlodge.org
+MAGIC_LINK_BASE_URL=https://your-pilot-url.vercel.app
+```
+
+- Only emails on `LODGE_ALLOWLIST` receive sign-in links
+- No passwords, no accounts beyond a session cookie
+- Per-IP and per-email rate limiting on link issuance (5/hr per IP, 3/hr per email)
+- Session cookie is good for 30 days; sign-in link is good for 24 hours
 
 ## Self-Hosting
 
@@ -469,23 +579,23 @@ Runs on port 3000 as a standard Next.js 16 application.
 ```mermaid
 flowchart LR
     subgraph Local["Stays on Your Device"]
-        A["Ritual cipher + plain text\nAES-256 encrypted"]
+        A["Ritual cipher + plain text\nAES-256-GCM encrypted"]
         B["Encryption key\nBrowser-generated"]
         C["Practice scores"]
-        D["Browser speech recognition"]
-        E["Browser voice playback"]
+        D["Voice recordings\nIndexedDB"]
+        E["Baked audio from .mram\nPre-rendered, on-device"]
     end
 
     subgraph Cloud["Sent Externally — Only When Used"]
-        F["AI Coach → Claude API\nPlain text only"]
-        G["Google TTS → plain text"]
-        H["ElevenLabs → plain text"]
-        I["Groq → audio recording"]
+        F["Llama 3.3 / Groq\nPlain text only"]
+        G["Gemini TTS\nPlain text (when not baked)"]
+        H["Voxtral\nPlain text + voice sample"]
+        I["Groq Whisper\nAudio recording"]
     end
 
     subgraph Safe["Security Guarantees"]
         J["API keys stay on server"]
-        K["Anthropic does not train on API data"]
+        K["No-retention policies on all AI vendors"]
         L["No user accounts or tracking"]
         M[".mram file never stored"]
     end
@@ -502,17 +612,19 @@ flowchart LR
 | Ritual cipher + plain text | AES-256-GCM encrypted, separate fields in IndexedDB |
 | Encryption key | Generated by your browser, never transmitted |
 | Practice scores | Local browser storage only |
-| Browser speech recognition | Processed entirely on-device |
-| Browser voice playback | Processed entirely on-device |
+| Voice recordings (Voxtral) | Encrypted IndexedDB, only sent with TTS requests |
+| Pre-baked audio (baked .mram) | Played from file, never leaves the device |
 
 ## What Goes to the Cloud (Only When Used)
 
 | Service | What's Sent | Data Policy |
 |---------|------------|-------------|
-| Claude API (AI Coach) | Plain text only, never cipher | Anthropic does not train on API data |
+| Groq (Llama 3.3) | Plain text only, never cipher | No-retention policy |
+| Groq (Whisper) | Audio recording for transcription | No-retention policy |
+| Google Gemini TTS | Plain text for speech synthesis | Google AI Studio data terms |
+| Voxtral (Mistral) | Plain text + ref_audio sample | Mistral data processing terms |
 | Google Cloud TTS | Plain text for speech synthesis | Google Cloud data processing terms |
-| ElevenLabs TTS | Plain text for speech synthesis | ElevenLabs data processing terms |
-| Groq Whisper | Audio recording for transcription | Groq data processing terms |
+| Deepgram / ElevenLabs | Plain text for speech synthesis | Vendor data processing terms |
 
 ## Security Guarantees
 
@@ -521,6 +633,9 @@ flowchart LR
 - AES-256-GCM encryption for all stored data
 - The `.mram` file is **never stored** — only re-encrypted data is kept
 - **No user accounts, no tracking, no analytics**
+- Strict CSP, HSTS preload, `X-Frame-Options: DENY`, locked `Permissions-Policy` on every response
+- Magic-link auth uses `x-vercel-forwarded-for` for trustworthy IP attribution on rate limits
+- Grips, passwords, and modes of recognition are never in the corpus the AI sees
 
 ---
 
@@ -535,20 +650,22 @@ flowchart LR
 ```mermaid
 flowchart TB
     subgraph Frontend["Frontend — Next.js 16 + React 19"]
-        Pages["Pages\nUpload / Practice / Chat\nListen / Rehearsal"]
-        Components["Components\nDocumentUpload / PracticeMode\nListenMode / RehearsalMode\nChatInterface / DiffDisplay"]
+        Pages["Pages\nUpload / Practice / Voices\nListen / Rehearsal / Author"]
+        Components["Components\nDocumentUpload / PracticeMode\nListenMode / RehearsalMode\nDiffDisplay"]
         Lib["Libraries\nmram-format / storage\ntext-comparison\nspeech-to-text / text-to-speech"]
         Pages --> Components --> Lib
     end
 
     subgraph API["API Routes — Next.js Server"]
-        Chat["/api/chat\nClaude streaming"]
-        TTS["/api/tts/*\nGoogle + ElevenLabs"]
+        TTS["/api/tts/*\nGemini + Voxtral + 5 others"]
         STT["/api/transcribe\nGroq Whisper"]
+        Feedback["/api/rehearsal-feedback\nLlama 3.3 streaming"]
+        Auth["/api/auth/magic-link/*\nJWT + rate-limited"]
+        Author["/api/author/*\nLocal-only ritual editor"]
     end
 
     subgraph Storage["Client Storage"]
-        IDB["IndexedDB\nAES-256-GCM encrypted\nCipher + Plain separated"]
+        IDB["IndexedDB\nAES-256-GCM encrypted\nCipher + Plain + Audio separated"]
         Crypto["Web Crypto API\nKey generation + encryption"]
     end
 
@@ -565,14 +682,17 @@ flowchart TB
 |-------|-----------|
 | **Frontend** | Next.js 16 (App Router), React 19, TypeScript |
 | **Styling** | Tailwind CSS v4 |
-| **AI / LLM** | Claude (Haiku / Sonnet / Opus) via Vercel AI SDK |
-| **Speech-to-Text** | Web Speech API + Groq Whisper |
-| **Text-to-Speech** | Browser TTS + Google Cloud Neural2 + ElevenLabs |
+| **AI Feedback** | Llama 3.3 70B on Groq (streaming) |
+| **Speech-to-Text** | Groq Whisper Large v3 + Browser Web Speech API |
+| **Text-to-Speech** | Gemini 3.1 Flash TTS (default), Voxtral, ElevenLabs, Deepgram Aura-2, Google Cloud TTS, Kokoro, Browser |
+| **Voice Cloning** | Voxtral (Mistral) via ref_audio zero-shot cloning |
 | **Text Comparison** | jsdiff + Double Metaphone + Levenshtein distance |
 | **Encryption** | AES-256-GCM + PBKDF2 (310k iterations) |
 | **Local Storage** | IndexedDB with Web Crypto API |
-| **Audio Effects** | Web Audio API (synthesized gavel knocks) |
-| **Ritual Format** | `.mram` custom encrypted binary |
+| **Audio Effects** | Web Audio API (synthesized gavel knocks, WAV encoding) |
+| **Ritual Format** | `.mram` custom encrypted binary (v3 — with embedded Opus audio) |
+| **Auth** | Magic-link (JWT + per-IP/per-email rate limiting) for pilot allowlist |
+| **Deployment** | Vercel Fluid Compute |
 
 ---
 
@@ -597,14 +717,22 @@ flowchart TB
 ## No sound in Listen / Rehearsal mode
 
 - Check device volume and mute settings
-- Try switching voice engines (Browser TTS, Google, ElevenLabs)
+- If your .mram was built with `--with-audio`, the audio is embedded — try re-uploading the file to make sure it loaded
+- Switch voice engines from the dropdown (Gemini, Voxtral, Browser TTS, etc.)
 - Some browsers block autoplay — click a button first to allow audio
 
-## AI Coach not responding
+## Rehearsal feedback not appearing
 
-- Verify `ANTHROPIC_API_KEY` in `.env` is correct
-- Check key validity at [console.anthropic.com](https://console.anthropic.com/)
+- Verify `GROQ_API_KEY` in `.env` is correct
+- Check key validity at [console.groq.com](https://console.groq.com/)
 - Restart the dev server after any `.env` change
+
+## Gemini voices suddenly sound different
+
+- Gemini TTS preview has a daily quota that resets at midnight Pacific Time
+- When exhausted, the route falls back: 3.1-flash → 2.5-flash → 2.5-pro → Voxtral → Google Cloud → Browser
+- If you hear a different voice, the fallback fired — add billing to your Gemini project or wait for reset
+- Baked .mram files skip this path entirely (audio comes from the file, not the API)
 
 ## Voice engines not showing up
 
@@ -621,19 +749,22 @@ flowchart TB
 ---
 
 **Can I use this on my phone?**
-Yes. Fully responsive with mobile-optimized navigation. Works in any modern mobile browser.
+Yes. Fully responsive with mobile-optimized navigation. Install as a PWA from Safari (iOS) or Chrome (Android) for a native-app feel.
 
 **Does the AI store my ritual text?**
-No. Anthropic does not train on API data. Text is sent only during active chat sessions and is not retained.
+No. Groq, Google Gemini, Mistral, Deepgram, ElevenLabs, and Google Cloud TTS all have no-retention policies. Text is sent only during active sessions and is not retained. For the pilot, baked .mram files skip the cloud entirely for playback — the audio is already on your device.
 
 **Can I practice offline?**
-Solo Practice with Browser TTS works fully offline. AI Coach and cloud TTS/STT need internet.
+Solo Practice with Browser TTS works fully offline. Baked .mram files play Listen and Rehearsal audio offline too. The only online-required features are Groq feedback and Whisper STT.
 
 **What degrees are supported?**
-Any ceremony formatted as an `.mram` file. The app is ceremony-agnostic.
+Any ceremony formatted as an `.mram` file. The app is ceremony-agnostic. The `/author` page (local-only) is a side-by-side editor for lodge secretaries building or editing rituals.
 
 **How do I share with my lodge?**
-Deploy to Vercel (free tier works), share the URL. Each member uploads the same `.mram` file with the lodge passphrase. No accounts needed.
+Deploy to Vercel (free tier works), share the URL. Distribute the `.mram` file separately (USB stick, direct message). Each member uploads the same `.mram` with the lodge passphrase. No accounts needed unless you want the pilot auth gate.
+
+**Does the AI ever see grips, passwords, or modes of recognition?**
+No. Those are not in the plain-text corpus. The AI only sees the plain text of ritual speech. The system prompt further enforces that it never generates or echoes recognition modes.
 
 **Is my data safe?**
-Yes. AES-256-GCM encryption, PBKDF2 key derivation (310k iterations), no server-side storage, no tracking. Your ritual stays in your browser.
+Yes. AES-256-GCM encryption, PBKDF2 key derivation (310k iterations), no server-side storage, no tracking. Your ritual stays in your browser. For the pilot, magic-link auth with per-IP/per-email rate limits keeps the allowlist gate tight.
