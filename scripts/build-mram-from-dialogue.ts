@@ -32,6 +32,12 @@
  *   continue — silently continue, just log a warning (good for CI)
  *   abort    — exit with code 2 on first fallback, cache preserved
  *
+ * --verify-audio          (AUTHOR-07 D-11) Pipe each rendered line's Opus
+ *                         through Groq Whisper and print a word-diff
+ *                         roll-up at the end. Default off. Warn-only
+ *                         (never fails the bake). Threshold controlled
+ *                         by VERIFY_AUDIO_DIFF_THRESHOLD env (default 2).
+ *
  * The passphrase is read interactively with echo disabled. It is NEVER
  * accepted on the command line (that would leak it to shell history and
  * `ps -ef` output).
@@ -206,6 +212,133 @@ async function googleTtsBakeCall(
 }
 
 // ============================================================
+// AUTHOR-06 D-10: audio-duration anomaly detector
+// ============================================================
+//
+// Per-ritual rolling median sec-per-char; hard-fails on >3.0× or <0.3×
+// the median. Pitfall 6: skip check for the first 30 samples (median
+// is unstable below that). D-10 explicitly rejects auto-evict — the
+// failing cache entry stays, surfaced in the error message so the user
+// can rm it and investigate (don't mask recurring failures).
+//
+// Historical failure this catches (`gemini-tts-voice-cast-scene-leaks-into-
+// audio` skill): a Gemini TTS bake leaked the voice-cast preamble into
+// the rendered audio, producing ~30s of audio for a ~5s expected line.
+// >3× median triggers on exactly this pattern.
+interface AnomalyCheckState {
+  samples: Array<{ durationMs: number; charCount: number }>;
+  medianSecPerChar: number | null;
+}
+
+function newAnomalyState(): AnomalyCheckState {
+  return { samples: [], medianSecPerChar: null };
+}
+
+function computeMedianSecPerChar(
+  samples: AnomalyCheckState["samples"],
+): number {
+  const ratios = samples
+    .map((s) => (s.durationMs / 1000) / Math.max(s.charCount, 1))
+    .sort((a, b) => a - b);
+  const mid = Math.floor(ratios.length / 2);
+  return ratios.length % 2 === 1
+    ? ratios[mid]!
+    : (ratios[mid - 1]! + ratios[mid]!) / 2;
+}
+
+function addAndCheckAnomaly(
+  state: AnomalyCheckState,
+  lineId: number,
+  durationMs: number,
+  charCount: number,
+): void {
+  state.samples.push({ durationMs, charCount });
+  // Pitfall 6: insufficient sample — median unstable below 30 data points.
+  if (state.samples.length < 30) return;
+  state.medianSecPerChar = computeMedianSecPerChar(state.samples);
+  const thisRatio = (durationMs / 1000) / Math.max(charCount, 1);
+  const r = thisRatio / state.medianSecPerChar;
+  if (r > 3.0 || r < 0.3) {
+    throw new Error(
+      `[AUTHOR-06 D-10] duration anomaly on line ${lineId}: ` +
+        `durationMs=${durationMs}, charCount=${charCount}, ` +
+        `ritualMedianSecPerChar=${state.medianSecPerChar.toFixed(4)}, ` +
+        `ratio=${r.toFixed(2)}× (allowed band: [0.3×, 3×]). ` +
+        `Likely voice-cast scene leak (>3×) or cropped output (<0.3×). ` +
+        `Manually rm rituals/_bake-cache/{cacheKey}.opus for this line, ` +
+        `verify the dialogue text, and re-run.`,
+    );
+  }
+}
+
+// ============================================================
+// AUTHOR-07 D-11: optional --verify-audio STT round-trip
+// ============================================================
+//
+// Opt-in flag (default off). Pipes each rendered Opus through Groq
+// Whisper directly (bypassing /api/transcribe since the bake has no
+// dev server) and prints a word-diff roll-up at the end. Warn-only:
+// never hard-fails the bake — Whisper itself mis-transcribes
+// occasionally, so surfacing for review beats false-positive blocking.
+// Default threshold: "diff > 2 words" (env-overridable via
+// VERIFY_AUDIO_DIFF_THRESHOLD).
+const VERIFY_AUDIO_DIFF_THRESHOLD = Number(
+  process.env.VERIFY_AUDIO_DIFF_THRESHOLD ?? "2",
+);
+
+interface VerifyAudioEntry {
+  lineId: number;
+  role: string;
+  expected: string;
+  transcript: string;
+  wordDiffCount: number;
+}
+
+async function verifyAudioRoundTrip(
+  opusBytes: Buffer,
+  expectedText: string,
+): Promise<{ transcript: string; wordDiffCount: number }> {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "[AUTHOR-07] --verify-audio requires GROQ_API_KEY set in .env",
+    );
+  }
+  const form = new FormData();
+  // Copy into a fresh non-shared ArrayBuffer so the Uint8Array satisfies
+  // DOM's strict BlobPart typing (Node Buffer's ArrayBufferLike union
+  // includes SharedArrayBuffer which Blob rejects).
+  const opusCopy = new Uint8Array(opusBytes.byteLength);
+  opusCopy.set(opusBytes);
+  const opusBlob = new Blob([opusCopy], { type: "audio/ogg" });
+  form.append("file", opusBlob, "line.opus");
+  form.append("model", "whisper-large-v3");
+  form.append("response_format", "json");
+  const res = await fetch(
+    "https://api.groq.com/openai/v1/audio/transcriptions",
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: form,
+    },
+  );
+  if (!res.ok) {
+    throw new Error(
+      `[AUTHOR-07] groq whisper ${res.status}: ${(await res.text()).slice(0, 200)}`,
+    );
+  }
+  const { text: transcript } = (await res.json()) as { text: string };
+  const expWords = expectedText.toLowerCase().trim().split(/\s+/).filter(Boolean);
+  const gotWords = transcript.toLowerCase().trim().split(/\s+/).filter(Boolean);
+  const expSet = new Set(expWords);
+  const gotSet = new Set(gotWords);
+  let diff = 0;
+  for (const w of expWords) if (!gotSet.has(w)) diff++;
+  for (const w of gotWords) if (!expSet.has(w)) diff++;
+  return { transcript, wordDiffCount: diff };
+}
+
+// ============================================================
 // CLI
 // ============================================================
 
@@ -288,6 +421,8 @@ function parseFallbackMode(args: string[]): FallbackMode {
 async function main() {
   const rawArgs = process.argv.slice(2);
   const withAudio = rawArgs.includes("--with-audio");
+  // AUTHOR-07 D-11: opt-in STT round-trip verify flag (warn-only, default off).
+  const verifyAudio = rawArgs.includes("--verify-audio");
   const fallbackMode = parseFallbackMode(rawArgs);
   const positional = rawArgs.filter((a) => !a.startsWith("--"));
 
@@ -521,7 +656,7 @@ async function main() {
         );
       }
     }
-    await bakeAudioIntoDoc(doc, fallbackMode, voiceCast, speakAsByLineId);
+    await bakeAudioIntoDoc(doc, fallbackMode, voiceCast, speakAsByLineId, verifyAudio);
   }
 
   console.error("Encrypting...");
@@ -554,6 +689,7 @@ async function bakeAudioIntoDoc(
   fallbackMode: FallbackMode,
   voiceCast: VoiceCastFile | undefined,
   speakAsByLineId: Map<number, string> = new Map(),
+  verifyAudio: boolean = false,
 ): Promise<void> {
   // Resolve the text that gets sent to Gemini TTS for a given line.
   // When a speakAs override is registered for this line, it takes the
@@ -803,6 +939,15 @@ async function bakeAudioIntoDoc(
   let shortLineRendered = 0;
   let shortLineBytes = 0;
 
+  // AUTHOR-06 D-10: per-ritual rolling median sec-per-char + >3×/<0.3×
+  // anomaly check. Fed by both Gemini and Google short-line paths; first
+  // 30 samples skip the check (Pitfall 6).
+  const anomalyState = newAnomalyState();
+
+  // AUTHOR-07 D-11: per-line verify-audio entries (only populated when
+  // --verify-audio is set). Printed as a roll-up at the end of the bake.
+  const verifyEntries: VerifyAudioEntry[] = [];
+
   for (const line of spokenLines) {
     const voice = getGeminiVoiceForRole(line.role);
     const cleanText = bakeTextFor(line);
@@ -819,14 +964,39 @@ async function bakeAudioIntoDoc(
     // call Google Cloud TTS REST directly and embed the OGG_OPUS bytes the
     // same way as the Gemini path. NO preamble, NO style directive, NO voice-
     // cast scene in the call body (Pitfall 4 — voice-cast scene leak).
-    // (Duration-anomaly check + --verify-audio hook are added in Task 2.)
     if (shortLineIds.has(line.id)) {
       try {
         const googleVoice = getGoogleVoiceForRole(line.role);
-        const { opusBytes } = await googleTtsBakeCall(
+        const { opusBytes, durationMs } = await googleTtsBakeCall(
           cleanText,
           googleVoice.name,
         );
+        // AUTHOR-06 D-10: feed the short-line duration into the same
+        // per-ritual rolling median as Gemini lines. Short lines will
+        // likely be in the first 30 samples (Pitfall 6 → skip), but they
+        // still help build the median for subsequent Gemini lines.
+        addAndCheckAnomaly(anomalyState, line.id, durationMs, cleanText.length);
+        // AUTHOR-07 D-11: optional STT round-trip (warn-only, same
+        // contract as Gemini path).
+        if (verifyAudio) {
+          try {
+            const { transcript, wordDiffCount } = await verifyAudioRoundTrip(
+              opusBytes,
+              cleanText,
+            );
+            verifyEntries.push({
+              lineId: line.id,
+              role: line.role,
+              expected: cleanText,
+              transcript,
+              wordDiffCount,
+            });
+          } catch (err) {
+            console.error(
+              `\n[AUTHOR-07] verify-audio failed on line ${line.id}: ${(err as Error).message}`,
+            );
+          }
+        }
         // Embed: same mechanism as Gemini path (line.audio = base64 Opus).
         line.audio = opusBytes.toString("base64");
         shortLineRendered++;
@@ -901,6 +1071,43 @@ async function bakeAudioIntoDoc(
       );
 
       line.audio = opus.toString("base64");
+
+      // AUTHOR-06 D-10: duration-anomaly check on the rendered Opus.
+      // parseBuffer decodes the Ogg container header for the duration
+      // without transcoding. First 30 samples per ritual skip the check
+      // (Pitfall 6 — median unstable below that threshold).
+      const geminiMeta = await parseBuffer(opus, { mimeType: "audio/ogg" });
+      const geminiDurationMs = Math.round(
+        (geminiMeta.format.duration ?? 0) * 1000,
+      );
+      addAndCheckAnomaly(
+        anomalyState,
+        line.id,
+        geminiDurationMs,
+        cleanText.length,
+      );
+
+      // AUTHOR-07 D-11: optional STT round-trip. Warn-only: errors and
+      // mismatches never hard-fail the bake; roll-up printed at the end.
+      if (verifyAudio) {
+        try {
+          const { transcript, wordDiffCount } = await verifyAudioRoundTrip(
+            opus,
+            cleanText,
+          );
+          verifyEntries.push({
+            lineId: line.id,
+            role: line.role,
+            expected: cleanText,
+            transcript,
+            wordDiffCount,
+          });
+        } catch (err) {
+          console.error(
+            `\n[AUTHOR-07] verify-audio failed on line ${line.id}: ${(err as Error).message}`,
+          );
+        }
+      }
 
       // Quality-drop detection: this line was served by something other
       // than the preferred model. If we haven't already resolved the
@@ -1090,6 +1297,38 @@ async function bakeAudioIntoDoc(
     .map(([role, voice]) => `${role}=${voice}`)
     .join(", ")}`);
   console.error("");
+
+  // AUTHOR-07 D-11: --verify-audio roll-up. Warn-only — prints even when
+  // every line matches, so Shannon sees the flag's doing its job; flags
+  // the worst 3 diffs when any exceed the threshold (N=2 by default).
+  if (verifyAudio && verifyEntries.length > 0) {
+    const flagged = verifyEntries.filter(
+      (e) => e.wordDiffCount > VERIFY_AUDIO_DIFF_THRESHOLD,
+    );
+    console.error(`[AUTHOR-07] --verify-audio summary:`);
+    console.error(`  Lines checked: ${verifyEntries.length}`);
+    console.error(
+      `  Lines with word-diff > ${VERIFY_AUDIO_DIFF_THRESHOLD}: ${flagged.length}`,
+    );
+    if (flagged.length > 0) {
+      const worst = [...flagged]
+        .sort((a, b) => b.wordDiffCount - a.wordDiffCount)
+        .slice(0, 3);
+      console.error(`  Worst 3 (warn-only; bake still proceeded):`);
+      for (const e of worst) {
+        console.error(
+          `    line ${e.lineId} (${e.role}) diff=${e.wordDiffCount}`,
+        );
+        console.error(
+          `      expected: "${e.expected.slice(0, 80)}${e.expected.length > 80 ? "…" : ""}"`,
+        );
+        console.error(
+          `      got:      "${e.transcript.slice(0, 80)}${e.transcript.length > 80 ? "…" : ""}"`,
+        );
+      }
+    }
+    console.error("");
+  }
 }
 
 /**
