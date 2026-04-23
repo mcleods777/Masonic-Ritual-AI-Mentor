@@ -11,12 +11,22 @@
  * Lines without a speaker prefix are stage directions or special text.
  *
  * Usage:
- *   npx tsx scripts/build-mram.ts <input.md> <output.mram> [passphrase]
+ *   npx tsx scripts/build-mram.ts <input.md> <output.mram> [passphrase] [options]
+ *
+ * Options:
+ *   --expires <ISO-date>    Hard expiration timestamp, e.g. 2026-12-31 or
+ *                           2026-12-31T23:59:59Z. After this moment the file
+ *                           will not decrypt, even with the correct passphrase.
+ *   --expires-in <duration> Relative expiration from build time. Supports d/h/m
+ *                           suffixes: 90d, 72h, 45m. Mutually exclusive with
+ *                           --expires.
  *
  * If passphrase is omitted, you'll be prompted.
  *
  * Example:
  *   npx tsx scripts/build-mram.ts ritual-ea-opening.md ea-opening.mram "MyLodgePass123"
+ *   npx tsx scripts/build-mram.ts in.md out.mram "pass" --expires-in 90d
+ *   npx tsx scripts/build-mram.ts in.md out.mram "pass" --expires 2026-12-31
  */
 
 import * as fs from "fs";
@@ -35,6 +45,7 @@ interface MRAMDocument {
     degree: string;
     ceremony: string;
     checksum: string;
+    expiresAt?: string;
   };
   roles: Record<string, string>;
   sections: { id: string; title: string; note?: string }[];
@@ -417,20 +428,137 @@ async function promptPassphrase(): Promise<string> {
   });
 }
 
-async function main() {
-  const args = process.argv.slice(2);
+/**
+ * Parse a relative duration like "90d", "72h", "45m" into milliseconds.
+ * Returns null on a malformed value.
+ */
+function parseDuration(value: string): number | null {
+  const match = value.trim().match(/^(\d+)\s*(d|h|m)$/i);
+  if (!match) return null;
+  const n = parseInt(match[1], 10);
+  const unit = match[2].toLowerCase();
+  const ms = unit === "d" ? 86_400_000 : unit === "h" ? 3_600_000 : 60_000;
+  return n * ms;
+}
 
-  if (args.length < 2) {
-    console.error("Usage: npx tsx scripts/build-mram.ts <input.md> <output.mram> [passphrase]");
+/**
+ * Resolve --expires / --expires-in into an ISO timestamp, or null if neither
+ * flag was passed. Exits the process on malformed input.
+ */
+function resolveExpiresAt(args: {
+  expires?: string;
+  expiresIn?: string;
+}): string | null {
+  if (args.expires && args.expiresIn) {
+    console.error("Error: --expires and --expires-in are mutually exclusive.");
+    process.exit(1);
+  }
+
+  if (args.expires) {
+    const d = new Date(args.expires);
+    if (Number.isNaN(d.getTime())) {
+      console.error(
+        `Error: --expires must be an ISO date (e.g. 2026-12-31 or 2026-12-31T23:59:59Z). Got: ${args.expires}`
+      );
+      process.exit(1);
+    }
+    if (d.getTime() <= Date.now()) {
+      console.error(
+        `Error: --expires is in the past (${d.toISOString()}). Refusing to build a pre-expired file.`
+      );
+      process.exit(1);
+    }
+    return d.toISOString();
+  }
+
+  if (args.expiresIn) {
+    const ms = parseDuration(args.expiresIn);
+    if (ms === null || ms <= 0) {
+      console.error(
+        `Error: --expires-in must be a positive duration like 90d, 72h, or 45m. Got: ${args.expiresIn}`
+      );
+      process.exit(1);
+    }
+    return new Date(Date.now() + ms).toISOString();
+  }
+
+  return null;
+}
+
+/**
+ * Split argv into positional args and recognized flags. Unknown flags are a
+ * hard error so typos don't silently pre-expire or mis-date a build.
+ */
+function parseArgs(argv: string[]): {
+  positional: string[];
+  expires?: string;
+  expiresIn?: string;
+} {
+  const positional: string[] = [];
+  let expires: string | undefined;
+  let expiresIn: string | undefined;
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--expires") {
+      expires = argv[++i];
+      if (!expires) {
+        console.error("Error: --expires requires a value.");
+        process.exit(1);
+      }
+      continue;
+    }
+    if (arg.startsWith("--expires=")) {
+      expires = arg.slice("--expires=".length);
+      continue;
+    }
+    if (arg === "--expires-in") {
+      expiresIn = argv[++i];
+      if (!expiresIn) {
+        console.error("Error: --expires-in requires a value.");
+        process.exit(1);
+      }
+      continue;
+    }
+    if (arg.startsWith("--expires-in=")) {
+      expiresIn = arg.slice("--expires-in=".length);
+      continue;
+    }
+    if (arg.startsWith("--")) {
+      console.error(`Error: Unknown option: ${arg}`);
+      process.exit(1);
+    }
+    positional.push(arg);
+  }
+
+  return { positional, expires, expiresIn };
+}
+
+async function main() {
+  const parsed = parseArgs(process.argv.slice(2));
+
+  if (parsed.positional.length < 2) {
+    console.error(
+      "Usage: npx tsx scripts/build-mram.ts <input.md> <output.mram> [passphrase] [options]"
+    );
+    console.error("");
+    console.error("Options:");
+    console.error("  --expires <ISO-date>    Hard expiration (e.g. 2026-12-31 or 2026-12-31T23:59:59Z)");
+    console.error("  --expires-in <duration> Relative expiration: 90d, 72h, 45m");
     console.error("");
     console.error("Input format: Markdown with paired cipher/plain lines.");
     console.error("Each speaker line appears twice — cipher first, then plain text.");
     process.exit(1);
   }
 
-  const inputPath = args[0];
-  const outputPath = args[1];
-  let passphrase = args[2];
+  const inputPath = parsed.positional[0];
+  const outputPath = parsed.positional[1];
+  let passphrase = parsed.positional[2];
+
+  const expiresAt = resolveExpiresAt({
+    expires: parsed.expires,
+    expiresIn: parsed.expiresIn,
+  });
 
   if (!fs.existsSync(inputPath)) {
     console.error(`Error: Input file not found: ${inputPath}`);
@@ -451,12 +579,21 @@ async function main() {
   console.error("Parsing paired cipher/plain format...");
   const doc = parseDocument(content);
 
+  if (expiresAt) {
+    doc.metadata.expiresAt = expiresAt;
+  }
+
   console.error(`  Jurisdiction: ${doc.metadata.jurisdiction}`);
   console.error(`  Degree: ${doc.metadata.degree}`);
   console.error(`  Ceremony: ${doc.metadata.ceremony}`);
   console.error(`  Sections: ${doc.sections.length}`);
   console.error(`  Lines: ${doc.lines.length}`);
   console.error(`  Roles: ${Object.keys(doc.roles).join(", ")}`);
+  if (expiresAt) {
+    console.error(`  Expires: ${expiresAt}`);
+  } else {
+    console.error(`  Expires: never`);
+  }
 
   console.error("Encrypting...");
   const encrypted = encryptMRAM(doc, passphrase);

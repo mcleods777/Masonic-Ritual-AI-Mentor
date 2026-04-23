@@ -57,7 +57,6 @@ vi.mock("@/lib/screen-wake-lock", () => ({
 
 vi.mock("@/lib/performance-history", () => ({
   saveSession: vi.fn(async () => {}),
-  buildPerformanceContext: vi.fn(async () => ""),
 }));
 
 vi.mock("@/lib/speech-to-text", () => ({

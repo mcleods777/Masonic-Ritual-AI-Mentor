@@ -487,12 +487,21 @@ export async function speakAsRole(
     // last resort. Previous version went straight to Google Cloud — that
     // made Gemini failures silently robotic because Google Cloud's generic
     // voices are the "robot-adjacent" ones in this stack.
+    //
+    // Each inner catch must re-throw AbortError so a user-initiated stop
+    // (clicking a different line) doesn't silently fall through to the
+    // next engine. Without this guard, a rapid click would abort the
+    // current fetch, the inner catch would swallow the AbortError, and
+    // the next engine would start a fresh AbortController and play audio
+    // that overlaps with the newly-requested line.
     try {
       await speakVoxtralAsRole(text, role);
-    } catch {
+    } catch (e1) {
+      if (e1 instanceof DOMException && e1.name === "AbortError") throw e1;
       try {
         await speakGoogleCloudAsRole(text, role);
-      } catch {
+      } catch (e2) {
+        if (e2 instanceof DOMException && e2.name === "AbortError") throw e2;
         try {
           const profile = voiceMap?.get(role) || getVoiceForRole(role);
           await speakBrowser(text, {
@@ -500,7 +509,8 @@ export async function speakAsRole(
             rate: profile.rate,
             voiceName: profile.voiceName,
           });
-        } catch {
+        } catch (e3) {
+          if (e3 instanceof DOMException && e3.name === "AbortError") throw e3;
           throw err;
         }
       }
@@ -529,44 +539,3 @@ export function isSpeaking(): boolean {
   return false;
 }
 
-/**
- * Speak a correction with context:
- * "You said [wrong]. The correct words are: [right]"
- */
-export async function speakCorrection(
-  wrongWord: string,
-  correctPhrase: string,
-  options?: TTSOptions
-): Promise<void> {
-  const message = `You said "${wrongWord}". The correct words are: ${correctPhrase}`;
-  await speak(message, options);
-}
-
-/**
- * Speak encouragement after a practice session
- */
-export async function speakFeedback(
-  accuracy: number,
-  options?: TTSOptions
-): Promise<void> {
-  let message: string;
-
-  if (accuracy >= 95) {
-    message =
-      "Excellent work, Brother. Your recitation is nearly perfect. Keep practicing and you will have it memorized in no time.";
-  } else if (accuracy >= 85) {
-    message =
-      "Very good work. You have most of the words correct. Focus on the highlighted trouble spots and try again.";
-  } else if (accuracy >= 70) {
-    message =
-      "Good effort. You are making solid progress. Review the sections marked in red and practice those parts specifically.";
-  } else if (accuracy >= 50) {
-    message =
-      "Keep at it, Brother. Memorization takes time and repetition. Try working through smaller sections at a time.";
-  } else {
-    message =
-      "No worries. Everyone starts somewhere. Try practicing a shorter section first, then build up to the full passage.";
-  }
-
-  await speak(message, options);
-}

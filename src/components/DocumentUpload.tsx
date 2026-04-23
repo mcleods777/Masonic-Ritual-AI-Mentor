@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
-import { decryptMRAM, isMRAMFile } from "@/lib/mram-format";
+import { decryptMRAM, isMRAMFile, MRAMExpiredError } from "@/lib/mram-format";
 import { saveMRAMDocument } from "@/lib/storage";
 
 interface DocumentUploadProps {
@@ -85,7 +85,17 @@ export default function DocumentUpload({ onDocumentSaved }: DocumentUploadProps)
           ? err.message
           : "Failed to decrypt file. Check your passphrase and try again."
       );
-      setStage("passphrase");
+      // An expired file won't be fixed by re-typing the passphrase — bounce the
+      // user back to the upload screen so they can request a fresh file from
+      // their lodge. All other errors keep them on the passphrase screen so
+      // they can retry a typo.
+      if (err instanceof MRAMExpiredError) {
+        fileDataRef.current = null;
+        setPassphrase("");
+        setStage("idle");
+      } else {
+        setStage("passphrase");
+      }
       setProgress(null);
     }
   }, [passphrase, onDocumentSaved]);
