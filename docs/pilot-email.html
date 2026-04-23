@@ -67,12 +67,9 @@
 
 <p>Your lodge's <code>.mram</code> file now ships with the <strong>Google Gemini 3.1 Flash TTS</strong> voice already rendered into it — each officer's lines pre-baked into audio at build time, per role, with the right cadence direction (<code>[slow, solemn]</code>, <code>[measured]</code>, and so on) embedded in the source. When you press play during rehearsal, the audio streams straight from the file on your device. <strong>No cloud voice call is made during playback.</strong> That's a stronger privacy posture than the old "pick your engine" flow, and it's faster — no network round-trip per line.</p>
 
-<p>Two narrow cases still use a live cloud voice:</p>
+<p>One narrow case still uses a live cloud voice: <strong>voice cloning</strong>. If you've recorded a short sample of a brother — say, a Past Master whose delivery you want to emulate — the app uses <strong>Mistral Voxtral</strong> to read that officer's lines in his voice. Zero-shot cloning, no paid "voice clone" tier required. Everything else — every standard officer line, including single-letter exchanges like the spelling of the word in the catechism — is baked into your <code>.mram</code> file and never requires a cloud call.</p>
 
-<ul>
-  <li><strong>Voice cloning (optional).</strong> If you've recorded a short sample of a brother — say, a Past Master whose delivery you want to emulate — the app uses <strong>Mistral Voxtral</strong> to read lines in that voice. Zero-shot cloning, no paid "voice clone" tier required.</li>
-  <li><strong>Very short lines.</strong> Gemini has a minimum duration below which short phrases clip awkwardly. For those (a one-word response, a signal word), Voxtral handles synthesis on the fly and produces cleaner results on short clips.</li>
-</ul>
+<p>Short ritual tokens (the letter-by-letter spelling in the catechism, single-syllable responses) used to be the one awkward exception to "everything is baked in" — Gemini's TTS regresses on ultra-short prompts and would silently return empty audio. A new build-time technique called <em>speakAs</em> now handles these: the build pipeline sends Gemini a longer instructional prompt (<em>"say only this single letter name: Bee"</em>) while the file still stores the short traditional token (<em>"B."</em>) for display. The result is clean, phonetic baked audio for every line, no live-cloud fallback for any normal playback.</p>
 
 <p>Gemini sits at the top of the Artificial Analysis TTS quality leaderboard (Elo 1,211), supports 70+ languages, and watermarks every clip with SynthID. The pre-baking runs on my build machine before your file is sent to you, so the API quota burn is mine, not yours.</p>
 
@@ -230,7 +227,7 @@
 
 <h2 style="font-family: Georgia, 'Times New Roman', serif; color: #8b6914; border-bottom: 1px solid #c9962c; padding-bottom: 6px; margin-top: 32px;">The pilot URL</h2>
 
-<blockquote style="border-left: 4px solid #c9962c; padding: 10px 16px; margin: 16px 0; background: #faf6ed; font-size: 1.05em;"><strong><a href="https://masonic-ritual-ai-mentor.vercel.app" style="color: #8b6914; text-decoration: none;">https://masonic-ritual-ai-mentor.vercel.app</a></strong></blockquote>
+<blockquote style="border-left: 4px solid #c9962c; padding: 10px 16px; margin: 16px 0; background: #faf6ed; font-size: 1.05em;"><strong><a href="https://masonicmentor.app" style="color: #8b6914; text-decoration: none;">https://masonicmentor.app</a></strong></blockquote>
 
 <p>Please keep this address inside the pilot group.</p>
 
