@@ -84,8 +84,8 @@ Plans:
 - [x] 03-01-deps-and-scaffolding-PLAN.md — wave 0: install p-limit/music-metadata/fake-indexeddb + gitignore + wave-0 test scaffolds (2026-04-23, commits 77c07c0 + 73e350c)
 - [x] 03-02-idb-schema-PLAN.md — AUTHOR-10: extract idb-schema.ts single source of truth + feedbackTraces store + dual-open test (2026-04-23, commits 43774bd + a90ffe2)
 - [x] 03-03-dev-guard-PLAN.md — D-15: extract shared dev-guard.ts + refactor /author/page.tsx to use isDev()
-- [ ] 03-04-author-validation-PLAN.md — AUTHOR-05 D-08: add bake-band word-ratio hard-fail to cipher/plain parity validator
-- [ ] 03-05-cache-migration-PLAN.md — AUTHOR-01 + AUTHOR-03: bump cache key to v3, add modelId, move cache to rituals/_bake-cache/, one-shot migration, lock DEFAULT_MODELS order
+- [x] 03-04-author-validation-PLAN.md — AUTHOR-05 D-08: add bake-band word-ratio hard-fail to cipher/plain parity validator (2026-04-23, commit 76c565f)
+- [x] 03-05-cache-migration-PLAN.md — AUTHOR-01 + AUTHOR-03: bump cache key to v3, add modelId, move cache to rituals/_bake-cache/, one-shot migration, lock DEFAULT_MODELS order (2026-04-23, commits 0b0c4ea + 5e32cb9)
 - [ ] 03-06-bake-integration-PLAN.md — AUTHOR-04/05/06/07: wire validator gate + short-line Google TTS + duration-anomaly detector + --verify-audio into build-mram-from-dialogue.ts
 - [ ] 03-07-bake-all-orchestrator-PLAN.md — AUTHOR-02/09: scripts/bake-all.ts with --since/--dry-run/--resume/--parallel + p-limit + _RESUME.json
 - [ ] 03-08-preview-bake-PLAN.md — AUTHOR-08: scripts/preview-bake.ts localhost-only cache scrubber with dev-guard + loopback-only bind + path-traversal-safe Opus streaming
@@ -154,7 +154,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. Pre-invite Hygiene | 7/7 | Complete (UAT pending) | 2026-04-21 |
 | 2. Safety Floor | 0/9 | Not started | - |
-| 3. Authoring Throughput | 0/8 | Not started | - |
+| 3. Authoring Throughput | 5/8 | In progress | - |
 | 4. Content Coverage | 0/0 | Not started | - |
 | 5. Coach Quality Lift | 0/0 | Not started | - |
 | 6. Admin Substrate & Distribution | 0/0 | Not started | - |

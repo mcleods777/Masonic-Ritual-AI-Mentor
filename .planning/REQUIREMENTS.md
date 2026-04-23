@@ -66,9 +66,9 @@ All baked in Shannon's lodge's working; all ship with pre-baked Opus per line so
 
 Solo-author tooling so Shannon can bake five rituals worth of content without spending weekends on it.
 
-- [ ] **AUTHOR-01**: Content-addressed bake cache at `rituals/_bake-cache/` keyed on `sha256(voice + style + text + modelId + KEY_VERSION)`; single-line edits rebake 1 line, not 155
+- [x] **AUTHOR-01**: Content-addressed bake cache at `rituals/_bake-cache/` keyed on `sha256(voice + style + text + modelId + KEY_VERSION)`; single-line edits rebake 1 line, not 155 (Phase 3 Plan 05, commits 0b0c4ea + 5e32cb9)
 - [ ] **AUTHOR-02**: `scripts/bake-all.ts` orchestrator with `--since <git-ref>`, `--dry-run`, `--resume`, `--parallel N` flags
-- [ ] **AUTHOR-03**: `gemini-3.1-flash-tts-preview` prioritized in `GEMINI_TTS_MODELS` fallback chain; older previews retained as fallback
+- [x] **AUTHOR-03**: `gemini-3.1-flash-tts-preview` prioritized in `GEMINI_TTS_MODELS` fallback chain; older previews retained as fallback (Phase 3 Plan 05, commit 0b0c4ea — D-12 rationale comment pinned + DEFAULT_MODELS exported)
 - [ ] **AUTHOR-04**: Bake pipeline fixes the ultra-short-line silent-skip bug recorded in `bake.log` — lines below the Gemini minimum route to an alternate engine, never silently drop
 - [ ] **AUTHOR-05**: `src/lib/author-validation.ts` cipher/plain parity validator enforces same speaker, same action tags, and a word-count ratio band per line — bake refuses on failure
 - [ ] **AUTHOR-06**: Audio-duration-anomaly detector flags any baked line whose duration is implausibly short or long given its text length (catches voice-cast preamble leak into the audio)
@@ -193,9 +193,9 @@ Each v1 requirement maps to exactly one phase. Populated by `gsd-roadmapper` on 
 | CONTENT-05 | Phase 4 | Pending |
 | CONTENT-06 | Phase 4 | Pending |
 | CONTENT-07 | Phase 4 | Pending |
-| AUTHOR-01 | Phase 3 | Pending |
+| AUTHOR-01 | Phase 3 | Complete (03-05, 2026-04-23) |
 | AUTHOR-02 | Phase 3 | Pending |
-| AUTHOR-03 | Phase 3 | Pending |
+| AUTHOR-03 | Phase 3 | Complete (03-05, 2026-04-23) |
 | AUTHOR-04 | Phase 3 | Pending |
 | AUTHOR-05 | Phase 3 | Pending |
 | AUTHOR-06 | Phase 3 | Pending |
