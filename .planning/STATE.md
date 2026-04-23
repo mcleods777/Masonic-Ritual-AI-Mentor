@@ -3,18 +3,18 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-04-23T19:05:04Z"
+last_updated: "2026-04-23T19:32:00Z"
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 24
-  completed_plans: 21
-  percent: 88
+  completed_plans: 22
+  percent: 92
 ---
 
 # State: Masonic Ritual AI Mentor — v1 Invited-Lodge Milestone
 
-**Last updated:** 2026-04-23 (Phase 3 Plan 05 landed — cache v3 bump + modelId key + legacy migration)
+**Last updated:** 2026-04-23 (Phase 3 Plan 06 landed — all five bake-time gates wired into build-mram-from-dialogue.ts + shared scripts/lib/resume-state.ts + scripts/lib/bake-math.ts)
 
 ## Project Reference
 
@@ -27,12 +27,12 @@ progress:
 ## Current Position
 
 Phase: 03 (Authoring Throughput) — EXECUTING
-Plan: 6 of 8 (Plans 01 + 02 + 03 + 04 + 05 complete; SUMMARIES at `.planning/phases/03-authoring-throughput/03-01-SUMMARY.md`, `03-02-SUMMARY.md`, `03-03-SUMMARY.md`, `03-04-SUMMARY.md`, `03-05-SUMMARY.md`)
+Plan: 7 of 8 (Plans 01 + 02 + 03 + 04 + 05 + 06 complete; SUMMARIES at `.planning/phases/03-authoring-throughput/03-01-SUMMARY.md`, `03-02-SUMMARY.md`, `03-03-SUMMARY.md`, `03-04-SUMMARY.md`, `03-05-SUMMARY.md`, `03-06-SUMMARY.md`)
 **Milestone:** v1 invited-lodge
 **Phase:** Phase 2 MERGED to main (PR #68 → merge commit `d2e02cc`, 2026-04-22)
-**Plan:** Phase 2 9/9 complete; Phase 3 5/8 complete
+**Plan:** Phase 2 9/9 complete; Phase 3 6/8 complete
 **Status:** Executing Phase 03
-**Progress:** [████████░░] 88%
+**Progress:** [█████████░] 92%
 
 ```
 [█████░░░░░░░░░░░░░░░] 29% (2/7 phases)
@@ -48,7 +48,7 @@ mcleods777@gmail.com, ajw71681@gmail.com (Amanda), wadeburger@rocketmail.com, bs
 
 **Resend sending domain:** `masonicmentor.app` verified via Cloudflare DNS (DKIM+SPF+DMARC); `MAGIC_LINK_FROM_EMAIL=mentor@masonicmentor.app`.
 
-**Next action:** Phase 3 Plan 03-06 (bake-integration: validator gate + short-line Google TTS + duration-anomaly detector + --verify-audio wiring into `build-mram-from-dialogue.ts`, AUTHOR-04/05/06/07). Plan 03-05 landed on `gsd/phase-3-authoring-throughput` — cache key bumped to `"v3"` with modelId in sha256 material (AUTHOR-01 D-02); `CACHE_DIR` moved from `~/.cache/masonic-mram-audio/` to `rituals/_bake-cache/` (AUTHOR-01 D-01); `migrateLegacyCacheIfNeeded()` is a one-shot `fs.cp` COPY helper that preserves OLD for rollback; `DEFAULT_MODELS` exported with an AUTHOR-03 D-12 rationale comment pinning 3.1-flash-tts-preview-first; `isLineCached` + `invalidate-mram-cache.ts` updated to probe the full model chain; 13 new tests passing in `scripts/__tests__/render-gemini-audio-cache.test.ts` (5 cacheKey + 6 migration + 1 version guard + 1 D-12 comment guard). Full suite: 445 passed + 42 todo + 3 skipped (the three remaining Wave 0 scaffolds for Plans 06/07/08). On Shannon's dev machine, 475 `.opus` entries live in the legacy location and will copy to `rituals/_bake-cache/` on first Phase-3 bake (most will re-render under v3, but OLD is preserved). Plans 03-06, 03-07, 03-08 can now consume `renderLineAudio` + `computeCacheKey` + `CACHE_DIR` imports from the stable Plan-05 surface; no blockers.
+**Next action:** Phase 3 Plan 03-07 (bake-all orchestrator: `scripts/bake-all.ts` with --since / --dry-run / --resume / --parallel + p-limit + reads shared ResumeState types from scripts/lib/resume-state.ts written by Plan 06, AUTHOR-02 / AUTHOR-09). Plan 03-06 landed on `gsd/phase-3-authoring-throughput` — all five bake-time gates wired into `scripts/build-mram-from-dialogue.ts`: validateOrFail (D-08) runs before passphrase prompt and exits 1 on any severity-error issue; googleTtsBakeCall (D-09) replaces the short-line hard-skip with direct Google Cloud TTS REST (OGG_OPUS native, NO preamble per Pitfall 4, ?key= redacted); addAndCheckAnomaly (D-10) per-ritual rolling median + strict >3.0×/<0.3× with first-30-samples skip (Pitfall 6); verifyAudioRoundTrip (D-11) opt-in --verify-audio direct Groq Whisper call (warn-only, VERIFY_AUDIO_DIFF_THRESHOLD env override default 2); markLineInFlight/markLineCompleted line-level _RESUME.json writes (D-06) via new shared scripts/lib/resume-state.ts. New scripts/lib/bake-math.ts extracted the pure-math helpers (computeMedianSecPerChar / isDurationAnomaly / wordDiff) for unit coverage; scripts/__tests__/bake-helpers.test.ts flipped from 11 it.todo stubs to 25 passing tests. Three atomic commits: 43209d2 (validator + short-line), 332b483 (anomaly + verify-audio), 04bb0e6 (resume-state + tests). Full suite: 470 passed + 30 todo across 41 files + 2 skipped. Zero plan deviations; two Rule 3 cascades (Blob ArrayBufferLike copy-to-Uint8Array, valueConsumingFlags positional-arg filter). Plan 07 can now `import { ResumeState, readResumeState } from './lib/resume-state'` and invoke `build-mram-from-dialogue.ts --resume-state-path ... --ritual-slug ... --skip-line-ids ...` per the D-06 contract; no blockers.
 
 ## Phase Map
 
@@ -92,6 +92,13 @@ mcleods777@gmail.com, ajw71681@gmail.com (Amanda), wadeburger@rocketmail.com, bs
 | Plan 03-05 extended `isLineCached` to probe entire model chain (Option A parity with renderLineAudio) | `isLineCached` calls `computeCacheKey` internally — without updating its signature the build breaks on the 4→5 param change. Added optional `models` param defaulting to `readModelsFromEnv() ?? DEFAULT_MODELS`; the 2 external callers compile unchanged and now correctly reflect post-D-02 cache semantics where a line can have entries under multiple modelIds. | Plan 03-05 execution |
 | Plan 03-05 exported CACHE_DIR, OLD_CACHE_DIR, CACHE_KEY_VERSION, DEFAULT_MODELS as module-level exports | invalidate-mram-cache.ts previously hardcoded its own copy of the cache path (`${HOME}/.cache/masonic-mram-audio`) — a drift hazard even before D-01, guaranteed-broken after. Exporting the constants from the canonical module eliminates the drift class; tests can also assert against the source of truth. | Plan 03-05 execution |
 | Plan 03-05 invalidation loop deletes ALL model-variant entries per line, not one | Post-D-02 the cache can hold multiple entries per line (one per modelId that rendered it across runs in the fallback chain). Deleting only one variant would leave orphan entries that re-bake would cache-hit and never refresh. Summary surfaces the count: `DELETED (2 entries across model chain)`. | Plan 03-05 execution |
+| Plan 03-06 validator gate runs BEFORE passphrase prompt | No reason to make the user type a passphrase for a bake that's going to exit(1) on D-08 errors — existence check → validator → passphrase is the correct ordering. | Plan 03-06 execution |
+| Plan 03-06 Buffer→Blob copies bytes into a fresh Uint8Array | Node Buffer's ArrayBufferLike union includes SharedArrayBuffer which DOM Blob's strict BlobPart typing rejects (TS2322). Cast-based fixes failed; copying is O(n) on small Opus bytes and removes type gymnastics. | Plan 03-06 execution |
+| Plan 03-06 bakeAudioIntoDoc takes a single ResumeOptions param (not 3) | Matches the existing speakAsByLineId = new Map() default-param idiom on the same function. Keeps the main() callsite readable. | Plan 03-06 execution |
+| Plan 03-06 markLineInFlight runs INSIDE each render branch (not at top of loop) | --skip-line-ids must short-circuit first. Skipping a completed line should NOT re-mark it as inFlightLineIds — that would trigger unnecessary state writes and overwrite the orchestrator's completedLineIds snapshot. | Plan 03-06 execution |
+| Plan 03-06 PersistentTextTokenRegression catch leaves lineId in inFlightLineIds | Orchestrator re-dispatches on next run. If regressing again, Shannon edits the dialogue — regression is loud, never silent (cf. D-10 auto-evict rejection rationale). | Plan 03-06 execution |
+| Plan 03-06 pure math helpers extracted to scripts/lib/bake-math.ts | computeMedianSecPerChar + isDurationAnomaly + wordDiff are load-bearing (catch voice-cast-scene-leaks pattern, underpin D-11 verify); pure functions are unit-testable independently of a real bake. build-mram wraps with local names to preserve the existing grep criterion and function-name stability. | Plan 03-06 execution |
+| Plan 03-06 scripts/lib/ established as first-class shared-utils home | Formerly only src/lib/ was for shared utilities. Plan 07's bake-all.ts + Plan 08's preview-bake.ts can now import from scripts/lib/ the same way — resume-state + bake-math are the first residents. | Plan 03-06 execution |
 
 ### Open Questions / Todos
 
@@ -119,9 +126,9 @@ None.
 
 ## Session Continuity
 
-**Last significant action:** Phase 3 Plan 05 (cache migration: v3 bump + modelId + legacy migration, AUTHOR-01 + AUTHOR-03) executed on 2026-04-23. Two commits on `gsd/phase-3-authoring-throughput`: `0b0c4ea` landed all implementation edits — `CACHE_KEY_VERSION = "v3"`, `computeCacheKey(text, style, voice, modelId, preamble)` 5-param signature with modelId between voice and preamble in sha256 material, `CACHE_DIR` moved to `path.resolve("rituals/_bake-cache")`, `OLD_CACHE_DIR` retained for rollback, one-shot `migrateLegacyCacheIfNeeded(cacheDir, oldDir = OLD_CACHE_DIR)` `fs.cp` COPY helper with module-level `migrationRan` flag + `__resetMigrationFlagForTests` hook, `DEFAULT_MODELS` exported with AUTHOR-03 D-12 rationale comment pinning 3.1-flash-tts-preview-first order, `renderLineAudio` rewritten to probe full model chain (Option A) and write under actually-used model, `isLineCached` extended to iterate chain, `invalidate-mram-cache.ts` updated to import `CACHE_DIR` + `DEFAULT_MODELS` and delete all model variants per targeted line; `5e32cb9` filled the Wave 0 scaffold at `scripts/__tests__/render-gemini-audio-cache.test.ts` with 13 passing tests (5 computeCacheKey invariants + 1 CACHE_KEY_VERSION regression guard + 6 migration tests + 1 D-12 comment regression guard). Full suite: 445 passed + 42 todo across 40 files + 3 skipped (remaining Wave 0 scaffolds for Plans 06/07/08); `npm run build` clean; `npx tsc --noEmit` shows 0 errors in touched files (26 pre-existing errors in unrelated files are out of scope). Zero deviations from plan — only Rule 3 (blocking) cascades applied: `isLineCached` signature extension and `invalidate-mram-cache.ts` hardcoded-path cleanup, both unavoidable given the `computeCacheKey` signature change. Shannon's dev machine has 475 legacy `.opus` entries that will copy on first Phase-3 bake; OLD preserved.
+**Last significant action:** Phase 3 Plan 06 (bake-integration: all 5 Phase-3 bake-time gates wired into scripts/build-mram-from-dialogue.ts, AUTHOR-02/04/05/06/07) executed on 2026-04-23. Three atomic commits on `gsd/phase-3-authoring-throughput`: `43209d2` added validateOrFail() pre-render gate (D-08: runs after existence check, BEFORE passphrase prompt, exits 1 on severity='error' lineIssues or !structureOk; no --force) + googleTtsBakeCall() (D-09: direct POST to texttospeech.googleapis.com with OGG_OPUS native + {input:{text}} only body + ?key= redaction in error surface) + replaced the short-line hard-skip / tooShortIds logic with a Google-route preShortLineGoogle / shortLineIds branch that embeds OGG_OPUS bytes identically to the Gemini path; `332b483` added AnomalyCheckState + addAndCheckAnomaly (D-10: per-ritual rolling median sec-per-char, strict r > 3.0 OR r < 0.3 trigger, first 30 samples skip per Pitfall 6, auto-evict rejected by design) + verifyAudioRoundTrip direct Groq Whisper call (D-11: whisper-large-v3, bearer GROQ_API_KEY, form-data, warn-only) + VERIFY_AUDIO_DIFF_THRESHOLD env default 2 + --verify-audio flag threaded through bakeAudioIntoDoc + end-of-bake verify roll-up; `04bb0e6` created scripts/lib/resume-state.ts (exports ResumeState interface + readResumeState + writeResumeStateAtomic tmp+rename POSIX-atomic) and scripts/lib/bake-math.ts (exports pure computeMedianSecPerChar + isDurationAnomaly + wordDiff), wired --resume-state-path / --ritual-slug / --skip-line-ids CLI args (with valueConsumingFlags positional-arg filter fix), added markLineInFlight/markLineCompleted helpers inside bakeAudioIntoDoc, wired them into both Gemini and Google short-line render branches (before/after render), made build-mram's inline computeMedianSecPerChar a thin wrapper delegating to bake-math's extracted version, replaced verifyAudioRoundTrip's inline set-diff with wordDiff(), and filled the Plan-01 Wave 0 scaffold at scripts/__tests__/bake-helpers.test.ts with 25 passing tests (7 resume-state + 5 median + 7 anomaly + 6 wordDiff). Full suite: 470 passed + 30 todo across 41 files + 2 skipped (bake-helpers went from skipped to passing — Wave 0 scaffolds now 2 remaining: Plans 07 and 08); `npm run build` clean; `npx tsc --noEmit` shows 0 errors in touched files (26 pre-existing errors in unrelated files persist — same set as Plan 05 baseline). Zero plan deviations; two Rule 3 (blocking) cascades: Buffer→Blob ArrayBufferLike copy-to-Uint8Array workaround (otherwise TS2322 on new Blob([buf])), and valueConsumingFlags Set-based positional-arg filter (otherwise --resume-state-path's value feeds into the 3-positional-arg check). Shannon needs GOOGLE_CLOUD_TTS_API_KEY + GROQ_API_KEY (already in .env for Phase 2) for the new gates at bake time.
 
-**Resumption cue:** Next action: Plan 03-06 (bake-integration for AUTHOR-04/05/06/07: wire validator gate + short-line Google TTS + duration-anomaly detector + --verify-audio into build-mram-from-dialogue.ts). Plans 03-01 through 03-05 complete; Wave 3 (06, 07, 08) unblocked. `renderLineAudio` + `computeCacheKey` + `CACHE_DIR` are now stable public exports from `scripts/render-gemini-audio.ts`.
+**Resumption cue:** Next action: Plan 03-07 (bake-all orchestrator for AUTHOR-02/09: scripts/bake-all.ts with --since / --dry-run / --resume / --parallel + p-limit). Plan 07 can now `import { ResumeState, readResumeState } from './lib/resume-state'` (written by Plan 06's build-mram) and invoke `scripts/build-mram-from-dialogue.ts --resume-state-path <path> --ritual-slug <slug> --skip-line-ids <csv>` per the D-06 contract. scripts/__tests__/bake-all.test.ts Wave 0 scaffold from Plan 01 still waiting to be filled. Only Plans 07 and 08 remain in Phase 3.
 
 **Critical context for next agent:**
 
@@ -145,3 +152,4 @@ None.
 *Phase 3 Plan 03 executed: 2026-04-23 (2/2 tasks, 2 commits, 1 file created, 2 modified, ~8min)*
 *Phase 3 Plan 04 executed: 2026-04-23 (commit 76c565f; author-validation D-08 bake-band)*
 *Phase 3 Plan 05 executed: 2026-04-23 (2/2 tasks, 2 commits 0b0c4ea + 5e32cb9, 1 SUMMARY created, 3 files modified, ~7min)*
+*Phase 3 Plan 06 executed: 2026-04-23 (3/3 tasks, 3 commits 43209d2 + 332b483 + 04bb0e6, 1 SUMMARY + 2 new scripts/lib modules created, 2 files modified, ~30min)*

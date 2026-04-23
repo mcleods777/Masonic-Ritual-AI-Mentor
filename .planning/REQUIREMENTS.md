@@ -67,12 +67,12 @@ All baked in Shannon's lodge's working; all ship with pre-baked Opus per line so
 Solo-author tooling so Shannon can bake five rituals worth of content without spending weekends on it.
 
 - [x] **AUTHOR-01**: Content-addressed bake cache at `rituals/_bake-cache/` keyed on `sha256(voice + style + text + modelId + KEY_VERSION)`; single-line edits rebake 1 line, not 155 (Phase 3 Plan 05, commits 0b0c4ea + 5e32cb9)
-- [ ] **AUTHOR-02**: `scripts/bake-all.ts` orchestrator with `--since <git-ref>`, `--dry-run`, `--resume`, `--parallel N` flags
+- [ ] **AUTHOR-02**: `scripts/bake-all.ts` orchestrator with `--since <git-ref>`, `--dry-run`, `--resume`, `--parallel N` flags (Phase 3 Plan 06 landed the D-06 line-level resume-state primitive — `scripts/lib/resume-state.ts` + `_RESUME.json` atomic writes in `build-mram-from-dialogue.ts`, commit 04bb0e6; Plan 03-07 will land the orchestrator itself)
 - [x] **AUTHOR-03**: `gemini-3.1-flash-tts-preview` prioritized in `GEMINI_TTS_MODELS` fallback chain; older previews retained as fallback (Phase 3 Plan 05, commit 0b0c4ea — D-12 rationale comment pinned + DEFAULT_MODELS exported)
-- [ ] **AUTHOR-04**: Bake pipeline fixes the ultra-short-line silent-skip bug recorded in `bake.log` — lines below the Gemini minimum route to an alternate engine, never silently drop
-- [ ] **AUTHOR-05**: `src/lib/author-validation.ts` cipher/plain parity validator enforces same speaker, same action tags, and a word-count ratio band per line — bake refuses on failure
-- [ ] **AUTHOR-06**: Audio-duration-anomaly detector flags any baked line whose duration is implausibly short or long given its text length (catches voice-cast preamble leak into the audio)
-- [ ] **AUTHOR-07**: Optional STT round-trip diff per line in bake pipeline — cheap last-line-of-defense against audio that doesn't match the text
+- [x] **AUTHOR-04**: Bake pipeline fixes the ultra-short-line silent-skip bug recorded in `bake.log` — lines below the Gemini minimum now route to Google Cloud TTS via `googleTtsBakeCall()` at bake time and embed OGG_OPUS bytes the same way as the Gemini path (Phase 3 Plan 06, commit 43209d2 — D-09 implementation)
+- [x] **AUTHOR-05**: `src/lib/author-validation.ts` cipher/plain parity validator enforces same speaker, same action tags, and a word-count ratio band per line — bake refuses on failure (Phase 3 Plan 04 added the D-08 bake-band severity='error' check in commit 76c565f; Phase 3 Plan 06 wired `validateOrFail()` into build-mram-from-dialogue.ts as the pre-render gate that exits 1 on any severity='error' issue, commit 43209d2)
+- [x] **AUTHOR-06**: Audio-duration-anomaly detector flags any baked line whose duration is implausibly short or long given its text length (catches voice-cast preamble leak into the audio) — `addAndCheckAnomaly()` per-ritual rolling median with strict >3.0× / <0.3× hard-fail and first-30-samples skip (Pitfall 6); pure math helpers extracted to `scripts/lib/bake-math.ts` with 12 unit tests (Phase 3 Plan 06, commits 332b483 + 04bb0e6 — D-10 implementation)
+- [x] **AUTHOR-07**: Optional STT round-trip diff per line in bake pipeline — cheap last-line-of-defense against audio that doesn't match the text — `--verify-audio` opt-in flag (default off) pipes each Opus through Groq Whisper via direct API call and prints a word-diff roll-up; warn-only, never hard-fails the bake; threshold env-overridable via `VERIFY_AUDIO_DIFF_THRESHOLD` default 2 (Phase 3 Plan 06, commits 332b483 + 04bb0e6 — D-11 implementation)
 - [ ] **AUTHOR-08**: `scripts/preview-bake.ts` localhost-only server streams cached Opus for in-editor scrubbing before re-encrypting `.mram`; dev-guard identical to `/author/_guard.ts` (Plan 03-03 landed the dev-guard primitive at `src/lib/dev-guard.ts` + rewired `/author/page.tsx` — commits 4eda2b4 + a61a47d; Plan 03-08 will land the preview-bake.ts server that imports `assertDevOnly()` from it)
 - [ ] **AUTHOR-09**: `p-limit` concurrency cap on parallel Gemini TTS calls in `build-mram-from-dialogue.ts`
 - [x] **AUTHOR-10**: `src/lib/idb-schema.ts` extracted as the single source of truth for `DB_VERSION` shared between `storage.ts` and `voice-storage.ts`; also houses the new `feedbackTraces` store (Phase 3 Plan 02, commits 43774bd + a90ffe2)
@@ -194,12 +194,12 @@ Each v1 requirement maps to exactly one phase. Populated by `gsd-roadmapper` on 
 | CONTENT-06 | Phase 4 | Pending |
 | CONTENT-07 | Phase 4 | Pending |
 | AUTHOR-01 | Phase 3 | Complete (03-05, 2026-04-23) |
-| AUTHOR-02 | Phase 3 | Pending |
+| AUTHOR-02 | Phase 3 | Partial (03-06 landed D-06 resume-state primitive; 03-07 will land the bake-all.ts orchestrator) |
 | AUTHOR-03 | Phase 3 | Complete (03-05, 2026-04-23) |
-| AUTHOR-04 | Phase 3 | Pending |
-| AUTHOR-05 | Phase 3 | Pending |
-| AUTHOR-06 | Phase 3 | Pending |
-| AUTHOR-07 | Phase 3 | Pending |
+| AUTHOR-04 | Phase 3 | Complete (03-06, 2026-04-23) |
+| AUTHOR-05 | Phase 3 | Complete (03-04 primitive + 03-06 wired, 2026-04-23) |
+| AUTHOR-06 | Phase 3 | Complete (03-06, 2026-04-23) |
+| AUTHOR-07 | Phase 3 | Complete (03-06, 2026-04-23) |
 | AUTHOR-08 | Phase 3 | Partial (Plan 03-03 landed dev-guard primitive; Plan 03-08 will land preview-bake.ts server) |
 | AUTHOR-09 | Phase 3 | Pending |
 | AUTHOR-10 | Phase 3 | Complete (03-02, 2026-04-23) |
