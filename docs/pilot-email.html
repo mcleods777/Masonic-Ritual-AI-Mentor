@@ -7,14 +7,14 @@
 <body style="margin: 0; padding: 24px; background: #f5f3ee; font-family: Georgia, 'Times New Roman', serif; color: #222; line-height: 1.55;">
 
 <!-- ────────────────────────────────────────────────────────────────────
-     Non-copied usage note. This banner is outside the "copy-this-part"
-     block below. Don't include it in the selection when you paste.
+     Non-copied usage note. user-select: none (plus vendor prefixes)
+     makes Ctrl+A skip this banner entirely, so a blanket select-all
+     never pulls the yellow "how to send" box into the pasted email.
      ──────────────────────────────────────────────────────────────────── -->
-<div style="max-width: 680px; margin: 0 auto 24px; background: #fff8e1; border-left: 4px solid #c9962c; padding: 14px 18px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; color: #5a4410;">
+<div style="max-width: 680px; margin: 0 auto 24px; background: #fff8e1; border-left: 4px solid #c9962c; padding: 14px 18px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; color: #5a4410; user-select: none; -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none;">
   <strong style="font-size: 15px;">How to send this</strong>
   <ol style="margin: 8px 0 0; padding-left: 20px;">
-    <li>Click anywhere inside the beige bordered box below.</li>
-    <li>Press <strong>Ctrl/Cmd + A</strong> to select the body, then <strong>Ctrl/Cmd + C</strong> to copy.</li>
+    <li>Press <strong>Ctrl/Cmd + A</strong> to select, then <strong>Ctrl/Cmd + C</strong> to copy. (This yellow box is automatically excluded from the selection — only the email body below gets copied.)</li>
     <li>In Gmail, click <strong>Compose</strong> and paste into the message body. The six screenshots come through automatically.</li>
     <li>Subject line: <em>Masonic Ritual Mentor — your pilot invitation</em></li>
   </ol>
