@@ -73,7 +73,7 @@ Solo-author tooling so Shannon can bake five rituals worth of content without sp
 - [x] **AUTHOR-05**: `src/lib/author-validation.ts` cipher/plain parity validator enforces same speaker, same action tags, and a word-count ratio band per line — bake refuses on failure (Phase 3 Plan 04 added the D-08 bake-band severity='error' check in commit 76c565f; Phase 3 Plan 06 wired `validateOrFail()` into build-mram-from-dialogue.ts as the pre-render gate that exits 1 on any severity='error' issue, commit 43209d2)
 - [x] **AUTHOR-06**: Audio-duration-anomaly detector flags any baked line whose duration is implausibly short or long given its text length (catches voice-cast preamble leak into the audio) — `addAndCheckAnomaly()` per-ritual rolling median with strict >3.0× / <0.3× hard-fail and first-30-samples skip (Pitfall 6); pure math helpers extracted to `scripts/lib/bake-math.ts` with 12 unit tests (Phase 3 Plan 06, commits 332b483 + 04bb0e6 — D-10 implementation)
 - [x] **AUTHOR-07**: Optional STT round-trip diff per line in bake pipeline — cheap last-line-of-defense against audio that doesn't match the text — `--verify-audio` opt-in flag (default off) pipes each Opus through Groq Whisper via direct API call and prints a word-diff roll-up; warn-only, never hard-fails the bake; threshold env-overridable via `VERIFY_AUDIO_DIFF_THRESHOLD` default 2 (Phase 3 Plan 06, commits 332b483 + 04bb0e6 — D-11 implementation)
-- [ ] **AUTHOR-08**: `scripts/preview-bake.ts` localhost-only server streams cached Opus for in-editor scrubbing before re-encrypting `.mram`; dev-guard identical to `/author/_guard.ts` (Plan 03-03 landed the dev-guard primitive at `src/lib/dev-guard.ts` + rewired `/author/page.tsx` — commits 4eda2b4 + a61a47d; Plan 03-08 will land the preview-bake.ts server that imports `assertDevOnly()` from it)
+- [x] **AUTHOR-08**: `scripts/preview-bake.ts` localhost-only server streams cached Opus for in-editor scrubbing before re-encrypting `.mram`; dev-guard identical to `/author/page.tsx` via shared `src/lib/dev-guard.ts` (Plan 03-03 landed the dev-guard primitive; Plan 03-08 landed the 390-line preview-bake.ts on 127.0.0.1:8883 with assertDevOnly() at module load, ensureLoopback() refusing non-loopback hosts, defense-in-depth path-traversal safety (regex gate + path.resolve + fs.realpathSync containment for symlink-escape), RFC 7233 Range streaming, and 20 unit tests — commits a679360 + 643baf7)
 - [ ] **AUTHOR-09**: `p-limit` concurrency cap on parallel Gemini TTS calls in `build-mram-from-dialogue.ts`
 - [x] **AUTHOR-10**: `src/lib/idb-schema.ts` extracted as the single source of truth for `DB_VERSION` shared between `storage.ts` and `voice-storage.ts`; also houses the new `feedbackTraces` store (Phase 3 Plan 02, commits 43774bd + a90ffe2)
 
@@ -200,7 +200,7 @@ Each v1 requirement maps to exactly one phase. Populated by `gsd-roadmapper` on 
 | AUTHOR-05 | Phase 3 | Complete (03-04 primitive + 03-06 wired, 2026-04-23) |
 | AUTHOR-06 | Phase 3 | Complete (03-06, 2026-04-23) |
 | AUTHOR-07 | Phase 3 | Complete (03-06, 2026-04-23) |
-| AUTHOR-08 | Phase 3 | Partial (Plan 03-03 landed dev-guard primitive; Plan 03-08 will land preview-bake.ts server) |
+| AUTHOR-08 | Phase 3 | Complete (03-03 dev-guard primitive + 03-08 preview-bake.ts, 2026-04-23) |
 | AUTHOR-09 | Phase 3 | Pending |
 | AUTHOR-10 | Phase 3 | Complete (03-02, 2026-04-23) |
 | ADMIN-01 | Phase 6 | Pending |

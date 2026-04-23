@@ -88,7 +88,7 @@ Plans:
 - [x] 03-05-cache-migration-PLAN.md — AUTHOR-01 + AUTHOR-03: bump cache key to v3, add modelId, move cache to rituals/_bake-cache/, one-shot migration, lock DEFAULT_MODELS order (2026-04-23, commits 0b0c4ea + 5e32cb9)
 - [x] 03-06-bake-integration-PLAN.md — AUTHOR-02/04/05/06/07: wire validator gate + short-line Google TTS + duration-anomaly detector + --verify-audio + line-level _RESUME.json writes (D-06) into build-mram-from-dialogue.ts; new scripts/lib/resume-state.ts + scripts/lib/bake-math.ts (2026-04-23, commits 43209d2 + 332b483 + 04bb0e6)
 - [x] 03-07-bake-all-orchestrator-PLAN.md — AUTHOR-02/09: scripts/bake-all.ts with --since/--dry-run/--resume/--parallel + p-limit + _RESUME.json read-side + validator gate + build-mram spawn-arg plumbing + 27 unit tests (2026-04-23, commits 54e7ed5 + 61277b1)
-- [ ] 03-08-preview-bake-PLAN.md — AUTHOR-08: scripts/preview-bake.ts localhost-only cache scrubber with dev-guard + loopback-only bind + path-traversal-safe Opus streaming
+- [x] 03-08-preview-bake-PLAN.md — AUTHOR-08: scripts/preview-bake.ts localhost-only cache scrubber with dev-guard + loopback-only bind + defense-in-depth path-traversal safety (regex gate + path.resolve + fs.realpathSync containment for symlink-escape) + RFC 7233 Range streaming + 20 unit tests (2026-04-23, commits a679360 + 643baf7)
 **UI hint**: no
 
 ### Phase 4: Content Coverage
@@ -153,8 +153,8 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Pre-invite Hygiene | 7/7 | Complete (UAT pending) | 2026-04-21 |
-| 2. Safety Floor | 0/9 | Not started | - |
-| 3. Authoring Throughput | 7/8 | In progress | - |
+| 2. Safety Floor | 9/9 | Complete (merged to main PR #68) | 2026-04-22 |
+| 3. Authoring Throughput | 8/8 | Execution complete (merge PR pending) | 2026-04-23 |
 | 4. Content Coverage | 0/0 | Not started | - |
 | 5. Coach Quality Lift | 0/0 | Not started | - |
 | 6. Admin Substrate & Distribution | 0/0 | Not started | - |
