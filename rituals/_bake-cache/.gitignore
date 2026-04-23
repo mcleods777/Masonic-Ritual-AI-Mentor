@@ -1,0 +1,4 @@
+# Content-addressed bake cache — local only, never committed (AUTHOR-01 D-01).
+# Every file in this directory is gitignored EXCEPT this .gitignore itself.
+*
+!.gitignore
