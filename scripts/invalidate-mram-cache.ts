@@ -32,7 +32,12 @@
 import * as fs from "node:fs";
 import { parseDialogue } from "../src/lib/dialogue-format";
 import { buildFromDialogue } from "../src/lib/dialogue-to-mram";
-import { computeCacheKey, deleteCacheEntry } from "./render-gemini-audio";
+import {
+  CACHE_DIR,
+  DEFAULT_MODELS,
+  computeCacheKey,
+  deleteCacheEntry,
+} from "./render-gemini-audio";
 import {
   buildPreamble,
   validateVoiceCast,
@@ -285,25 +290,17 @@ async function main() {
         ? preambleByRole[line.role] ?? ""
         : "";
 
-    const cacheKey = computeCacheKey(cleanText, line.style, voice, preamble);
+    // AUTHOR-01 D-02: cache keys now include modelId. We don't know at
+    // invalidation time which model rendered the cached entry, so iterate
+    // the entire fallback chain and check each key. Any hit gets deleted.
+    const candidateKeys = DEFAULT_MODELS.map((modelId) =>
+      computeCacheKey(cleanText, line.style, voice, modelId, preamble),
+    );
+    const existingKeys = candidateKeys.filter((cacheKey) =>
+      fs.existsSync(`${CACHE_DIR}/${cacheKey}.opus`),
+    );
 
-    // Check if cached without touching the cache dir ourselves — defer
-    // to the deleteCacheEntry helper so we reuse its logic.
-    // Tactic: dry-run by checking existence via fs.existsSync in the
-    // invalidation helper's path. Since deleteCacheEntry only deletes
-    // if the file exists (returns boolean), we can use its return value
-    // to tell cache-hit vs cache-miss, but only after deciding to delete.
-    //
-    // For dry-run we need a separate existence check. Mirror the path
-    // computation from deleteCacheEntry: CACHE_DIR/{key}.opus
-    const cacheDir =
-      process.env.XDG_CACHE_HOME
-        ? `${process.env.XDG_CACHE_HOME}/masonic-mram-audio`
-        : `${process.env.HOME}/.cache/masonic-mram-audio`;
-    const cachePath = `${cacheDir}/${cacheKey}.opus`;
-    const exists = fs.existsSync(cachePath);
-
-    if (!exists) {
+    if (existingKeys.length === 0) {
       console.error(
         `  id=${line.id.toString().padStart(3)} ${line.role.padEnd(8)}  "${cleanText.slice(0, 40)}${cleanText.length > 40 ? "…" : ""}" — not cached`,
       );
@@ -311,17 +308,26 @@ async function main() {
       continue;
     }
 
-    foundInCache++;
+    foundInCache += existingKeys.length;
 
     if (args.yes) {
-      const actuallyDeleted = deleteCacheEntry(cacheKey);
-      if (actuallyDeleted) deleted++;
+      let anyDeleted = false;
+      for (const cacheKey of existingKeys) {
+        const actuallyDeleted = deleteCacheEntry(cacheKey);
+        if (actuallyDeleted) {
+          deleted++;
+          anyDeleted = true;
+        }
+      }
       console.error(
-        `  id=${line.id.toString().padStart(3)} ${line.role.padEnd(8)}  "${cleanText.slice(0, 40)}${cleanText.length > 40 ? "…" : ""}" — ${actuallyDeleted ? "DELETED" : "already gone"}`,
+        `  id=${line.id.toString().padStart(3)} ${line.role.padEnd(8)}  "${cleanText.slice(0, 40)}${cleanText.length > 40 ? "…" : ""}" — ${anyDeleted ? `DELETED (${existingKeys.length} entr${existingKeys.length === 1 ? "y" : "ies"} across model chain)` : "already gone"}`,
       );
     } else {
+      const keyPreview = existingKeys
+        .map((k) => k.slice(0, 12) + "…")
+        .join(", ");
       console.error(
-        `  id=${line.id.toString().padStart(3)} ${line.role.padEnd(8)}  "${cleanText.slice(0, 40)}${cleanText.length > 40 ? "…" : ""}" — would delete (cacheKey=${cacheKey.slice(0, 12)}…)`,
+        `  id=${line.id.toString().padStart(3)} ${line.role.padEnd(8)}  "${cleanText.slice(0, 40)}${cleanText.length > 40 ? "…" : ""}" — would delete ${existingKeys.length} entr${existingKeys.length === 1 ? "y" : "ies"} (cacheKey(s)=${keyPreview})`,
       );
     }
   }
