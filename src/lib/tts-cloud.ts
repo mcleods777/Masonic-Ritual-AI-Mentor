@@ -4,10 +4,6 @@
  * Each engine calls its corresponding Next.js API route (which holds
  * the secret API key) and plays back the returned audio via an
  * HTMLAudioElement.
- *
- * For the canonical per-engine role-to-voice tables (and the gender
- * guardrails that keep female voices out of Masonic audio), see
- * `docs/VOICE-MAPS.md`. Keep that doc and the tables below in sync.
  */
 
 import { fetchApi } from "./api-fetch";
@@ -20,6 +16,15 @@ let currentAudio: HTMLAudioElement | null = null;
 let currentResolve: (() => void) | null = null;
 let currentAbort: AbortController | null = null;
 
+// Monotonic token. stopCloudAudio() bumps it to invalidate anything
+// currently in flight; every playAudioBlob() captures the latest token
+// at entry and re-reads before calling audio.play(). If another caller
+// has bumped it since, this playback is stale and never starts.
+// Prevents the "two rapid taps both reach playAudioBlob, both start
+// audio.play() before the pause() from the second call catches the
+// first" race — which produces audible voice overlap on mobile.
+let playToken = 0;
+
 /** Get a new AbortSignal for a TTS fetch. Aborts any previous in-flight fetch. */
 export function getTTSAbortSignal(): AbortSignal {
   if (currentAbort) currentAbort.abort();
@@ -31,35 +36,59 @@ export function getTTSAbortSignal(): AbortSignal {
 export function playAudioBlob(blob: Blob): Promise<void> {
   return new Promise((resolve, reject) => {
     stopCloudAudio();
+    // After stopCloudAudio() (which bumped playToken to invalidate any
+    // prior call), claim the next token for this call. Anyone who
+    // bumps after this will be newer than us; we'll see it.
+    const myToken = ++playToken;
+
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
     currentAudio = audio;
     currentResolve = resolve;
 
-    // Ownership-guarded cleanup: only null the module-level refs if THIS
-    // audio is still the current one. Without these guards, a stale
-    // handler from a previous playAudioBlob (whose .play() promise is
-    // still settling when the next one starts) would wipe the new
-    // audio's reference — leaving audio playing that stopCloudAudio()
-    // can no longer find, which is how "voices keep playing and Stop
-    // doesn't stop them" manifests.
-    const cleanup = () => {
-      URL.revokeObjectURL(url);
-      if (currentAudio === audio) currentAudio = null;
-      if (currentResolve === resolve) currentResolve = null;
-    };
-
     audio.onended = () => {
-      cleanup();
+      URL.revokeObjectURL(url);
+      if (currentAudio === audio) {
+        currentAudio = null;
+        currentResolve = null;
+      }
       resolve();
     };
     audio.onerror = () => {
-      cleanup();
+      URL.revokeObjectURL(url);
+      if (currentAudio === audio) {
+        currentAudio = null;
+        currentResolve = null;
+      }
       reject(new Error("Cloud TTS audio playback failed"));
     };
 
+    // Final stale check just before actually starting playback. If
+    // another playAudioBlob() call bumped the token between our
+    // `++playToken` above and here, we're about to play a line the
+    // user already moved past — bail before the browser emits sound.
+    if (myToken !== playToken) {
+      URL.revokeObjectURL(url);
+      if (currentAudio === audio) {
+        currentAudio = null;
+        currentResolve = null;
+      }
+      resolve();
+      return;
+    }
+
     audio.play().catch((err) => {
-      cleanup();
+      URL.revokeObjectURL(url);
+      if (currentAudio === audio) {
+        currentAudio = null;
+        currentResolve = null;
+      }
+      // Browser throws AbortError when we pause() a still-loading audio;
+      // that's expected during rapid-tap interruption, not a real error.
+      if (err instanceof DOMException && err.name === "AbortError") {
+        resolve();
+        return;
+      }
       reject(err);
     });
   });
@@ -67,22 +96,19 @@ export function playAudioBlob(blob: Blob): Promise<void> {
 
 /** Stop whatever cloud audio is currently playing and abort in-flight fetches. */
 export function stopCloudAudio(): void {
+  // Bump the token FIRST so any playAudioBlob() that is past its
+  // cache lookup but hasn't yet called audio.play() sees the bump
+  // and bails before starting playback.
+  playToken++;
   // Abort any in-flight TTS fetch so it doesn't start playback after we stop
   if (currentAbort) {
     currentAbort.abort();
     currentAbort = null;
   }
   if (currentAudio) {
-    const audio = currentAudio;
+    currentAudio.pause();
+    currentAudio.src = "";
     currentAudio = null;
-    // Detach event handlers BEFORE pause/src="" so the teardown doesn't
-    // trigger onerror, which would re-enter cleanup and fire reject on
-    // the playAudioBlob promise after we've already resolved it via
-    // currentResolve below.
-    audio.onended = null;
-    audio.onerror = null;
-    audio.pause();
-    audio.src = "";
   }
   // Resolve the pending playAudioBlob promise so callers (e.g. the
   // playFrom loop) don't hang forever waiting for audio that was stopped.
@@ -1037,51 +1063,23 @@ export const GEMINI_ROLE_VOICES: Record<string, string> = {
   Steward: "Rasalgethi", // distinctive male voice — attendant role
   Candidate: "Zubenelgenubi", // distinctive male — the new brother
   Narrator: "Enceladus", // breathy and soft — scene-setter voice
+  // Catechism (explanatory lecture): instructor asking, candidate answering.
+  // Without these, Q/A fall through roleToGroup → -1 → "Kore" (female) default,
+  // producing a girl voice on explanatory bakes. Q reuses Achird (warm/pedagogical)
+  // since that matches the voice-cast; A reuses Zubenelgenubi since A is the candidate.
+  Q: "Achird",
+  A: "Zubenelgenubi",
 };
 
 /**
- * Safe male fallback for any code path that needs a Gemini voice but
- * doesn't have a role-specific mapping (unknown roles, roles missing
- * from a Voxtral group default, the generic `speak()` entry point for
- * feedback/correction audio, etc.). Must never be a female voice —
- * Masonry is a men's fraternity and female voices in ritual/lecture
- * audio are never appropriate.
+ * Fallback voice for any path that can't find a mapped role (stale cache,
+ * typo in a role map, explanatory-lecture speaker label without a male
+ * mapping). Must be male — Masonry is a men's fraternity and female
+ * voices in ritual/lecture audio are never appropriate.
  */
 const GEMINI_MALE_FALLBACK_VOICE = "Enceladus";
 
-/**
- * Gemini voices that are female per Google's roster. Any caller path
- * that would otherwise pass one of these to the model gets rewritten
- * to GEMINI_MALE_FALLBACK_VOICE — defense in depth against a stale
- * cache, a typo in a role map, or an explanatory-lecture speaker label
- * that slipped through without a male mapping.
- */
-const GEMINI_FEMALE_VOICES = new Set<string>([
-  "Kore",
-  "Zephyr",
-  "Aoede",
-  "Callirrhoe",
-  "Autonoe",
-  "Despina",
-  "Erinome",
-  "Laomedeia",
-  "Leda",
-  "Pulcherrima",
-  "Sulafat",
-  "Vindemiatrix",
-  "Achernar",
-  "Gacrux",
-]);
-
-/** Sanitize a voice name — swap any known-female voice for the male fallback. */
-function ensureMaleGeminiVoice(voice: string | undefined): string {
-  if (!voice || GEMINI_FEMALE_VOICES.has(voice)) {
-    return GEMINI_MALE_FALLBACK_VOICE;
-  }
-  return voice;
-}
-
-/** Get the default Gemini voice for a Masonic role, or a neutral fallback. */
+/** Get the default Gemini voice for a Masonic role, or a male fallback. */
 export function getGeminiVoiceForRole(role: string): string {
   // Try exact match first, then try group-based resolution for alias roles.
   if (GEMINI_ROLE_VOICES[role]) return GEMINI_ROLE_VOICES[role];
@@ -1195,14 +1193,9 @@ async function blobToBase64(blob: Blob): Promise<string> {
  */
 export async function speakGemini(
   text: string,
-  options: { style?: string; voice?: string; embeddedAudio?: string } = {}
+  options: { style?: string; voice?: string; embeddedAudio?: string; role?: string } = {}
 ): Promise<void> {
-  // Sanitize: unknown/undefined/known-female voice names get rewritten to
-  // the safe male fallback. This is the last line of defense before the
-  // request hits Gemini — anything upstream can be buggy (stale .mram,
-  // typo in a role map, future-added voice we missed) and we still
-  // guarantee a male voice plays.
-  const voice = ensureMaleGeminiVoice(options.voice);
+  const voice = options.voice ?? "Kore";
 
   // Embedded-audio short-circuit: if the .mram had audio baked in for
   // this line at build time (v3+ format), play those bytes directly.
@@ -1226,6 +1219,18 @@ export async function speakGemini(
 
   const signal = getTTSAbortSignal();
   if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+
+  // Observability: baked audio is missing AND cache is cold, so we're
+  // about to hit the live /api/tts/gemini route. That's a bake gap.
+  // Users won't see anything (playback still proceeds), but you'll see
+  // these in devtools when debugging why a user had latency spikes.
+  console.warn("[tts-gap]", {
+    role: options.role ?? null,
+    voice,
+    style: options.style ?? null,
+    textPreview: text.slice(0, 60),
+    reason: "no-baked-audio",
+  });
 
   // Retry transient failures (429 rate-limit, 5xx). Mirrors the Voxtral
   // route's retry policy. Prevents mid-ritual fallback when Gemini
@@ -1310,6 +1315,7 @@ export async function speakGeminiAsRole(
     voice: getGeminiVoiceForRole(role),
     style,
     embeddedAudio,
+    role,
   });
 }
 
@@ -1324,7 +1330,7 @@ export async function prefetchGeminiLine(
   role: string,
   style?: string
 ): Promise<"hit" | "fetched" | "error"> {
-  const voice = ensureMaleGeminiVoice(getGeminiVoiceForRole(role));
+  const voice = getGeminiVoiceForRole(role);
   const cacheKey = await geminiCacheKey(text, style, voice);
 
   const hit = await getCachedAudio(cacheKey);

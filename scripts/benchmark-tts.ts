@@ -166,21 +166,6 @@ async function main() {
     console.log(` ERROR: ${err instanceof Error ? err.message : err}`);
   }
 
-  // AI Feedback
-  process.stdout.write(`  Groq Llama 3.3 (feedback)...`);
-  const feedbackStart = performance.now();
-  try {
-    const resp = await fetch(`${BASE_URL}/api/rehearsal-feedback`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ expected: TEST_TEXT, actual: TEST_TEXT, role: "WM" }),
-    });
-    const feedbackTime = Math.round(performance.now() - feedbackStart);
-    console.log(resp.ok ? ` ${feedbackTime}ms` : ` ${feedbackTime}ms (${resp.status})`);
-  } catch (err) {
-    console.log(` ERROR: ${err instanceof Error ? err.message : err}`);
-  }
-
   // Summary table
   console.log("\n" + "=".repeat(80));
   console.log("SUMMARY");

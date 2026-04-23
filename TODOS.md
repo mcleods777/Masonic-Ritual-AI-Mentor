@@ -125,6 +125,102 @@ features.
 
 ---
 
+### Delete unused TTS engine paths + stranded component files
+**Priority:** P3
+**What:** After the dropdown-removal PR lands, delete:
+- `src/components/TTSEngineSelector.tsx` (169 lines, unmounted)
+- `src/components/GeminiPreloadPanel.tsx` (189 lines, unmounted)
+- Every engine branch in `src/lib/text-to-speech.ts` and
+  `src/lib/tts-cloud.ts` except Gemini and Voxtral (Deepgram,
+  Kokoro, Google Cloud, Browser, ElevenLabs — all unreachable after UI
+  removal).
+- `fetchEngineAvailability`, `hasLocalVoices`, `preloadGeminiRitual`,
+  `countCachedGeminiLines` if they become dead after the auto-preload
+  refactor.
+
+**Why:** The shallow-scope dropdown-removal PR leaves ~400+ lines of
+dead code on disk. CLAUDE.md says no half-finished implementations;
+this item closes the loop.
+
+**Pros:** Mental model matches reality. Smaller bundle. No "mystery
+engines" for a future reader to wonder about. Test matrix shrinks to
+2 sources (baked Gemini + Voxtral override).
+
+**Cons:** Non-trivial diff (~10 files touched). Existing
+`tts-fallback.test.ts` rewrites entirely. Small risk of breaking a
+path we didn't realize was still used (mitigated by end-to-end QA).
+
+**Context:** Proposed as "Deep — boil the lake" option during
+eng-review on 2026-04-20. User chose "Shallow" to keep the current
+PR minimal. This TODO captures the deferred work.
+
+**Depends on / blocked by:** the shallow-scope dropdown removal PR
+must land and bake in production first. Run after ~1 week of clean
+production use confirms baked Gemini + Voxtral-override flow covers
+all real rehearsals.
+
+---
+
+### First-run migration telemetry for tts-engine key-bump
+**Priority:** P4
+**What:** Once an analytics layer lands in this repo, instrument the
+key-bump from `tts-engine` → `tts-engine-v2` (shipped 2026-04-20 CEO
+review). On first load, read the old key once. If non-gemini, fire one
+event tagged with the old engine name using the typed-event-names PII-safe
+pattern.
+
+**Why:** Tells us whether 2% or 40% of returning users were locked into
+non-gemini engines before the bump. Directly shapes priority of the
+"delete unused TTS engine paths" TODO. Today the only signal is the
+console.warn from cherry-pick #7 of the same PR.
+
+**Pros:** Converts a gut-feel priority ("should we actually delete Deepgram/
+Kokoro/GoogleCloud/Browser/ElevenLabs?") into data.
+
+**Cons:** Dependent on analytics layer existing. Scaffolding a full
+typed-event channel for one event is overkill.
+
+**Context:** CEO-review cherry-pick 2020-04-20, initially accepted then
+downgraded to DEFERRED after grep confirmed no `src/lib/analytics.ts`,
+no posthog/mixpanel/amplitude imports. Once the first product-analytics
+layer is added (could be for any feature), add this event in the same PR.
+
+**Depends on / blocked by:** an analytics layer in `src/` (typed-event-
+names pattern, per gstack skill).
+
+---
+
+### Audit baked-audio coverage to eliminate the silent preload
+**Priority:** P4
+**What:** Verify every playable line in every `.mram` file has audio
+bytes embedded. Revisit the ultra-short-line skip rule in
+`scripts/build-mram-from-dialogue.ts` (commit 459ded0) and any other
+bake filters. Goal: `section.audio` is always defined for any line
+the player might reach.
+
+**Why:** The shallow-scope PR adds a silent on-mount preload as a
+runtime safety net for lines missing from the bake. If the bake is
+100% complete, the preload is dead code — it will never find a
+missing line to preload. Close the gaps, delete the preload.
+
+**Pros:** Zero cold-start latency on any line, ever. Zero runtime
+Gemini API calls on any rehearsal or listen session. Zero quota risk
+per Brother per session.
+
+**Cons:** Revisiting ultra-short line skip rules means finding out
+why they were skipped in the first place (likely TTS model refuses
+or returns garbage for 1-2 syllable lines). May require per-line
+voice tuning or accepting some lines play via Browser TTS.
+
+**Context:** Proposed during 2026-04-20 eng-review. Auto-preload is
+the current fix; this TODO is the permanent fix.
+
+**Depends on / blocked by:** production data on how often lines
+actually hit the preload path. Measure first, then decide if the
+investment is worth it.
+
+---
+
 ## Auth & Distribution
 
 ### Stateful one-time-use magic links

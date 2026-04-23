@@ -278,13 +278,13 @@ src/
 ├── components/
 │   ├── DiffDisplay.tsx                  # Color-coded word-by-word diff
 │   ├── DocumentUpload.tsx               # .mram file upload + passphrase entry
-│   ├── GeminiPreloadPanel.tsx           # Gemini per-ritual audio preload + cache probe
+│   ├── GeminiPreloadPanel.tsx           # Unmounted — silent on-mount preload now lives in Listen/Rehearsal directly
 │   ├── ListenMode.tsx                   # Full ceremony playback with TTS
 │   ├── Navigation.tsx                   # Mobile bottom bar + desktop top nav
 │   ├── PerformanceTracker.tsx           # Accuracy trends & streaks
 │   ├── PracticeMode.tsx                 # Solo section practice
 │   ├── RehearsalMode.tsx                # Call-and-response with AI voices
-│   └── TTSEngineSelector.tsx            # Voice engine selection dropdown
+│   └── TTSEngineSelector.tsx            # Unmounted — default is baked Gemini + per-role Voxtral override
 ├── middleware.ts                         # Root redirect + auth gate + CORS + shared-secret check
 └── lib/
     ├── auth.ts                          # JWT magic-link tokens + session cookie

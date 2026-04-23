@@ -38,14 +38,16 @@ import {
 
 export type TTSEngineName = "browser" | "elevenlabs" | "google-cloud" | "deepgram" | "kokoro" | "voxtral" | "gemini";
 
-const TTS_ENGINE_STORAGE_KEY = "tts-engine";
+// Key-bumped 2026-04-20: the old "tts-engine" key is left dormant on
+// returning users' disks (~15 bytes orphan data, accepted). Bumping the
+// key name means any stale non-gemini value set via the retired dropdown
+// is ignored on next load and every user converges to the baked Gemini
+// default.
+const TTS_ENGINE_STORAGE_KEY = "tts-engine-v2";
 
-// Gemini 3.1 Flash TTS is the default for new users. Existing users who
-// have explicitly picked a different engine keep their choice because the
-// localStorage read below runs after this default.
 let currentEngine: TTSEngineName = "gemini";
 
-// Restore persisted engine on module load (client only)
+// Restore persisted engine on module load (client only).
 if (typeof window !== "undefined") {
   const stored = localStorage.getItem(TTS_ENGINE_STORAGE_KEY);
   if (
@@ -66,16 +68,11 @@ export function getTTSEngine(): TTSEngineName {
   return currentEngine;
 }
 
-/** Set the active TTS engine. Persists to localStorage + broadcasts. */
+/** Set the active TTS engine. Persists to localStorage. */
 export function setTTSEngine(engine: TTSEngineName): void {
   currentEngine = engine;
   if (typeof window !== "undefined") {
     localStorage.setItem(TTS_ENGINE_STORAGE_KEY, engine);
-    // Broadcast to any component subscribed via addEventListener so
-    // the UI can react to engine changes (e.g. Gemini-only panels).
-    window.dispatchEvent(
-      new CustomEvent("tts-engine-changed", { detail: engine }),
-    );
   }
 }
 
@@ -542,44 +539,3 @@ export function isSpeaking(): boolean {
   return false;
 }
 
-/**
- * Speak a correction with context:
- * "You said [wrong]. The correct words are: [right]"
- */
-export async function speakCorrection(
-  wrongWord: string,
-  correctPhrase: string,
-  options?: TTSOptions
-): Promise<void> {
-  const message = `You said "${wrongWord}". The correct words are: ${correctPhrase}`;
-  await speak(message, options);
-}
-
-/**
- * Speak encouragement after a practice session
- */
-export async function speakFeedback(
-  accuracy: number,
-  options?: TTSOptions
-): Promise<void> {
-  let message: string;
-
-  if (accuracy >= 95) {
-    message =
-      "Excellent work, Brother. Your recitation is nearly perfect. Keep practicing and you will have it memorized in no time.";
-  } else if (accuracy >= 85) {
-    message =
-      "Very good work. You have most of the words correct. Focus on the highlighted trouble spots and try again.";
-  } else if (accuracy >= 70) {
-    message =
-      "Good effort. You are making solid progress. Review the sections marked in red and practice those parts specifically.";
-  } else if (accuracy >= 50) {
-    message =
-      "Keep at it, Brother. Memorization takes time and repetition. Try working through smaller sections at a time.";
-  } else {
-    message =
-      "No worries. Everyone starts somewhere. Try practicing a shorter section first, then build up to the full passage.";
-  }
-
-  await speak(message, options);
-}

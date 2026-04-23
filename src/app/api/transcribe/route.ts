@@ -1,7 +1,20 @@
 /**
  * Speech-to-text API route using Groq's Whisper endpoint.
  * Accepts audio blobs from the browser and returns a transcript.
+ *
+ * SAFETY-03: guard at the top runs BEFORE request.formData() — the
+ * guard only reads headers/cookies/Bearer, so it's body-agnostic and
+ * works for formData bodies as cleanly as JSON bodies.
  */
+
+import type { NextRequest } from "next/server";
+import crypto from "node:crypto";
+import { applyPaidRouteGuards } from "@/lib/paid-route-guard";
+import { emit } from "@/lib/audit-log";
+import { estimateCost } from "@/lib/pricing";
+
+const sha256Hex = (s: string | Uint8Array | Buffer) =>
+  crypto.createHash("sha256").update(s).digest("hex");
 
 export const maxDuration = 30;
 
@@ -21,7 +34,14 @@ const MASONIC_PROMPT = [
   "Lodge assembled. Purgation. Colloquy.",
 ].join(" ");
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
+  // SAFETY-03: kill-switch + client-token + rate-limit gate BEFORE any
+  // body access. formData is still available after because the guard
+  // never touches req.body.
+  const guard = await applyPaidRouteGuards(req, { routeName: "transcribe" });
+  if (guard.kind === "deny") return guard.response;
+  const { hashedUser } = guard;
+
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
     return Response.json(
@@ -60,6 +80,7 @@ export async function POST(req: Request) {
     groqForm.append("response_format", "json");
     groqForm.append("temperature", "0.0");
 
+    const t0 = Date.now();
     const response = await fetch(GROQ_API_URL, {
       method: "POST",
       headers: {
@@ -67,6 +88,7 @@ export async function POST(req: Request) {
       },
       body: groqForm,
     });
+    const latencyMs = Date.now() - t0;
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -77,8 +99,40 @@ export async function POST(req: Request) {
       );
     }
 
-    const result = await response.json();
-    return Response.json({ transcript: result.text || "" });
+    const result = (await response.json()) as { text?: string };
+    const transcript = result.text || "";
+
+    // SAFETY-03: emit audit record on successful transcription.
+    // durationMs estimate: Groq bills a 10-second minimum per request
+    // (PRICING_TABLE groq-whisper-large-v3 notes). We approximate
+    // encoded-audio duration from the blob byteLength at ~16 kB/s
+    // (typical webm/opus bitrate) and clamp to 10 000 ms minimum.
+    const estimatedRawDurationMs = Math.round((audioFile.size / 16_000) * 1000);
+    const durationMs = Math.max(estimatedRawDurationMs, 10_000);
+    const estimatedCostUSD = estimateCost(
+      "groq-whisper-large-v3",
+      durationMs / 60_000,
+      "per-audio-minute",
+    );
+    emit({
+      kind: "stt",
+      timestamp: new Date().toISOString(),
+      hashedUser,
+      route: "/api/transcribe",
+      // promptHash: hash of the audio byte count (a scalar, not the audio
+      // content) — never the audio bytes themselves.
+      promptHash: sha256Hex(String(audioFile.size)),
+      // completionHash: hash of the transcript text (never the text
+      // itself; see AuditRecord type exclusion of `text`).
+      completionHash: sha256Hex(transcript),
+      estimatedCostUSD,
+      latencyMs,
+      model: "groq-whisper-large-v3",
+      durationMs,
+      audioByteCount: audioFile.size,
+    });
+
+    return Response.json({ transcript });
   } catch (error) {
     console.error("Transcribe route error:", error);
     return Response.json(

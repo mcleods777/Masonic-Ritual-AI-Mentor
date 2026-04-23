@@ -5,7 +5,6 @@ import Link from "next/link";
 import type { RitualSectionWithCipher } from "@/lib/storage";
 import { ROLE_DISPLAY_NAMES, cleanRitualText } from "@/lib/document-parser";
 import { compareTexts, type ComparisonResult } from "@/lib/text-comparison";
-import { fetchApi } from "@/lib/api-fetch";
 import { getRoleIcon } from "./MasonicIcons";
 import {
   createWebSpeechEngine,
@@ -26,8 +25,8 @@ import {
   type RoleVoiceProfile,
 } from "@/lib/text-to-speech";
 import { playGavelKnocks, countGavelMarks, warmAudioContext } from "@/lib/gavel-sound";
-import { VOXTRAL_ROLE_OPTIONS } from "@/lib/tts-cloud";
-import GeminiPreloadPanel from "./GeminiPreloadPanel";
+import { preloadGeminiRitual } from "@/lib/tts-cloud";
+import { keepScreenAwake, allowScreenSleep } from "@/lib/screen-wake-lock";
 import {
   decideLineAction,
   planComparisonAction,
@@ -37,7 +36,6 @@ import {
 import DiffDisplay from "./DiffDisplay";
 import {
   saveSession,
-  buildPerformanceContext,
   type PracticeSession,
   type LineScore,
 } from "@/lib/performance-history";
@@ -46,6 +44,26 @@ interface RehearsalModeProps {
   sections: RitualSectionWithCipher[];
   documentId?: string;
   documentTitle?: string;
+}
+
+// SAFETY-06: session step ceiling for advanceInternal. Default 200 exceeds
+// the longest baked ritual's line count (~160). Resets on explicit user
+// navigation (jumpToLine, startRehearsal) but NEVER on auto-advance — a
+// runaway chain cannot reset its own counter. Belt-and-suspenders with
+// the server-side 300/5min counter in /api/rehearsal-feedback (Plan 03).
+const DEFAULT_MAX_SESSION_STEPS = 200;
+
+/** Resolve MAX_SESSION_STEPS, honoring NEXT_PUBLIC_RITUAL_MAX_STEPS env override. */
+export function resolveMaxSessionSteps(): number {
+  const raw = process.env.NEXT_PUBLIC_RITUAL_MAX_STEPS;
+  if (!raw) return DEFAULT_MAX_SESSION_STEPS;
+  const parsed = parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_SESSION_STEPS;
+}
+
+/** Pure ceiling gate. Counter is pre-incremented; 201st call at default trips halt. */
+export function checkStepCeiling(count: number, max: number): "allow" | "halt" {
+  return count > max ? "halt" : "allow";
 }
 
 type RehearsalState =
@@ -81,15 +99,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   const [sttError, setSttError] = useState<string | null>(null);
   const [inputMode, setInputMode] = useState<"voice" | "type">("voice");
   const [sttProvider, setSTTProvider] = useState<STTProvider>("whisper");
-  // AI coaching default is OFF — spoken feedback after every line breaks the
-  // call-and-response rhythm of the ritual. Users can flip it back on from
-  // the role-pick screen if they want coaching for a specific session.
-  const [aiCoaching, setAiCoaching] = useState(false);
-  const [aiFeedback, setAiFeedback] = useState<string | null>(null);
-  const [isSpeakingFeedback, setIsSpeakingFeedback] = useState(false);
-  const [feedbackVoice, setFeedbackVoice] = useState<string>("Narrator");
   const [ttsToast, setTtsToast] = useState<string | null>(null);
-  const [autoStop, setAutoStop] = useState(true);
 
 
   const engineRef = useRef<STTEngine | null>(null);
@@ -100,20 +110,13 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   const voiceMapRef = useRef<Map<string, RoleVoiceProfile>>(new Map());
   const cancelledRef = useRef(false);
   const advanceGenRef = useRef(0); // generation counter to prevent overlapping advanceToLine chains
+  // SAFETY-06: step-ceiling state (see MAX_SESSION_STEPS at module scope).
+  const stepCountRef = useRef(0);
+  const maxSessionStepsRef = useRef(resolveMaxSessionSteps());
   const scriptContainerRef = useRef<HTMLDivElement>(null);
   const startListeningRef = useRef<() => void>(() => {});
   const stopListeningRef = useRef<() => void>(() => { });
-  const autoStopRef = useRef(autoStop);
-  autoStopRef.current = autoStop;
   const sessionStartRef = useRef<string>(new Date().toISOString());
-  const perfContextRef = useRef<string>("");
-
-  // Load performance context on mount for AI feedback
-  useEffect(() => {
-    buildPerformanceContext()
-      .then((ctx) => { perfContextRef.current = ctx; })
-      .catch(console.error);
-  }, []);
 
   // Extract unique roles from sections (only those with speaker lines)
   const availableRoles = useMemo(() => {
@@ -203,6 +206,9 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   const startRehearsal = useCallback(() => {
     warmAudioContext();
     cancelledRef.current = false;
+    // SAFETY-06: reset step ceiling + re-read env override on explicit start.
+    stepCountRef.current = 0;
+    maxSessionStepsRef.current = resolveMaxSessionSteps();
     sessionStartRef.current = new Date().toISOString();
     setCurrentIndex(0);
     setLineResults([]);
@@ -216,6 +222,17 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   // to advanceToLine() bumps the generation so any old chain exits.
   const advanceInternal = useCallback(async (index: number, gen: number) => {
     if (cancelledRef.current || index >= sections.length) {
+      setRehearsalState("complete");
+      return;
+    }
+
+    // SAFETY-06 session step ceiling gate.
+    stepCountRef.current += 1;
+    if (checkStepCeiling(stepCountRef.current, maxSessionStepsRef.current) === "halt") {
+      console.warn(
+        `[SAFETY-06] Session step ceiling (${maxSessionStepsRef.current}) reached — halting auto-advance`,
+      );
+      cancelledRef.current = true;
       setRehearsalState("complete");
       return;
     }
@@ -402,7 +419,6 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
       };
 
       engine.onSilence = () => {
-        if (!autoStopRef.current) return;
         stopListeningRef.current();
       };
 
@@ -478,16 +494,12 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   // Continue to next line after checking
   const continueAfterCheck = useCallback(() => {
     stopSpeaking();
-    setIsSpeakingFeedback(false);
-    setAiFeedback(null);
     advanceToLine(currentIndex + 1);
   }, [advanceToLine, currentIndex]);
 
   // Retry the current line — remove last result and auto-start listening
   const retryCurrentLine = useCallback(() => {
     stopSpeaking();
-    setIsSpeakingFeedback(false);
-    setAiFeedback(null);
     setCurrentComparison(null);
     setTranscript("");
     setLineResults((prev) => prev.slice(0, -1));
@@ -496,60 +508,6 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
       if (!cancelledRef.current) startListeningRef.current();
     }, 400);
   }, []);
-
-  // Fetch AI coaching feedback and speak it aloud
-  const fetchAndSpeakFeedback = useCallback(
-    async (comparison: ComparisonResult) => {
-      if (!aiCoaching || !isTTSAvailable()) return;
-
-      try {
-        const res = await fetchApi("/api/rehearsal-feedback", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            accuracy: comparison.accuracy,
-            wrongWords: comparison.wrongWords,
-            missingWords: comparison.missingWords,
-            troubleSpots: comparison.troubleSpots,
-            lineNumber: lineResults.length + 1,
-            totalLines: userLineCount,
-            performanceContext: perfContextRef.current,
-          }),
-        });
-
-        if (!res.ok) return;
-
-        // Stream the response — show text as it arrives, then speak once complete
-        const reader = res.body?.getReader();
-        if (!reader) return;
-        const decoder = new TextDecoder();
-        let feedback = "";
-        while (true) {
-          const { done, value } = await reader.read();
-          if (cancelledRef.current) { reader.cancel(); return; }
-          if (done) break;
-          feedback += decoder.decode(value, { stream: true });
-          setAiFeedback(feedback);
-        }
-        if (!feedback.trim()) return;
-
-        setIsSpeakingFeedback(true);
-        await speakAsRole(feedback, feedbackVoice, voiceMapRef.current);
-      } catch {
-        // Non-critical — silently skip if feedback fails
-      } finally {
-        setIsSpeakingFeedback(false);
-      }
-    },
-    [aiCoaching, feedbackVoice, lineResults.length, userLineCount]
-  );
-
-  // Trigger AI coaching feedback when a line is checked
-  useEffect(() => {
-    if (rehearsalState === "checking" && currentComparison && aiCoaching) {
-      fetchAndSpeakFeedback(currentComparison);
-    }
-  }, [rehearsalState, currentComparison, aiCoaching, fetchAndSpeakFeedback]);
 
   // Skip user's line (they can't remember)
   const skipLine = useCallback(() => {
@@ -591,8 +549,6 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
     setCurrentComparison(null);
     setLineResults([]);
     setSttError(null);
-    setAiFeedback(null);
-    setIsSpeakingFeedback(false);
   }, []);
 
   // Restart rehearsal
@@ -600,8 +556,6 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
     setLineResults([]);
     setCurrentComparison(null);
     setTranscript("");
-    setAiFeedback(null);
-    setIsSpeakingFeedback(false);
     startRehearsal();
   }, [startRehearsal]);
 
@@ -613,13 +567,12 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
       // Stop everything in-flight
       const gen = ++advanceGenRef.current;
       cancelledRef.current = false;
+      stepCountRef.current = 0; // SAFETY-06: reset on explicit Next/Back/line-click
       stopSpeaking();
       if (engineRef.current) {
         engineRef.current.stop();
         engineRef.current = null;
       }
-      setAiFeedback(null);
-      setIsSpeakingFeedback(false);
       setTranscript("");
       setCurrentComparison(null);
       setSttError(null);
@@ -764,16 +717,62 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
         engineRef.current.stop();
       }
       stopSpeaking();
+      void allowScreenSleep();
     };
   }, []);
+
+  // Keep the screen awake while the rehearsal is live. Covers every
+  // active state (AI speaking, user's turn, listening, checking, etc.)
+  // but lets the screen sleep during setup and after completion.
+  useEffect(() => {
+    const active = rehearsalState !== "setup"
+      && rehearsalState !== "ready"
+      && rehearsalState !== "complete";
+    if (active) {
+      void keepScreenAwake();
+    } else {
+      void allowScreenSleep();
+    }
+  }, [rehearsalState]);
+
+  // Silent on-mount preload of any lines that lack baked audio. Fires
+  // 2.5s after mount so it doesn't race with a user who immediately
+  // starts rehearsing (which would otherwise double-POST the same
+  // cache key). preloadGeminiRitual internally skips cache hits, so
+  // repeat mounts and Listen/Rehearsal switches are cheap. Errors are
+  // swallowed end-to-end.
+  useEffect(() => {
+    let abortFn: (() => void) | null = null;
+    let cancelled = false;
+
+    const timeoutId = window.setTimeout(() => {
+      if (cancelled) return;
+      try {
+        const gapLines = sections
+          .filter((s) => s.speaker && !s.audio && cleanRitualText(s.text).length > 0)
+          .map((s) => ({
+            text: cleanRitualText(s.text),
+            role: s.speaker,
+            style: s.style,
+          }));
+        if (gapLines.length === 0) return;
+        const { abort } = preloadGeminiRitual(gapLines, undefined, 250);
+        abortFn = abort;
+      } catch (err) {
+        console.warn("[tts-gap] silent preload setup failed", err);
+      }
+    }, 2500);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+      if (abortFn) abortFn();
+    };
+  }, [sections]);
 
   // ============================================================
   // RENDER
   // ============================================================
-
-  // Gemini preload panel — shared component with ListenMode. Renders
-  // null when the engine isn't Gemini.
-  const preloadPanel = <GeminiPreloadPanel sections={sections} />;
 
   // Setup: pick a role
   if (rehearsalState === "setup") {
@@ -866,72 +865,6 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
                 </span>
               </div>
 
-              {/* AI Coaching toggle */}
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-zinc-500 uppercase tracking-wide">AI Coach:</span>
-                <button
-                  onClick={() => setAiCoaching(!aiCoaching)}
-                  className={`
-                    relative inline-flex h-6 w-11 items-center rounded-full transition-colors
-                    ${aiCoaching ? "bg-amber-600" : "bg-zinc-700"}
-                  `}
-                >
-                  <span
-                    className={`
-                      inline-block h-4 w-4 rounded-full bg-white transition-transform
-                      ${aiCoaching ? "translate-x-6" : "translate-x-1"}
-                    `}
-                  />
-                </button>
-                <span className="text-xs text-zinc-600">
-                  {aiCoaching
-                    ? "AI gives spoken feedback after each line"
-                    : "No AI feedback between lines"}
-                </span>
-              </div>
-
-              {/* Feedback voice selector */}
-              {aiCoaching && (
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-zinc-500 uppercase tracking-wide">Feedback Voice:</span>
-                  <select
-                    value={feedbackVoice}
-                    onChange={(e) => setFeedbackVoice(e.target.value)}
-                    className="px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-300 text-xs focus:outline-none focus:border-amber-500 cursor-pointer"
-                  >
-                    {VOXTRAL_ROLE_OPTIONS.filter((o) => o.value).map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {/* Auto-stop toggle */}
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-zinc-500 uppercase tracking-wide">Auto-Stop:</span>
-                <button
-                  onClick={() => setAutoStop(!autoStop)}
-                  className={`
-                    relative inline-flex h-6 w-11 items-center rounded-full transition-colors
-                    ${autoStop ? "bg-amber-600" : "bg-zinc-700"}
-                  `}
-                >
-                  <span
-                    className={`
-                      inline-block h-4 w-4 rounded-full bg-white transition-transform
-                      ${autoStop ? "translate-x-6" : "translate-x-1"}
-                    `}
-                  />
-                </button>
-                <span className="text-xs text-zinc-600">
-                  {autoStop
-                    ? "Auto-submits after 3s of silence"
-                    : "Manual — press Done Speaking to submit"}
-                </span>
-              </div>
-
               <div className="flex items-center gap-4">
                 <button
                   onClick={startRehearsal}
@@ -949,7 +882,6 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
                 )}
               </div>
 
-              {preloadPanel && <div className="mt-6">{preloadPanel}</div>}
             </div>
           )}
         </div>
@@ -1053,10 +985,6 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   // Active rehearsal (ai-speaking, user-turn, listening, transcribing, checking)
   return (
     <div className="space-y-4">
-      {/* Gemini preload panel — persistent during active rehearsal so the
-          user can kick off a preload or check progress any time. */}
-      {preloadPanel}
-
       {/* TTS fallback toast */}
       {ttsToast && (
         <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3 flex items-center justify-between">
@@ -1319,11 +1247,9 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
                 Listening — speak your line...
               </span>
             </div>
-            {autoStop && (
-              <p className="text-xs text-zinc-500 text-center">
-                Will auto-submit after 3 seconds of silence
-              </p>
-            )}
+            <p className="text-xs text-zinc-500 text-center">
+              Will auto-submit after 3 seconds of silence
+            </p>
 
             {transcript && (
               <div className="p-4 bg-zinc-800/50 rounded-lg border border-zinc-700">
@@ -1385,37 +1311,10 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
                   </div>
                 )}
 
-                {/* AI Coach feedback */}
-                {aiCoaching && (
-                  <div className="p-3 bg-amber-900/20 rounded-lg border border-amber-700/30">
-                    {aiFeedback ? (
-                      <div className="flex items-start gap-2">
-                        {isSpeakingFeedback && (
-                          <div className="flex gap-0.5 items-center pt-1 flex-shrink-0">
-                            <div className="w-1 h-3 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                            <div className="w-1 h-4 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                            <div className="w-1 h-3 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
-                          </div>
-                        )}
-                        <p className="text-sm text-amber-200/90 italic">{aiFeedback}</p>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2 text-amber-400/60">
-                        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                        </svg>
-                        <span className="text-xs">AI Coach is thinking...</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-
                 <div className="flex justify-center gap-3">
                   <button
                     onClick={retryCurrentLine}
-                    disabled={aiCoaching && (!aiFeedback || isSpeakingFeedback)}
-                    className="px-6 py-3 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40 disabled:cursor-not-allowed text-zinc-200 rounded-lg font-semibold transition-colors flex items-center gap-2"
+                    className="px-6 py-3 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 rounded-lg font-semibold transition-colors flex items-center gap-2"
                   >
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -1424,8 +1323,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
                   </button>
                   <button
                     onClick={continueAfterCheck}
-                    disabled={aiCoaching && (!aiFeedback || isSpeakingFeedback)}
-                    className="px-8 py-3 bg-amber-600 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg font-semibold transition-colors flex items-center gap-2"
+                    className="px-8 py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-semibold transition-colors flex items-center gap-2"
                   >
                     Continue
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

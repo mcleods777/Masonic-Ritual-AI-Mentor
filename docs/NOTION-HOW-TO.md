@@ -651,7 +651,7 @@ flowchart LR
 flowchart TB
     subgraph Frontend["Frontend — Next.js 16 + React 19"]
         Pages["Pages\nUpload / Practice / Voices\nListen / Rehearsal / Author"]
-        Components["Components\nDocumentUpload / PracticeMode\nListenMode / RehearsalMode\nGeminiPreloadPanel / DiffDisplay"]
+        Components["Components\nDocumentUpload / PracticeMode\nListenMode / RehearsalMode\nDiffDisplay"]
         Lib["Libraries\nmram-format / storage\ntext-comparison\nspeech-to-text / text-to-speech"]
         Pages --> Components --> Lib
     end

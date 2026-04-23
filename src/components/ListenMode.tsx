@@ -12,7 +12,8 @@ import {
   type RoleVoiceProfile,
 } from "@/lib/text-to-speech";
 import { playGavelKnocks, countGavelMarks, warmAudioContext } from "@/lib/gavel-sound";
-import GeminiPreloadPanel from "./GeminiPreloadPanel";
+import { preloadGeminiRitual } from "@/lib/tts-cloud";
+import { keepScreenAwake, allowScreenSleep } from "@/lib/screen-wake-lock";
 
 interface ListenModeProps {
   sections: RitualSectionWithCipher[];
@@ -27,7 +28,6 @@ export default function ListenMode({ sections }: ListenModeProps) {
   const pausedRef = useRef(false);
   const resumeRef = useRef<(() => void) | null>(null);
   const playGenRef = useRef(0); // generation counter to prevent overlapping playFrom loops
-  const oneShotRef = useRef(false); // true while a single-line click is playing; keeps subsequent clicks from being routed to ceremony playback
   const voiceMapRef = useRef<Map<string, RoleVoiceProfile>>(new Map());
   const scriptContainerRef = useRef<HTMLDivElement>(null);
 
@@ -92,7 +92,6 @@ export default function ListenMode({ sections }: ListenModeProps) {
       const gen = ++playGenRef.current;
       cancelledRef.current = false;
       pausedRef.current = false;
-      oneShotRef.current = false;
       setPlayState("playing");
 
       for (let i = startIndex; i < sections.length; i++) {
@@ -144,10 +143,6 @@ export default function ListenMode({ sections }: ListenModeProps) {
                   // Final failure — pause before advancing so user notices the skip
                   await new Promise((r) => setTimeout(r, 1500));
                 }
-                // Re-check after the backoff: if the user has stopped or
-                // jumped to a different line while we were sleeping, bail
-                // out instead of retrying or advancing.
-                if (stale()) return;
               }
             }
           }
@@ -155,6 +150,16 @@ export default function ListenMode({ sections }: ListenModeProps) {
         // Lines with no speaker (stage directions) get a brief pause
         else {
           await new Promise((r) => setTimeout(r, 600));
+        }
+
+        // If pause was triggered mid-line, don't advance. stopSpeaking()
+        // resolves the TTS promise cleanly (not as an abort), so without
+        // this the for-loop's i++ would skip the paused line and resume
+        // would start the next one. Rewind so the top-of-loop pause check
+        // waits, then on resume replays this line from the start.
+        if (pausedRef.current) {
+          i--;
+          continue;
         }
 
         // Small gap between lines to avoid hammering the TTS API
@@ -193,10 +198,6 @@ export default function ListenMode({ sections }: ListenModeProps) {
   const handleStop = useCallback(() => {
     cancelledRef.current = true;
     pausedRef.current = false;
-    oneShotRef.current = false;
-    // Bump generation so any in-flight one-shot or ceremony loop exits at
-    // its next stale() checkpoint rather than continuing past the await.
-    ++playGenRef.current;
     stopSpeaking();
     if (resumeRef.current) {
       resumeRef.current();
@@ -214,55 +215,66 @@ export default function ListenMode({ sections }: ListenModeProps) {
       const section = sections[index];
       if (!section) return;
 
-      // Route one-shot clicks (including repeat clicks while a one-shot is
-      // still playing) to the single-line branch. Only clicks that arrive
-      // during real ceremony playback should jump the ceremony.
-      const isOneShotContext =
-        oneShotRef.current || playState === "idle" || playState === "finished";
+      // Unconditionally interrupt whatever is in flight. Bumping
+      // playGenRef FIRST causes any earlier handleLineClick or playFrom
+      // invocation to see stale on its next stale() check, so even if
+      // its async IndexedDB / fetch work is still pending, it returns
+      // before reaching playAudioBlob. Without this, two quick taps
+      // could both race past the old single stopSpeaking() call and
+      // end up with two audio blobs playing in sequence (briefly overlapping).
+      const gen = ++playGenRef.current;
+      cancelledRef.current = false;
+      pausedRef.current = false;
+      stopSpeaking();
+      if (resumeRef.current) {
+        resumeRef.current();
+        resumeRef.current = null;
+      }
 
-      if (isOneShotContext) {
-        // One-shot: speak just this line. Flip playState to "playing" so
-        // the Stop button renders — without this, the click starts audio
-        // with no way for the user to halt it.
-        const gen = ++playGenRef.current;
-        cancelledRef.current = false;
-        oneShotRef.current = true;
-        stopSpeaking();
-        setCurrentIndex(index);
-        setPlayState("playing");
-        try {
-          const gavelCount = section.gavels > 0 ? section.gavels : countGavelMarks(section.text);
-          if (gavelCount > 0) await playGavelKnocks(gavelCount);
-          if (cancelledRef.current || gen !== playGenRef.current) return;
-          if (section.speaker) {
-            const cleanText = cleanRitualText(section.text);
-            if (cleanText) {
-              try {
-                await speakAsRole(cleanText, section.speaker, voiceMapRef.current, section.style, section.audio);
-              } catch {
-                /* ignore */
-              }
-            }
-          }
-        } finally {
-          // Only reset state if we're still the latest generation — a
-          // newer click (or Stop) will have already bumped gen and set
-          // its own playState.
-          if (gen === playGenRef.current && !cancelledRef.current) {
-            oneShotRef.current = false;
-            setPlayState("idle");
-          }
-        }
-      } else if (playState === "playing" || playState === "paused") {
-        // Jump playback to this line and continue from here
-        // stopSpeaking() cancels current audio; playFrom() bumps generation
-        // so the old loop exits at its next checkpoint
-        stopSpeaking();
-        if (resumeRef.current) {
-          resumeRef.current();
-          resumeRef.current = null;
-        }
+      const stale = () => gen !== playGenRef.current || cancelledRef.current;
+
+      // If full-ceremony playback was in progress, resume the loop from
+      // this line. playFrom() bumps gen again which is harmless — our
+      // gen still matches because we just set it.
+      if (playState === "playing" || playState === "paused") {
         playFrom(index);
+        return;
+      }
+
+      // One-shot from idle/finished. Transition to "playing" so the
+      // Stop button renders (handleStop → cancelledRef + setPlayState
+      // "idle" correctly cancels this branch via stale()).
+      setPlayState("playing");
+      setCurrentIndex(index);
+
+      try {
+        const gavelCount = section.gavels > 0 ? section.gavels : countGavelMarks(section.text);
+        if (gavelCount > 0) {
+          await playGavelKnocks(gavelCount);
+        }
+        if (stale()) return;
+
+        if (section.speaker) {
+          const cleanText = cleanRitualText(section.text);
+          if (cleanText) {
+            await speakAsRole(
+              cleanText,
+              section.speaker,
+              voiceMapRef.current,
+              section.style,
+              section.audio,
+            );
+          }
+        }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        // Other errors: swallow for one-shot playback — the user can retry.
+      } finally {
+        // Only flip back to idle if we weren't superseded (another tap
+        // or Stop button). Superseding paths own the next transition.
+        if (!stale()) {
+          setPlayState("idle");
+        }
       }
     },
     [playState, sections, playFrom],
@@ -277,15 +289,56 @@ export default function ListenMode({ sections }: ListenModeProps) {
         resumeRef.current();
       }
       stopSpeaking();
+      void allowScreenSleep();
     };
   }, []);
 
+  // Keep the screen awake while the ritual is playing. Browsers release
+  // the lock on tab-hide; the wake-lock module re-acquires on visible.
+  useEffect(() => {
+    if (playState === "playing") {
+      void keepScreenAwake();
+    } else {
+      void allowScreenSleep();
+    }
+  }, [playState]);
+
+  // Silent on-mount preload of any lines that lack baked audio. Fires
+  // 2.5s after mount so it doesn't race with a user who immediately
+  // taps play on line 1 (which would otherwise double-POST the same
+  // cache key). preloadGeminiRitual internally skips cache hits, so
+  // repeat mounts are cheap. Errors are swallowed end-to-end.
+  useEffect(() => {
+    let abortFn: (() => void) | null = null;
+    let cancelled = false;
+
+    const timeoutId = window.setTimeout(() => {
+      if (cancelled) return;
+      try {
+        const gapLines = sections
+          .filter((s) => s.speaker && !s.audio && cleanRitualText(s.text).length > 0)
+          .map((s) => ({
+            text: cleanRitualText(s.text),
+            role: s.speaker,
+            style: s.style,
+          }));
+        if (gapLines.length === 0) return;
+        const { abort } = preloadGeminiRitual(gapLines, undefined, 250);
+        abortFn = abort;
+      } catch (err) {
+        console.warn("[tts-gap] silent preload setup failed", err);
+      }
+    }, 2500);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+      if (abortFn) abortFn();
+    };
+  }, [sections]);
+
   return (
     <div className="space-y-4">
-      {/* Gemini audio preload panel — visible only when Gemini is the
-          selected engine. Shared with RehearsalMode. */}
-      <GeminiPreloadPanel sections={sections} />
-
       {/* Header */}
       <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-5">
         <div className="flex items-center justify-between mb-3">
