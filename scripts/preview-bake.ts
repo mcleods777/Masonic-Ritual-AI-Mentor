@@ -113,15 +113,21 @@ export function handleOpusRequest(
   // T-03-03 layer 2: path-containment assertion — refuse any resolved
   // path that escapes cacheDir. Defense-in-depth against (a) a future
   // regex relaxation, or (b) a symlink planted inside the cache dir
-  // that resolves outside it. `path.resolve` normalizes .., symlinks,
-  // and yields an absolute path; we compare against rootAbs + path.sep
-  // to ensure the file truly lives under the cache dir (and is not the
-  // cache dir itself).
+  // that resolves outside it.
+  //
+  // NOTE: `path.resolve` alone does NOT dereference symlinks — it only
+  // normalizes `..` and resolves to absolute form. To catch a symlink
+  // planted inside the cache dir that points outside, we must also
+  // check fs.realpathSync() on any existing file. Two sub-checks:
+  //   2a) path.resolve(opusPath) stays under rootAbs (catches `..`
+  //       traversal if the regex is ever relaxed).
+  //   2b) fs.realpathSync(opusPath) stays under rootAbs (catches
+  //       symlink-escape — the realpath follows links to the target).
   const resolved = path.resolve(opusPath);
   const rootAbs = path.resolve(cacheDir);
   if (!resolved.startsWith(rootAbs + path.sep)) {
     console.warn(
-      `[PREVIEW-BAKE] rejected cacheKey (containment): ${cacheKey.slice(0, 16)}...`,
+      `[PREVIEW-BAKE] rejected cacheKey (containment 2a): ${cacheKey.slice(0, 16)}...`,
     );
     res.writeHead(400, { "Content-Type": "text/plain" });
     res.end("Bad Request");
@@ -131,6 +137,34 @@ export function handleOpusRequest(
   if (!fs.existsSync(resolved)) {
     res.writeHead(404, { "Content-Type": "text/plain" });
     res.end("not found");
+    return;
+  }
+
+  // Layer 2b — realpath containment. Only runs when the file exists
+  // (realpathSync throws on missing files). Uses rootAbs (already
+  // computed) because the cache dir itself is expected to NOT be a
+  // symlink to somewhere weird; if operators care about that edge
+  // case they can also realpath the cacheDir once at startup.
+  let realResolved: string;
+  try {
+    realResolved = fs.realpathSync(resolved);
+  } catch {
+    // Race: file disappeared between existsSync and realpathSync.
+    // Treat as not found rather than 500 — the cache is transient.
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end("not found");
+    return;
+  }
+  const realRoot = fs.existsSync(rootAbs) ? fs.realpathSync(rootAbs) : rootAbs;
+  if (
+    realResolved !== realRoot &&
+    !realResolved.startsWith(realRoot + path.sep)
+  ) {
+    console.warn(
+      `[PREVIEW-BAKE] rejected cacheKey (containment 2b — symlink escape): ${cacheKey.slice(0, 16)}...`,
+    );
+    res.writeHead(400, { "Content-Type": "text/plain" });
+    res.end("Bad Request");
     return;
   }
   const stat = fs.statSync(resolved);
@@ -158,14 +192,34 @@ export function handleOpusRequest(
       "Accept-Ranges": "bytes",
       "Content-Length": end - start + 1,
     });
-    fs.createReadStream(resolved, { start, end }).pipe(res);
+    const stream = fs.createReadStream(resolved, { start, end });
+    // Attach error handler before pipe — a mid-stream ENOENT (file
+    // deleted after statSync, or cache eviction) must not crash the
+    // server. End the response quietly; the client sees a truncated
+    // read, which is the correct signal on a race.
+    stream.on("error", () => {
+      try {
+        res.end();
+      } catch {
+        // best-effort — response may already be closed
+      }
+    });
+    stream.pipe(res);
   } else {
     res.writeHead(200, {
       "Content-Type": "audio/ogg; codecs=opus",
       "Content-Length": stat.size,
       "Accept-Ranges": "bytes",
     });
-    fs.createReadStream(resolved).pipe(res);
+    const stream = fs.createReadStream(resolved);
+    stream.on("error", () => {
+      try {
+        res.end();
+      } catch {
+        // best-effort
+      }
+    });
+    stream.pipe(res);
   }
 }
 
