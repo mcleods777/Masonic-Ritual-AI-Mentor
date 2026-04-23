@@ -140,7 +140,63 @@ time without touching the web app:
 None of these are user-facing, but they are the reason ritual files
 can now evolve safely after they are distributed.
 
-### Practice page UI simplified (April 20 — today)
+### Custom domain, mobile nav polish, and safety floor (April 21)
+
+- **The app now lives at `https://masonicmentor.app`.** The old Vercel
+  preview URL still works but the short masonicmentor.app address is the
+  canonical one — use it on every device and share only this one with
+  brothers.
+- **Mobile bottom nav trimmed from six tabs to five** (Home, Upload,
+  Practice, Voices, Stats) so each button gets ~20% more width on a
+  phone. The walkthrough guide is still reachable by direct URL if
+  needed; it just no longer occupies a permanent spot on the bar.
+- **Phase 2 safety floor merged** — a batch of protections the pilot
+  now runs with quietly in the background:
+  - **Rate limiting** on every paid-API route so a compromised key
+    cannot run up an unlimited bill.
+  - **Per-user daily spend caps.** Practice until you hit the day's
+    budget, then paid services cut off for that user until reset.
+    Nothing breaks; you just fall to the fully-offline voice + speech
+    paths.
+  - **Emergency kill-switch.** One env var flip disables the paid-API
+    path site-wide — useful if a vendor has an outage or a cost spike
+    is in flight.
+  - **Daily aggregate spend alert.** If the lodge's total paid-API
+    spend trips a threshold, I get an email the next morning.
+  - **Privacy-preserving analytics.** PostHog (EU region), but the
+    server only ever sends **SHA-256-hashed email addresses** and a
+    handful of event names. PostHog has no way to reverse the hash to
+    a brother's real email; ritual text, speech, and coaching content
+    are never sent.
+  - **Session step ceiling** so a runaway rehearsal cannot loop
+    endlessly if something goes wrong with advancement.
+  - **Screen wake-lock auto-release** after 30 minutes of inactivity —
+    prevents the phone staying lit all night if a brother sets the app
+    down mid-session and forgets it.
+
+### Baked-audio quality polish + letter-exchange fix (April 22 — today)
+
+- **Baked-audio cleanup across all three EA rituals** (opening, closing,
+  initiation). Specific pacing issues corrected ("Perform that duty..."
+  was dragging and is now brisk), several end-of-line artifacts removed,
+  and a hanging WM line in the initiation now plays cleanly.
+- **The duplicate Chaplain prayer in the EA opening is gone.** Only the
+  "Great Architect of the Universe, in Thy name we have assembled..."
+  prayer remains, as intended.
+- **Letter-exchange (B-O-A-Z) lines now bake deterministically.** These
+  short single-letter exchanges in the catechism used to fall through to
+  a live cloud voice because Gemini TTS regresses on ultra-short
+  prompts. A new build-time mechanism called `speakAs` sends Gemini a
+  longer instructional prompt (*"say only this single letter name: Bee"*)
+  while the ritual file still stores and displays the traditional short
+  token. You now hear clean phonetic letter names in the spelling
+  passages, and those lines no longer require any live-cloud fallback.
+- **One WM pacing line tightened.** The WM's "Perform that duty..."
+  command in the opening had a default "deliberate" pacing that read as
+  draggy; it now has a targeted direct-delivery style so it lands as a
+  command rather than a dirge.
+
+### Practice page UI simplified (April 20)
 
 With baked audio as the default, the old seven-engine voice dropdown
 and the "Preload audio" button on the practice page were no longer
@@ -456,7 +512,7 @@ at [gnu.org/licenses/agpl-3.0.html](https://www.gnu.org/licenses/agpl-3.0.html).
 
 ## The pilot URL
 
-> **https://masonic-ritual-ai-mentor.vercel.app**
+> **https://masonicmentor.app**
 
 Please keep this address inside the pilot group.
 
