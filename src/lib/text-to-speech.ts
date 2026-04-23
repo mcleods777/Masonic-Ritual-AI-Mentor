@@ -487,12 +487,21 @@ export async function speakAsRole(
     // last resort. Previous version went straight to Google Cloud — that
     // made Gemini failures silently robotic because Google Cloud's generic
     // voices are the "robot-adjacent" ones in this stack.
+    //
+    // Each inner catch must re-throw AbortError so a user-initiated stop
+    // (clicking a different line) doesn't silently fall through to the
+    // next engine. Without this guard, a rapid click would abort the
+    // current fetch, the inner catch would swallow the AbortError, and
+    // the next engine would start a fresh AbortController and play audio
+    // that overlaps with the newly-requested line.
     try {
       await speakVoxtralAsRole(text, role);
-    } catch {
+    } catch (e1) {
+      if (e1 instanceof DOMException && e1.name === "AbortError") throw e1;
       try {
         await speakGoogleCloudAsRole(text, role);
-      } catch {
+      } catch (e2) {
+        if (e2 instanceof DOMException && e2.name === "AbortError") throw e2;
         try {
           const profile = voiceMap?.get(role) || getVoiceForRole(role);
           await speakBrowser(text, {
@@ -500,7 +509,8 @@ export async function speakAsRole(
             rate: profile.rate,
             voiceName: profile.voiceName,
           });
-        } catch {
+        } catch (e3) {
+          if (e3 instanceof DOMException && e3.name === "AbortError") throw e3;
           throw err;
         }
       }

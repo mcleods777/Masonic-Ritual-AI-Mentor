@@ -1071,7 +1071,15 @@ export const GEMINI_ROLE_VOICES: Record<string, string> = {
   A: "Zubenelgenubi",
 };
 
-/** Get the default Gemini voice for a Masonic role, or a neutral fallback. */
+/**
+ * Fallback voice for any path that can't find a mapped role (stale cache,
+ * typo in a role map, explanatory-lecture speaker label without a male
+ * mapping). Must be male — Masonry is a men's fraternity and female
+ * voices in ritual/lecture audio are never appropriate.
+ */
+const GEMINI_MALE_FALLBACK_VOICE = "Enceladus";
+
+/** Get the default Gemini voice for a Masonic role, or a male fallback. */
 export function getGeminiVoiceForRole(role: string): string {
   // Try exact match first, then try group-based resolution for alias roles.
   if (GEMINI_ROLE_VOICES[role]) return GEMINI_ROLE_VOICES[role];
@@ -1085,9 +1093,9 @@ export function getGeminiVoiceForRole(role: string): string {
       "Iapetus", "Achird", "Schedar", "Fenrir",
       "Zubenelgenubi", "Rasalgethi", "Enceladus",
     ];
-    return groupDefaults[group] ?? "Kore";
+    return groupDefaults[group] ?? GEMINI_MALE_FALLBACK_VOICE;
   }
-  return "Kore";
+  return GEMINI_MALE_FALLBACK_VOICE;
 }
 
 /**

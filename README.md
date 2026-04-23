@@ -211,6 +211,8 @@ Runs ea-opening, ea-initiation, and ea-closing back-to-back with a single passph
 
 **Full reference:** [`docs/BAKE-WORKFLOW.md`](./docs/BAKE-WORKFLOW.md) is the canonical doc for the bake pipeline — every CLI flag, every environment variable, cache semantics, tier-drop handling, resume guarantees, exit codes, and typical workflows. When in doubt, look there first.
 
+**Voice maps:** [`docs/VOICE-MAPS.md`](./docs/VOICE-MAPS.md) is the canonical reference for which voice each Masonic role gets on every supported TTS engine, plus the gender guardrails that keep female voices out of ritual/lecture audio.
+
 Legacy `build-mram.ts` (single-file paired format) still works for older ritual sources.
 
 ---
