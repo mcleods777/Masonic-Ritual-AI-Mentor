@@ -3,18 +3,18 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-04-23T15:01:09.493Z"
+last_updated: "2026-04-23T16:58:36.233Z"
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 24
-  completed_plans: 17
-  percent: 71
+  completed_plans: 18
+  percent: 75
 ---
 
 # State: Masonic Ritual AI Mentor — v1 Invited-Lodge Milestone
 
-**Last updated:** 2026-04-22 (Phase 2 merged; masonicmentor.app custom domain live)
+**Last updated:** 2026-04-23 (Phase 3 Plan 02 landed — idb-schema extracted)
 
 ## Project Reference
 
@@ -27,12 +27,12 @@ progress:
 ## Current Position
 
 Phase: 03 (Authoring Throughput) — EXECUTING
-Plan: 2 of 8 (Plan 01 complete: commits `77c07c0` + `73e350c`; SUMMARY at `.planning/phases/03-authoring-throughput/03-01-SUMMARY.md`)
+Plan: 3 of 8 (Plans 01 + 02 complete; SUMMARIES at `.planning/phases/03-authoring-throughput/03-01-SUMMARY.md` + `03-02-SUMMARY.md`)
 **Milestone:** v1 invited-lodge
 **Phase:** Phase 2 MERGED to main (PR #68 → merge commit `d2e02cc`, 2026-04-22)
-**Plan:** Phase 2 9/9 complete; Phase 3 1/8 complete
+**Plan:** Phase 2 9/9 complete; Phase 3 2/8 complete
 **Status:** Executing Phase 03
-**Progress:** [███████░░░] 71%
+**Progress:** [████████░░] 75%
 
 ```
 [█████░░░░░░░░░░░░░░░] 29% (2/7 phases)
@@ -48,7 +48,7 @@ mcleods777@gmail.com, ajw71681@gmail.com (Amanda), wadeburger@rocketmail.com, bs
 
 **Resend sending domain:** `masonicmentor.app` verified via Cloudflare DNS (DKIM+SPF+DMARC); `MAGIC_LINK_FROM_EMAIL=mentor@masonicmentor.app`.
 
-**Next action:** Phase 3 Plan 03-02 (idb-schema extraction, AUTHOR-10). Plan 03-01 landed on `gsd/phase-3-authoring-throughput` — three deps installed (p-limit/music-metadata/fake-indexeddb), bake-cache dir+gitignore plumbed, 7 Wave 0 test scaffolds committed, vitest config updated to discover `scripts/__tests__/`. Plans 02-08 can run; no blockers.
+**Next action:** Phase 3 Plan 03-03 (dev-guard extraction, D-15). Plan 03-02 landed on `gsd/phase-3-authoring-throughput` — `src/lib/idb-schema.ts` is now the single source of truth for DB_NAME, DB_VERSION=5, all 6 store constants, shared openDB(), and the PII-free FeedbackTrace interface. `storage.ts` and `voice-storage.ts` both import from it (lockstep dance gone). 414 tests passing, 0 regressions. Plans 03-08 can run; no blockers.
 
 ## Phase Map
 
@@ -85,6 +85,8 @@ mcleods777@gmail.com, ajw71681@gmail.com (Amanda), wadeburger@rocketmail.com, bs
 | Reject third-party LLM body-observability for v1 | Langfuse/Helicone/LangSmith ingest full prompt+completion — even 1-2 expected ritual words violates the client-only data plane invariant | Research ARCHITECTURE.md |
 | Phase 3 gitignore uses glob form `rituals/_bake-cache/*` + `!rituals/_bake-cache/.gitignore` | Plain directory form would ignore the nested self-documenting .gitignore the same decision D-01 asks to track; glob form satisfies both layers of the belt-and-suspenders pattern | Plan 03-01 execution |
 | Phase 3 vitest.config.ts include glob extended to `scripts/**/*.test.{ts,tsx}` | Plans 05-08 put their test scaffolds under `scripts/__tests__/`; without this entry, vitest silently filters them out even when passed as explicit file args | Plan 03-01 execution |
+| `voice-storage.ts` re-exports `AUDIO_CACHE_STORE` after migration to `idb-schema.ts` | `src/lib/tts-cloud.ts:1036-1040` imports `AUDIO_CACHE_STORE` from voice-storage pre-D-16; preserving the re-export avoids a grep-and-replace across the codebase while D-16 still eliminates the inline constant. | Plan 03-02 execution |
+| Plan 02 test case 3 (consumer parity) simplified to repeated-openDB() | Post-Task-2 both `storage.ts` and `voice-storage.ts` call the same `openDB()` — a storage-first-then-voice-first dance would be tautological. Repeated-open still proves the idempotent-upgrade invariant. | Plan 03-02 execution |
 
 ### Open Questions / Todos
 
@@ -112,9 +114,9 @@ None.
 
 ## Session Continuity
 
-**Last significant action:** Phase 3 Plan 01 (deps + scaffolding) executed on 2026-04-23. Two commits on `gsd/phase-3-authoring-throughput`: `77c07c0` installed p-limit@7.3.0 + music-metadata@11.12.3 + fake-indexeddb@6.2.5 and plumbed `rituals/_bake-cache/` with both root + nested gitignore layers; `73e350c` scaffolded seven Wave 0 RED-with-todo test files across `src/lib/__tests__/` and `scripts/__tests__/` and extended `vitest.config.ts` `include` glob to discover the new `scripts/__tests__/` directory. Two Rule-3 deviations (vitest include glob extension, `@ts-expect-error` on `fake-indexeddb/auto` import) both folded into Task 2 commit; documented in `03-01-SUMMARY.md`. Mid-flight branch-checkout interference (external process switched to `docs/pilot-email-banner-no-select` and back) recovered via cherry-pick + `git update-ref` to restore docs/pilot... to its origin tip — no work lost.
+**Last significant action:** Phase 3 Plan 02 (idb-schema extraction, AUTHOR-10) executed on 2026-04-23. Two commits on `gsd/phase-3-authoring-throughput`: `43774bd` created `src/lib/idb-schema.ts` (single source of truth: DB_NAME, DB_VERSION=5, 6 store constants, `openDB()`, `FeedbackTrace` interface) and filled the Wave 0 `idb-schema.test.ts` scaffold with 5 passing tests (DB_VERSION constant, all-6-stores-alphabetical, repeated-open parity, v4→v5 data-preserving migration, FeedbackTrace PII-shape check); `a90ffe2` refactored `src/lib/storage.ts` and `src/lib/voice-storage.ts` to import from `./idb-schema` (removed ~120 lines of duplicated inline DB constants + inline openDB + obsolete lockstep comment). voice-storage re-exports `AUDIO_CACHE_STORE` to preserve the pre-D-16 import path used by `tts-cloud.ts`. Full suite: 414 passing + 58 todo; build clean; zero regressions. One Rule-3 deviation (reworded a comment to avoid literal `indexedDB.open(` grep false-positive) documented in `03-02-SUMMARY.md`.
 
-**Resumption cue:** Next action: Plan 03-02 (idb-schema extraction, AUTHOR-10). Plan 02's scaffold test `src/lib/__tests__/idb-schema.test.ts` already exists with correct `@vitest-environment jsdom` pragma and 3 `it.todo()` markers; Plan 02 turns the todos into real assertions against the new `src/lib/idb-schema.ts` module. `fake-indexeddb` is installed. No blockers.
+**Resumption cue:** Next action: Plan 03-03 (dev-guard extraction, D-15). The Wave 0 scaffold `src/lib/__tests__/dev-guard.test.ts` is ready; Plan 03-03 will create `src/lib/dev-guard.ts` with `isDev()` / `assertDevOnly()` exports, then rewire `src/app/author/page.tsx:220-233` to use `isDev()`. No blockers.
 
 **Critical context for next agent:**
 
@@ -134,3 +136,4 @@ None.
 *Phase 2 context gathered: 2026-04-21*
 *Phase 2 planned: 2026-04-21 (9 plans, 8 waves, checker iteration 2 passed)*
 *Phase 3 Plan 01 executed: 2026-04-23 (2/2 tasks, 2 commits, 8 files created, 4 modified, ~10min)*
+*Phase 3 Plan 02 executed: 2026-04-23 (2/2 tasks, 2 commits, 1 file created, 3 modified, ~5min)*

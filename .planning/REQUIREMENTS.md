@@ -75,7 +75,7 @@ Solo-author tooling so Shannon can bake five rituals worth of content without sp
 - [ ] **AUTHOR-07**: Optional STT round-trip diff per line in bake pipeline — cheap last-line-of-defense against audio that doesn't match the text
 - [ ] **AUTHOR-08**: `scripts/preview-bake.ts` localhost-only server streams cached Opus for in-editor scrubbing before re-encrypting `.mram`; dev-guard identical to `/author/_guard.ts`
 - [ ] **AUTHOR-09**: `p-limit` concurrency cap on parallel Gemini TTS calls in `build-mram-from-dialogue.ts`
-- [ ] **AUTHOR-10**: `src/lib/idb-schema.ts` extracted as the single source of truth for `DB_VERSION` shared between `storage.ts` and `voice-storage.ts`; also houses the new `feedbackTraces` store
+- [x] **AUTHOR-10**: `src/lib/idb-schema.ts` extracted as the single source of truth for `DB_VERSION` shared between `storage.ts` and `voice-storage.ts`; also houses the new `feedbackTraces` store (Phase 3 Plan 02, commits 43774bd + a90ffe2)
 
 ### Admin (Shannon-facing visibility + distribution)
 
@@ -202,7 +202,7 @@ Each v1 requirement maps to exactly one phase. Populated by `gsd-roadmapper` on 
 | AUTHOR-07 | Phase 3 | Pending |
 | AUTHOR-08 | Phase 3 | Pending |
 | AUTHOR-09 | Phase 3 | Pending |
-| AUTHOR-10 | Phase 3 | Pending |
+| AUTHOR-10 | Phase 3 | Complete (03-02, 2026-04-23) |
 | ADMIN-01 | Phase 6 | Pending |
 | ADMIN-02 | Phase 6 | Pending |
 | ADMIN-03 | Phase 6 | Pending |
