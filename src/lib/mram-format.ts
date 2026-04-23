@@ -2,11 +2,13 @@
  * .mram (Masonic Ritual AI Mentor) file format.
  *
  * A single encrypted file that bundles both cipher text (abbreviated/encoded)
- * and plain text for each line of a ritual ceremony.
+ * and plain text for each line of a ritual ceremony. v3+ also optionally
+ * embeds pre-rendered Gemini TTS audio (Opus-encoded) per line so Brothers
+ * on-device don't need to call the Gemini API at all.
  *
  * File structure on disk (binary):
  *   [4 bytes] Magic: "MRAM"
- *   [1 byte]  Version (currently 1)
+ *   [1 byte]  Version (currently 3)
  *   [16 bytes] Salt (for PBKDF2 key derivation)
  *   [12 bytes] IV (for AES-256-GCM)
  *   [rest]    Ciphertext (AES-256-GCM encrypted JSON payload)
@@ -32,6 +34,53 @@ export interface MRAMMetadata {
   degree: string;
   ceremony: string;
   checksum: string; // SHA-256 of JSON.stringify(lines)
+  /**
+   * Optional expiration timestamp (ISO 8601 string, e.g. "2026-12-31T23:59:59Z").
+   * When present, `decryptMRAM` refuses to decrypt the file after this moment.
+   *
+   * Protection model: the field lives inside the authenticated ciphertext and
+   * is covered by AES-GCM's auth tag, so it cannot be edited without the
+   * passphrase. Anyone who knows the passphrase can of course re-encrypt with
+   * a new date, so this is a "do the right thing" gate rather than DRM.
+   */
+  expiresAt?: string;
+  /**
+   * Voice cast used when audio was baked into the file (v3+).
+   * Keys are role codes ("WM", "SW", ...), values are Gemini prebuilt
+   * voice names ("Alnilam", "Charon", ...). When present, the client
+   * playback path uses MRAMLine.audio directly and skips the Gemini
+   * API call entirely. If the user picks a different engine or a
+   * different voice cast at runtime, the embedded audio is ignored
+   * and the existing IndexedDB cache + API path handles it.
+   */
+  voiceCast?: Record<string, string>;
+  /**
+   * Codec identifier for the bytes in MRAMLine.audio. Currently only
+   * "opus-32k-mono" is emitted by the build script. Reserved for future
+   * codecs (e.g., "mp3-64k-mono") without breaking old readers.
+   */
+  audioFormat?: "opus-32k-mono";
+}
+
+// ============================================================
+// Errors
+// ============================================================
+
+/**
+ * Thrown by `decryptMRAM` when the file carries an `expiresAt` metadata field
+ * that is in the past. Distinct from a wrong-passphrase error so callers can
+ * show a specific message.
+ */
+export class MRAMExpiredError extends Error {
+  readonly expiredAt: Date;
+  constructor(expiredAt: Date) {
+    super(
+      `This ritual file expired on ${expiredAt.toISOString()}. ` +
+        `Request a fresh .mram file from your lodge.`
+    );
+    this.name = "MRAMExpiredError";
+    this.expiredAt = expiredAt;
+  }
 }
 
 export interface MRAMSection {
@@ -48,6 +97,28 @@ export interface MRAMLine {
   action: string | null; // Stage direction text or null
   cipher: string;  // Cipher/abbreviated text (shown to user)
   plain: string;   // Full plain text (used for AI coaching & comparison)
+  /**
+   * Optional Gemini 3.1 Flash TTS audio tag for expressive delivery
+   * (e.g., "gravely", "reverently", "whispers"). Only consumed by
+   * the Gemini TTS engine; other engines ignore this field entirely.
+   * Validates against STYLE_TAG_PATTERN in src/lib/styles.ts.
+   * Present in FORMAT_VERSION 2+ files only.
+   */
+  style?: string;
+  /**
+   * Optional pre-rendered audio for this line, Opus-encoded and
+   * base64-serialized. Baked at build time by scripts/build-mram-
+   * from-dialogue.ts via `--with-audio`. Audio was rendered with the
+   * voice named by metadata.voiceCast[this.role] and the style above.
+   *
+   * When this field is present and the user is playing with the Gemini
+   * engine + no per-role Voxtral override, the client plays these bytes
+   * directly — zero API call, zero network roundtrip. When absent, the
+   * existing /api/tts/gemini + IndexedDB cache path handles the line.
+   *
+   * Present in FORMAT_VERSION 3+ files only.
+   */
+  audio?: string;
 }
 
 // ============================================================
@@ -55,7 +126,11 @@ export interface MRAMLine {
 // ============================================================
 
 const MAGIC = new Uint8Array([0x4D, 0x52, 0x41, 0x4D]); // "MRAM"
-const FORMAT_VERSION = 1;
+// v1 files decrypt fine (style + audio fields are optional)
+// v2 adds MRAMLine.style
+// v3 adds MRAMLine.audio + metadata.voiceCast + metadata.audioFormat
+const FORMAT_VERSION = 3;
+const SUPPORTED_VERSIONS = [1, 2, 3];
 const SALT_LENGTH = 16;
 const IV_LENGTH = 12;
 const PBKDF2_ITERATIONS = 310_000; // OWASP 2023 recommended minimum
@@ -162,11 +237,12 @@ export async function decryptMRAM(
     }
   }
 
-  // Read version
+  // Read version. v1 and v2 are both supported; v1 files simply have no
+  // style field on any MRAMLine (JSON.parse leaves it undefined).
   const version = bytes[MAGIC.length];
-  if (version !== FORMAT_VERSION) {
+  if (!SUPPORTED_VERSIONS.includes(version)) {
     throw new Error(
-      `Unsupported file version (${version}). This app supports version ${FORMAT_VERSION}.`
+      `Unsupported file version (${version}). This app supports versions ${SUPPORTED_VERSIONS.join(", ")}.`
     );
   }
 
@@ -220,6 +296,20 @@ export async function decryptMRAM(
     );
   }
 
+  // Enforce expiration if set. Checked AFTER checksum so a corrupted file
+  // always surfaces the integrity error, not a stale date from garbage bytes.
+  if (doc.metadata.expiresAt) {
+    const expiresAt = new Date(doc.metadata.expiresAt);
+    if (Number.isNaN(expiresAt.getTime())) {
+      throw new Error(
+        `Invalid expiresAt value in file metadata: ${doc.metadata.expiresAt}`
+      );
+    }
+    if (expiresAt.getTime() <= Date.now()) {
+      throw new MRAMExpiredError(expiresAt);
+    }
+  }
+
   return doc;
 }
 
@@ -250,6 +340,10 @@ export interface MRAMRitualSection {
   order: number;
   gavels: number;
   action: string | null;
+  /** Gemini 3.1 Flash TTS audio tag (v2+ .mram files). Undefined on v1. */
+  style?: string;
+  /** Pre-rendered Opus audio for this line, base64 (v3+ files). */
+  audio?: string;
 }
 
 export function mramToSections(doc: MRAMDocument): MRAMRitualSection[] {
@@ -265,6 +359,8 @@ export function mramToSections(doc: MRAMDocument): MRAMRitualSection[] {
     order: index,
     gavels: line.gavels,
     action: line.action,
+    ...(line.style ? { style: line.style } : {}),
+    ...(line.audio ? { audio: line.audio } : {}),
   }));
 }
 

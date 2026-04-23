@@ -6,14 +6,21 @@ import {
   listVoices,
   deleteVoice,
   assignVoiceRole,
+  renameVoice,
   exportVoices,
   validateVoiceImport,
   importVoices,
   type LocalVoice,
 } from "@/lib/voice-storage";
-import { clearVoxtralVoicesCache, VOXTRAL_ROLE_OPTIONS } from "@/lib/tts-cloud";
+import { ensureDefaultVoices, resetDefaultVoiceRoles } from "@/lib/default-voices";
+import {
+  clearVoxtralVoicesCache,
+  VOXTRAL_ROLE_OPTIONS,
+  roleToGroup,
+  preloadVoxtralForRole,
+} from "@/lib/tts-cloud";
+import { listDocuments, getDocumentSections } from "@/lib/storage";
 import { normalizeAudio, encodeWav } from "@/lib/audio-utils";
-import { ensureDefaultVoices, getDefaultVoiceNames } from "@/lib/default-voices";
 import { fetchApi } from "@/lib/api-fetch";
 
 // ============================================================
@@ -26,14 +33,23 @@ type RecordingState = "idle" | "recording" | "recorded" | "saving";
 // Suggested phrases for recording samples
 // ============================================================
 
+// Voice-cloning prompts. Each ~35-55 words / ~10-14 seconds at natural
+// pace, with intentional prosodic structure (opening statement → middle
+// pause → resolved close) so Voxtral captures pitch range, pacing, and
+// register. Original prose only — never any actual ritual content. The
+// dignified register matches the Masonic context without revealing any
+// of the work itself.
 const SAMPLE_PHRASES = [
-  "Brethren, the lodge is now open for the transaction of business.",
-  "Worshipful Master, the lodge is tyled.",
-  "The Junior Warden's station is in the south.",
-  "Let us offer our prayers to the Most High.",
-  "I vouch for this brother, that he is worthy and well qualified.",
-  "The minutes of the previous communication are as follows.",
-  "So mote it be.",
+  "There is a quiet kind of work that asks nothing in return, and gives more than it takes. The hands that do it are rarely thanked, but the place is always better for them having been there.",
+  "Time has a way of revealing what mattered all along. The arguments fade, the pride dissolves, and what remains is the simple fact that we showed up for one another when it counted.",
+  "When the lamps are low and the room is still, a man can hear the shape of his own thoughts. It is in those hours that he decides what sort of person he intends to be.",
+  "We carry with us the lessons of those who came before, not as a weight, but as a steady hand on the shoulder. Their words echo forward, plain and patient, asking us to live well.",
+  "The work of building is slow. Stone upon stone, day upon day, with no great applause and no clear horizon. And yet the wall rises, and one morning you turn around and see it standing.",
+  "Friendship is not measured in the bright hours. It is measured in the long dim ones, when the work is hard and the company is silent, and someone simply stays.",
+  "There is dignity in keeping a promise, even one no one would notice you had broken. Especially that kind. The world is held together by such small, invisible faithfulnesses.",
+  "Walk slowly through the morning. Notice the cool air, the way the light falls across the floor, the small sounds the house makes as it wakes. These are the hours you will miss.",
+  "A craftsman does not boast of his tools. He sets them down, picks them up, and does the work. The wood remembers his hands long after his name has been forgotten.",
+  "There are rooms in our lives we leave and never visit again. We carry them with us anyway, in the way we hold a cup, in the way we listen, in the half-remembered shape of an old kindness.",
 ];
 
 // ============================================================
@@ -59,6 +75,9 @@ export default function VoicesPage() {
   const [micLevel, setMicLevel] = useState(0);
   const [testingVoiceId, setTestingVoiceId] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [renamingVoiceId, setRenamingVoiceId] = useState<string | null>(null);
+  const [renameInput, setRenameInput] = useState("");
+  const [renameSaving, setRenameSaving] = useState(false);
 
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -71,13 +90,170 @@ export default function VoicesPage() {
   const micAudioCtxRef = useRef<AudioContext | null>(null);
   const animFrameRef = useRef<number>(0);
 
+  // Per-voice prefetch progress. Kicks off when the user assigns a voice
+  // to a role — iterates every line in every loaded ritual that belongs
+  // to that role's group and pre-renders the Voxtral audio into the
+  // IndexedDB cache. Next rehearsal plays those lines instantly without
+  // hitting the API. See preloadVoxtralForRole in tts-cloud.ts.
+  interface PrefetchState {
+    status: "running" | "done" | "error";
+    cached: number;
+    total: number;
+    abort: () => void;
+  }
+  const [prefetchByVoice, setPrefetchByVoice] = useState<
+    Record<string, PrefetchState>
+  >({});
+  // Keep the live aborters outside render state so React strict-mode
+  // double-invokes and stale closures can't double-start or leak a
+  // prefetch.
+  const prefetchAbortersRef = useRef<Record<string, () => void>>({});
+
+  // ============================================================
+  // Voxtral prefetch — cache every line this voice will speak
+  // ============================================================
+
+  /**
+   * Gather every spoken line across all loaded rituals whose speaker
+   * maps to the same role group as the newly-assigned role. Returns
+   * sorted by ceremony order so the prefetch primes the first lines
+   * the user will hear before the later ones.
+   */
+  const gatherLinesForRoleGroup = useCallback(
+    async (
+      role: string,
+    ): Promise<{ text: string; order: number }[]> => {
+      const groupIdx = roleToGroup(role);
+      if (groupIdx < 0) return [];
+      const docs = await listDocuments();
+      const lines: { text: string; order: number }[] = [];
+      // Track a running ceremony counter across rituals so "order"
+      // stays monotonic — within one ritual the section.order already
+      // orders correctly, but we also want ritual 1 before ritual 2.
+      let ritualOffset = 0;
+      for (const doc of docs) {
+        const sections = await getDocumentSections(doc.id);
+        for (const section of sections) {
+          if (!section.speaker) continue;
+          if (roleToGroup(section.speaker) !== groupIdx) continue;
+          if (!section.text.trim()) continue;
+          lines.push({
+            text: section.text,
+            order: ritualOffset + section.order,
+          });
+        }
+        // Offset the next ritual beyond the end of this one so cross-
+        // ritual ordering is stable. `sections.length` is a cheap upper
+        // bound; exact max(order)+1 would be more correct but isn't
+        // worth another pass.
+        ritualOffset += sections.length + 1000;
+      }
+      return lines;
+    },
+    [],
+  );
+
+  /**
+   * Kick off (or reset) prefetch for a given voice after the user
+   * assigns it to a role. Aborts any in-flight prefetch for the same
+   * voice first. Silent no-op if no rituals are loaded or the role
+   * maps to nothing — the user will just eat cold-cache latency on
+   * the first rehearsal, same as before this feature existed.
+   */
+  const startPrefetchForVoice = useCallback(
+    async (voice: LocalVoice, role: string) => {
+      // Abort any existing prefetch for this voice (reassignment,
+      // re-assignment to same role, toggle off-and-on, etc).
+      const prev = prefetchAbortersRef.current[voice.id];
+      if (prev) prev();
+
+      const lines = await gatherLinesForRoleGroup(role);
+      if (lines.length === 0) {
+        // No matching lines. Clear any stale state for this voice so
+        // the UI doesn't show ghost progress from a prior ritual.
+        setPrefetchByVoice((s) => {
+          const next = { ...s };
+          delete next[voice.id];
+          return next;
+        });
+        return;
+      }
+
+      const { abort, done } = preloadVoxtralForRole(
+        lines,
+        voice.id,
+        voice.audioBase64,
+        (progress) => {
+          if (progress.aborted) return;
+          setPrefetchByVoice((s) => ({
+            ...s,
+            [voice.id]: {
+              status:
+                progress.index + 1 >= progress.total ? "done" : "running",
+              cached: progress.index + 1,
+              total: progress.total,
+              abort: prefetchAbortersRef.current[voice.id] ?? (() => {}),
+            },
+          }));
+        },
+      );
+      prefetchAbortersRef.current[voice.id] = abort;
+      setPrefetchByVoice((s) => ({
+        ...s,
+        [voice.id]: {
+          status: "running",
+          cached: 0,
+          total: lines.length,
+          abort,
+        },
+      }));
+
+      // Await completion so a thrown error can land in state. Progress
+      // callback handles success. Errors here are rare (we swallow per-
+      // line failures inside prefetchVoxtralLine).
+      done
+        .then(() => {
+          setPrefetchByVoice((s) => {
+            if (!s[voice.id]) return s;
+            return {
+              ...s,
+              [voice.id]: { ...s[voice.id], status: "done" },
+            };
+          });
+        })
+        .catch(() => {
+          setPrefetchByVoice((s) => ({
+            ...s,
+            [voice.id]: {
+              status: "error",
+              cached: s[voice.id]?.cached ?? 0,
+              total: lines.length,
+              abort,
+            },
+          }));
+        });
+    },
+    [gatherLinesForRoleGroup],
+  );
+
+  // Abort any in-flight prefetches on unmount so we don't leak promises
+  // or keep hitting the API after the user navigates away.
+  useEffect(() => {
+    const aborters = prefetchAbortersRef.current;
+    return () => {
+      for (const abort of Object.values(aborters)) abort();
+    };
+  }, []);
+
   // ============================================================
   // Load voices from IndexedDB
   // ============================================================
 
   const fetchVoices = useCallback(async () => {
     try {
-      // Auto-load default voices on first visit
+      // Auto-load the 15 default Voxtral voices on first visit. They ship
+      // unassigned so they sit in the round-robin pool for Voxtral fallback.
+      // The user can manually assign one to a role here.
       await ensureDefaultVoices();
       const localVoices = await listVoices();
       // Sort: user voices (createdAt > 0) first, then defaults (createdAt === 0)
@@ -321,6 +497,37 @@ export default function VoicesPage() {
     }
   };
 
+  const startRename = (voice: LocalVoice) => {
+    setRenamingVoiceId(voice.id);
+    setRenameInput(voice.name);
+    setError(null);
+  };
+
+  const cancelRename = () => {
+    setRenamingVoiceId(null);
+    setRenameInput("");
+  };
+
+  const saveRename = async (id: string) => {
+    const trimmed = renameInput.trim();
+    if (!trimmed) {
+      setError("Voice name cannot be empty.");
+      return;
+    }
+    setRenameSaving(true);
+    try {
+      await renameVoice(id, trimmed);
+      clearVoxtralVoicesCache();
+      await fetchVoices();
+      setRenamingVoiceId(null);
+      setRenameInput("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to rename voice");
+    } finally {
+      setRenameSaving(false);
+    }
+  };
+
   // ============================================================
   // Test voice playback
   // ============================================================
@@ -483,8 +690,9 @@ export default function VoicesPage() {
         {/* Tips */}
         <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3">
           <p className="text-xs text-amber-400/80">
-            <strong>Tips:</strong> 3-5 seconds is ideal. Shorter recordings = faster TTS response.
-            Speak in the tone you want for rehearsal. A quiet room helps cloning quality.
+            <strong>Tips:</strong> ~10 seconds gives the cleanest clone. Speak naturally and
+            let your voice rise and fall &mdash; a flat reading clones flat. Use the tone you want
+            for rehearsal. A quiet room helps.
           </p>
         </div>
 
@@ -653,6 +861,22 @@ export default function VoicesPage() {
           </h2>
           <div className="flex items-center gap-2">
             <button
+              onClick={async () => {
+                const { changed } = await resetDefaultVoiceRoles();
+                clearVoxtralVoicesCache();
+                await fetchVoices();
+                setSuccess(
+                  changed > 0
+                    ? `Cleared ${changed} default voice role assignment${changed === 1 ? "" : "s"}.`
+                    : "No default voice role assignments to clear.",
+                );
+              }}
+              className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-sm font-medium transition-colors"
+              title="Clear role assignments on default character voices. Does not touch your recorded voices."
+            >
+              Reset Defaults
+            </button>
+            <button
               onClick={() => fileInputRef.current?.click()}
               disabled={importing}
               className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
@@ -691,36 +915,110 @@ export default function VoicesPage() {
                 key={voice.id}
                 className="bg-zinc-800/50 rounded-lg p-4 space-y-3"
               >
-                {/* Top row: name + delete */}
-                <div className="flex items-center justify-between">
+                {/* Top row: name + rename + delete */}
+                <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0 flex-1">
-                    <p className="text-zinc-200 font-medium truncate">
-                      {voice.name}
-                    </p>
-                    <p className="text-xs text-zinc-500">
-                      {voice.duration}s &middot;{" "}
-                      {new Date(voice.createdAt).toLocaleDateString()}
-                    </p>
+                    {renamingVoiceId === voice.id ? (
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={renameInput}
+                          onChange={(e) => setRenameInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              saveRename(voice.id);
+                            } else if (e.key === "Escape") {
+                              e.preventDefault();
+                              cancelRename();
+                            }
+                          }}
+                          autoFocus
+                          disabled={renameSaving}
+                          className="flex-1 min-w-0 px-3 py-1.5 bg-zinc-800 border border-amber-500 rounded-lg text-zinc-200 text-sm focus:outline-none disabled:opacity-50"
+                          placeholder="Voice name"
+                        />
+                        <button
+                          onClick={() => saveRename(voice.id)}
+                          disabled={renameSaving || !renameInput.trim()}
+                          className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white rounded-lg text-xs font-medium transition-colors"
+                        >
+                          {renameSaving ? "Saving..." : "Save"}
+                        </button>
+                        <button
+                          onClick={cancelRename}
+                          disabled={renameSaving}
+                          className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <p className="text-zinc-200 font-medium truncate">
+                          {voice.name}
+                          {voice.createdAt === 0 && (
+                            <span className="ml-2 align-middle text-[10px] uppercase tracking-wider text-amber-500/80 bg-amber-500/10 px-1.5 py-0.5 rounded">
+                              Default
+                            </span>
+                          )}
+                        </p>
+                        <p className="text-xs text-zinc-500">
+                          {voice.duration}s
+                          {voice.createdAt > 0 && (
+                            <>
+                              {" "}&middot;{" "}
+                              {new Date(voice.createdAt).toLocaleDateString()}
+                            </>
+                          )}
+                        </p>
+                      </>
+                    )}
                   </div>
-                  <button
-                    onClick={() => handleDelete(voice.id, voice.name)}
-                    className="ml-3 p-2 text-zinc-600 hover:text-red-400 transition-colors flex-shrink-0"
-                    title="Delete voice"
-                  >
-                    <svg
-                      className="w-5 h-5"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                      />
-                    </svg>
-                  </button>
+                  {renamingVoiceId !== voice.id && (
+                    <div className="flex items-center flex-shrink-0">
+                      <button
+                        onClick={() => startRename(voice)}
+                        className="p-2 text-zinc-600 hover:text-amber-400 transition-colors"
+                        title="Rename voice"
+                        aria-label={`Rename ${voice.name}`}
+                      >
+                        <svg
+                          className="w-5 h-5"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                          />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={() => handleDelete(voice.id, voice.name)}
+                        className="p-2 text-zinc-600 hover:text-red-400 transition-colors"
+                        title="Delete voice"
+                        aria-label={`Delete ${voice.name}`}
+                      >
+                        <svg
+                          className="w-5 h-5"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                          />
+                        </svg>
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Bottom row: role dropdown + play button */}
@@ -732,6 +1030,22 @@ export default function VoicesPage() {
                       await assignVoiceRole(voice.id, role);
                       clearVoxtralVoicesCache();
                       fetchVoices();
+                      // Kick off prefetch for every line this voice
+                      // will speak, in ceremony order. If role was
+                      // cleared (round-robin), abort any in-flight
+                      // prefetch for this voice.
+                      if (role) {
+                        startPrefetchForVoice(voice, role);
+                      } else {
+                        const abort =
+                          prefetchAbortersRef.current[voice.id];
+                        if (abort) abort();
+                        setPrefetchByVoice((s) => {
+                          const next = { ...s };
+                          delete next[voice.id];
+                          return next;
+                        });
+                      }
                     }}
                     className="flex-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-300 text-sm focus:outline-none focus:border-amber-500 cursor-pointer"
                   >
@@ -761,6 +1075,52 @@ export default function VoicesPage() {
                     {testingVoiceId === voice.id ? "Playing..." : "Test"}
                   </button>
                 </div>
+
+                {/* Prefetch progress: appears the moment a role is
+                    assigned and this voice starts caching lines. Tiny
+                    so it never overwhelms the card; disappears when
+                    the voice is unassigned. */}
+                {prefetchByVoice[voice.id] && (
+                  <div className="mt-2 flex items-center gap-2 text-xs">
+                    {prefetchByVoice[voice.id].status === "running" && (
+                      <>
+                        <div className="w-3 h-3 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+                        <span className="text-zinc-400">
+                          Caching for rehearsal:{" "}
+                          <span className="text-amber-400">
+                            {prefetchByVoice[voice.id].cached}/
+                            {prefetchByVoice[voice.id].total}
+                          </span>
+                        </span>
+                      </>
+                    )}
+                    {prefetchByVoice[voice.id].status === "done" && (
+                      <>
+                        <svg
+                          className="w-3 h-3 text-green-400"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={3}
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M5 13l4 4L19 7"
+                          />
+                        </svg>
+                        <span className="text-zinc-500">
+                          Cached for instant playback ({prefetchByVoice[voice.id].total} lines)
+                        </span>
+                      </>
+                    )}
+                    {prefetchByVoice[voice.id].status === "error" && (
+                      <span className="text-red-400">
+                        Prefetch error — first rehearsal may be slow. Reassign to retry.
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>

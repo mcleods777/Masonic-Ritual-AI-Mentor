@@ -24,6 +24,203 @@ missed.
 Everything runs privately. Your ritual file is encrypted, decrypted on your
 own device, and never stored on a server.
 
+## What has changed in the last week
+
+If you have been tracking this pilot since Tuesday, April 14, here is the
+running summary of what shipped between then and today. If you are new to
+the pilot, skip to the next section — everything below is already in effect
+when you open the app for the first time.
+
+### Sign-in, landing page, and install (April 15)
+
+- **Magic-link sign-in.** Type your lodge email, receive a one-tap link,
+  remembered for thirty days on that device. No passwords to lose, no
+  shared credentials. The lodge's roster of approved emails is the only
+  gate.
+- **Installable as an app.** On iPhone or Android, the pilot site can be
+  installed to the home screen and opens in its own window, icon and all.
+  Full instructions in the install guide below.
+- **Mobile navigation tightened** so six sections fit cleanly across the
+  bottom bar on a phone, and "How It Works" now appears on mobile where
+  it previously only showed on desktop.
+
+### Pilot invitation email itself (April 16)
+
+- This email was written, published to the repository, and rendered as
+  HTML with the landing-page screenshots and two inline diagrams (the
+  sign-in flow and the data-flow map). Both diagrams have been revised
+  since the first draft.
+
+### Gemini 3.1 Flash TTS became the default voice (April 18)
+
+The single biggest change of the week. Google released **Gemini 3.1 Flash
+TTS** on April 15, and it went in as the app's default voice engine three
+days later after end-to-end testing.
+
+- **Expressive delivery.** Inline audio tags in the ritual text ([slow],
+  [solemn], [whispered]) steer cadence, weight, and emotion mid-sentence.
+  The work reads the way the work is meant to be heard, not as a flat
+  recitation.
+- **Three-model fallback chain.** When the daily quota on the preview
+  model fills up, playback silently falls through to two older Gemini
+  models so a rehearsal never dies mid-ritual. You may hear a slightly
+  different voice on a late-evening practice — that is the fallback
+  working.
+- **SSE streaming fixes.** Several rounds of plumbing work to make
+  streamed audio arrive cleanly across browsers, including WAV header
+  patching and a CRLF-tolerant SSE parser (Chrome and Edge were
+  truncating streamed audio before these landed).
+- **Voxtral voices restored as a fallback pool.** Fifteen character
+  voices come pre-loaded for any officer role that has no custom
+  recording yet, so every role has something to say from the first
+  click.
+- **CSP fix so the Masonic typography loads.** Cinzel (headings) and
+  Cormorant Garamond (body) are now allowed through the content
+  security policy on mobile; before the fix, some devices fell back to
+  a default system font.
+
+### Voxtral voice cloning — better prompts, smarter caching (April 19)
+
+- **Longer, generic prompts** replaced short ritual phrases in the
+  voice-clone training samples. Short phrases were producing cloned
+  voices that sounded stilted on long passages. The new samples
+  produce noticeably more natural clones.
+- **Ceremony-order prefetch.** When you assign a recorded voice to an
+  officer, the app now pre-renders that voice's lines in the order the
+  ritual will actually hit them, so the first few lines you hear are
+  always cache-hot. No more awkward first-line pause while the clone
+  warms up.
+- **Cache + role-assignment flow** generally tightened. The Junior
+  Warden default voice was also swapped from *Puck* to *Enceladus* for
+  a better match to the chair.
+
+### Audio baked into the ritual file at build time (April 19–20)
+
+This is the architectural shift the whole week has been pointing toward.
+Until now, every officer line was synthesized live by calling Google's
+TTS API from your browser while you rehearsed. Starting this week, the
+ritual audio is **pre-rendered into the `.mram` file itself** at build
+time on my machine.
+
+What that means for you:
+
+- **Near-zero runtime API calls.** Ninety-five-plus percent of lines
+  play instantly from the encrypted ritual file the moment the app
+  loads them. No round-trip to Google, no cold-start pause, no quota
+  risk during rehearsal.
+- **Tier 1 + Tier 2 expressive prompting.** Each line is baked with
+  full directorial context — mood, cadence, preceding line — so the
+  cloud-rendered performance is the best Gemini can currently produce,
+  not a first-draft quick read.
+- **Overnight bake mode.** The build pipeline can now pause and wait
+  out a Gemini quota exhaustion instead of failing — perfect for a
+  full three-degree bake that takes hours.
+- **Quality-tier drop detection.** If Gemini silently drops from
+  preview to a weaker fallback model mid-bake, the pipeline catches
+  it and stops for confirmation rather than stitching a mixed-quality
+  ritual together.
+- **Canonical bake workflow documented** in the repository so the
+  process is reproducible, not tribal knowledge.
+
+### Engineering tools for ritual file maintenance (April 20)
+
+Four small scripts were added to maintain encrypted ritual files over
+time without touching the web app:
+
+- `rotate-mram-passphrase.ts` — change the password on an existing
+  `.mram` file.
+- `invalidate-mram-cache.ts` — force a re-bake of a specific line
+  after editing or re-recording.
+- `list-ritual-lines.ts` — list every line in a ritual file with its
+  cache / bake / skip status.
+- `validate-rituals.ts` — now auto-discovers every dialogue pair in
+  the `rituals/` directory so adding a new ritual does not require
+  editing the validation script.
+
+None of these are user-facing, but they are the reason ritual files
+can now evolve safely after they are distributed.
+
+### Custom domain, mobile nav polish, and safety floor (April 21)
+
+- **The app now lives at `https://masonicmentor.app`.** The old Vercel
+  preview URL still works but the short masonicmentor.app address is the
+  canonical one — use it on every device and share only this one with
+  brothers.
+- **Mobile bottom nav trimmed from six tabs to five** (Home, Upload,
+  Practice, Voices, Stats) so each button gets ~20% more width on a
+  phone. The walkthrough guide is still reachable by direct URL if
+  needed; it just no longer occupies a permanent spot on the bar.
+- **Phase 2 safety floor merged** — a batch of protections the pilot
+  now runs with quietly in the background:
+  - **Rate limiting** on every paid-API route so a compromised key
+    cannot run up an unlimited bill.
+  - **Per-user daily spend caps.** Practice until you hit the day's
+    budget, then paid services cut off for that user until reset.
+    Nothing breaks; you just fall to the fully-offline voice + speech
+    paths.
+  - **Emergency kill-switch.** One env var flip disables the paid-API
+    path site-wide — useful if a vendor has an outage or a cost spike
+    is in flight.
+  - **Daily aggregate spend alert.** If the lodge's total paid-API
+    spend trips a threshold, I get an email the next morning.
+  - **Privacy-preserving analytics.** PostHog (EU region), but the
+    server only ever sends **SHA-256-hashed email addresses** and a
+    handful of event names. PostHog has no way to reverse the hash to
+    a brother's real email; ritual text, speech, and coaching content
+    are never sent.
+  - **Session step ceiling** so a runaway rehearsal cannot loop
+    endlessly if something goes wrong with advancement.
+  - **Screen wake-lock auto-release** after 30 minutes of inactivity —
+    prevents the phone staying lit all night if a brother sets the app
+    down mid-session and forgets it.
+
+### Baked-audio quality polish + letter-exchange fix (April 22 — today)
+
+- **Baked-audio cleanup across all three EA rituals** (opening, closing,
+  initiation). Specific pacing issues corrected ("Perform that duty..."
+  was dragging and is now brisk), several end-of-line artifacts removed,
+  and a hanging WM line in the initiation now plays cleanly.
+- **The duplicate Chaplain prayer in the EA opening is gone.** Only the
+  "Great Architect of the Universe, in Thy name we have assembled..."
+  prayer remains, as intended.
+- **Letter-exchange (B-O-A-Z) lines now bake deterministically.** These
+  short single-letter exchanges in the catechism used to fall through to
+  a live cloud voice because Gemini TTS regresses on ultra-short
+  prompts. A new build-time mechanism called `speakAs` sends Gemini a
+  longer instructional prompt (*"say only this single letter name: Bee"*)
+  while the ritual file still stores and displays the traditional short
+  token. You now hear clean phonetic letter names in the spelling
+  passages, and those lines no longer require any live-cloud fallback.
+- **One WM pacing line tightened.** The WM's "Perform that duty..."
+  command in the opening had a default "deliberate" pacing that read as
+  draggy; it now has a targeted direct-delivery style so it lands as a
+  command rather than a dirge.
+
+### Practice page UI simplified (April 20)
+
+With baked audio as the default, the old seven-engine voice dropdown
+and the "Preload audio" button on the practice page were no longer
+doing useful work for the rehearser. Both have been removed. The app
+now plays the baked Gemini audio by default and applies any custom
+Voxtral voice you have recorded as a per-role override. Missing lines
+(ultra-short filler phrases the bake intentionally skips) are warmed
+silently in the background a couple of seconds after the page loads.
+
+If you open the pilot today, the first thing you will notice is that
+the practice header is cleaner — a title, a subtitle, and the document
+selector when you have more than one ritual. The mode toggle
+(Rehearsal / Listen) sits below, and that is it.
+
+### Miscellaneous fixes (April 14–18)
+
+- **Rehearsal "jump to line" now respects your selected role** instead
+  of silently switching to whichever role owned the line you jumped
+  to.
+- **Voice cards show a "Default" badge** instead of rendering the Unix
+  epoch (12/31/1969) for voices that never had a custom upload date.
+- **Ritual review tool + auth hardening** shipped together on April 18
+  in the same PR that introduced Gemini as the default engine.
+
 ## About the front page — why it looks the way it does
 
 When you open the pilot URL, the first thing you see is a dark landing
@@ -33,24 +230,41 @@ themselves around the symbol as it moves.
 
 ![Masonic Ritual Mentor landing page](./install-guide-images/03-landing-desktop.png)
 
-That is not a gimmick. The page is a live demo of a brand-new open-source
-text layout standard called **Pretext**, released just days ago by an
-engineer at Midjourney. Pretext is the first practical way to get that
-kind of organic, obstacle-aware text flow on the open web, and our landing
-page is one of the earliest real-world uses of it outside the author's own
-demos.
+That is not a gimmick — and it is not something you have seen on a
+website before, because until now it could not be done. For the entire
+thirty-year history of the web, text has been trapped inside rectangles.
+Paragraphs wrap around the invisible edges of a box, full stop. A narrow
+CSS feature added around 2014 (`shape-outside`) let a paragraph hug the
+edge of *one* static image, but nothing more — no multiple obstacles, no
+moving obstacles, no real reflow.
 
-If you want the background, there's a short YouTube explainer on what
-Pretext is and why it matters:
+The page is a live demo of a brand-new open-source text layout standard
+called **Pretext**, released just days ago by an engineer at Midjourney.
+Pretext is the first practical way to get real, dynamic, multi-obstacle
+text reflow on the open web — text that genuinely recalculates its
+shape in real time as objects drift, resize, or appear. It unlocks an
+entire category of layout that was previously impossible outside of
+print: magazine-grade typography, interactive fiction, games with
+diegetic text, data-viz with inline narrative. Our landing page is one
+of the earliest real-world uses of it outside the author's own demos.
+
+Short YouTube explainer on what Pretext is and why it matters:
 
 https://youtu.be/CUAuy5SWJcw?si=0WRv_QF8yfhyaYKn
 
-And a write-up in VentureBeat:
+Write-up in VentureBeat:
 
 https://venturebeat.com/technology/midjourney-engineer-debuts-new-vibe-coded-open-source-standard-pretext-to
 
-I mention it because a few brothers have asked, "Why does the front page
-feel different from a normal website?" — that's why.
+Full transparency: no brother asked me to put this on the front page. I
+put it there because it is genuinely interesting and novel. When I first
+read about Pretext, I wanted to see if I could get it running inside the
+app within the hour — and I was frankly amazed when I could. It has no
+bearing on the rehearsal feature itself. It is there because we are
+among the first to sample a revolutionary new way of using the web —
+text that finally escapes the rectangle after thirty years — and our
+lodge's pilot page gets to be one of the earliest places on the open
+web to show it off.
 
 ## Under the hood — why this app is unique
 
@@ -66,14 +280,19 @@ hint that primes the model for ritual terms — *Worshipful Master*,
 reachable, it falls back automatically to your browser's built-in
 recognition.
 
-### Six voice engines, including voice cloning
+### Seven voice engines, including expressive AI voices and voice cloning
 
-Any of six text-to-speech engines can read the ritual aloud:
+Any of seven text-to-speech engines can read the ritual aloud:
 
-- **Mistral Voxtral** (default) — supports **zero-shot voice cloning**.
-  Record a short sample of a brother speaking and the app will read
-  *his* officer's lines in *his* voice. No paid "voice clone" tier
-  required.
+- **Google Gemini 3.1 Flash TTS** *(default)* — Google's newest
+  expressive voice model, released April 15, 2026. Per-officer male
+  voices with prompt-driven direction (gravely, reverent, commanding).
+  When the daily quota fills up, the app silently falls through to two
+  older Gemini models so playback keeps working.
+- **Mistral Voxtral** — supports **zero-shot voice cloning**. Record a
+  short sample of a brother speaking and the app will read *his*
+  officer's lines in *his* voice. No paid "voice clone" tier required.
+  Ships with 15 character voices in the pool as backup.
 - **ElevenLabs** — twelve distinct male voices, one per officer chair.
 - **Google Cloud Neural2** — per-role voice, pitch, and rate tuning so
   the Worshipful Master sounds deeper than the Tyler.
@@ -82,8 +301,9 @@ Any of six text-to-speech engines can read the ritual aloud:
 - **Kokoro** — a self-hosted option with no cloud dependency.
 - **Browser built-in** — always works, even offline.
 
-If one cloud engine is down, the app automatically falls through to the
-next in the chain.
+If a cloud engine is down or rate-limited, the app automatically falls
+through the chain (Gemini → Voxtral → Google Cloud → browser) so you
+never hit a dead end during practice.
 
 ### Five-layer feedback, not just text matching
 
@@ -101,6 +321,38 @@ expected text character-by-character. It runs five layers:
 After the diff, a large language model (Llama 3.3 70B via Groq) generates
 a short spoken coaching response — brief, contextual, and streamed to
 you as you listen.
+
+### Why Gemini is now the default voice — and what's still coming
+
+Today's default voice engine fixes the one thing earlier text-to-speech
+still got wrong for ritual work: *delivery.* A flat, evenly-paced reading
+is fine for a shopping list — it is not fine for the gravitas of an
+obligation or the cadence of a lecture.
+
+- **Google Gemini 3.1 Flash TTS** (now shipping as the app's default).
+  Google released this model on April 15, 2026 — a few days before
+  this email went out. It accepts inline *audio tags* — short
+  bracketed directions like `[slow, solemn]` or `[whispered]` — that
+  steer style, pace, and emotion at any point mid-sentence. That means
+  the ritual text itself can pre-mark the cadence shifts the work
+  already calls for, and the voice engine will honor them. It
+  currently sits at the top of the Artificial Analysis TTS quality
+  leaderboard (Elo 1,211), supports 70+ languages, and watermarks
+  every clip with SynthID.
+- **Microsoft Azure Dragon HD / Neural HD 2.5** (rolling out early-to-mid
+  2026 — not yet wired in). Microsoft's new HD line is LLM-based: the
+  model reads the *meaning* of each line and adjusts emotional tone
+  automatically — measured pause at a solemn passage, lift at a welcome,
+  weight at a charge — without any manual markup at all. A unified model
+  covering 700+ voices, with wider availability and a significant price
+  drop arriving in March 2026. We will add it to the seven-engine
+  dropdown when the public API lands.
+
+Gemini is live in the dropdown today and serves as the playback engine
+for every officer line by default. Voxtral, ElevenLabs, Deepgram, Google
+Cloud, Kokoro, and the browser engine are still selectable as
+alternatives or fallbacks — the ritual will *sound* like ritual either
+way.
 
 ## Your data — what leaves your device, and what doesn't
 
@@ -225,9 +477,42 @@ If you want to poke around, start with the **README** at the top of the
 repository page — that is the plain-English summary — and the **`docs/`
 folder**, where the written materials live.
 
+### The license — AGPL, and why it matters
+
+The code is published under the **GNU Affero General Public License,
+version 3** (AGPL-3.0). That is a deliberate choice, and it protects
+the brothers who use this app. In plain terms:
+
+- **Free of charge, free to use, free to study, free to modify, free to
+  share.** Any brother, any lodge, any jurisdiction is welcome to take
+  a copy.
+- **It cannot be taken back.** Once the code is published under AGPL,
+  no future owner — not me, not a company that might buy the project,
+  not anyone — can relicense it as closed, proprietary software. The
+  freedom is locked in.
+- **Modifications stay open.** If another person or organization takes
+  this code, changes it, and runs it on their own server for brothers
+  to use, AGPL requires them to publish their modifications under the
+  same license. There is no way to fork the app, quietly add tracking
+  or advertising, and keep those changes private.
+- **No warranty.** Standard for open-source licenses — the software is
+  provided as-is.
+
+The practical upshot for our lodge: the app you install today cannot
+become a closed, proprietary product trying to extract fees or data
+from brothers. If I ever became unable to maintain it, the code would
+remain available for someone else to take up. If another jurisdiction
+likes it, they can adopt it, and their improvements flow back to
+everyone.
+
+AGPL is the same license that covers Mastodon and Nextcloud — the
+established, privacy-respecting open-source projects in that space. The
+full license text is in the repository as `LICENSE`, or you can read it
+at [gnu.org/licenses/agpl-3.0.html](https://www.gnu.org/licenses/agpl-3.0.html).
+
 ## The pilot URL
 
-> **https://masonic-ritual-ai-mentor.vercel.app**
+> **https://masonicmentor.app**
 
 Please keep this address inside the pilot group.
 
@@ -339,10 +624,14 @@ you load the `.mram` file there too.
 - Decryption happens in your browser, on your device. The server never
   sees the decrypted ritual.
 - The app never stores your ritual on any server, ever.
-- When the app reads lines aloud or evaluates what you've said, small
-  pieces of text and audio are sent briefly to voice/AI services
-  (Voxtral, Google, Deepgram, Groq). These services have no-retention
-  policies — they do not save or train on the data.
+- When you speak a line and the app evaluates it, or if it needs to read
+  a line with a cloud voice it hasn't played before, small pieces of text
+  and audio are sent briefly to voice/AI services (Google Gemini, Voxtral,
+  Groq). These services have no-retention policies — they do not save or
+  train on the data.
+- For this pilot, most ritual audio is pre-rendered and embedded inside
+  your `.mram` file. When the app plays a line from a baked file, no cloud
+  service is called at all — the audio is already on your device.
 
 ## Troubleshooting
 

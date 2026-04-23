@@ -39,17 +39,19 @@
   <img src="https://raw.githubusercontent.com/mcleods777/Masonic-Ritual-AI-Mentor/main/docs/install-guide-images/03-landing-desktop.png" alt="Masonic Ritual Mentor landing page" width="600" style="max-width: 100%; height: auto; border: 1px solid #ddd;">
 </p>
 
-<p>That is not a gimmick. The page is a live demo of a brand-new open-source text layout standard called <strong>Pretext</strong>, released just days ago by an engineer at Midjourney. Pretext is the first practical way to get that kind of organic, obstacle-aware text flow on the open web, and our landing page is one of the earliest real-world uses of it outside the author's own demos.</p>
+<p>That is not a gimmick — and it is not something you have seen on a website before, because until now it could not be done. For the entire thirty-year history of the web, text has been trapped inside rectangles. Paragraphs wrap around the invisible edges of a box, full stop. A narrow CSS feature added around 2014 (<code>shape-outside</code>) let a paragraph hug the edge of <em>one</em> static image, but nothing more — no multiple obstacles, no moving obstacles, no real reflow.</p>
 
-<p>If you want the background, there's a short YouTube explainer on what Pretext is and why it matters:</p>
+<p>The page is a live demo of a brand-new open-source text layout standard called <strong>Pretext</strong>, released just days ago by an engineer at Midjourney. Pretext is the first practical way to get real, dynamic, multi-obstacle text reflow on the open web — text that genuinely recalculates its shape in real time as objects drift, resize, or appear. It unlocks an entire category of layout that was previously impossible outside of print: magazine-grade typography, interactive fiction, games with diegetic text, data-viz with inline narrative. Our landing page is one of the earliest real-world uses of it outside the author's own demos.</p>
+
+<p>Short YouTube explainer on what Pretext is and why it matters:</p>
 
 <p><a href="https://youtu.be/CUAuy5SWJcw?si=0WRv_QF8yfhyaYKn" style="color: #c9962c;">https://youtu.be/CUAuy5SWJcw?si=0WRv_QF8yfhyaYKn</a></p>
 
-<p>And a write-up in VentureBeat:</p>
+<p>Write-up in VentureBeat:</p>
 
 <p><a href="https://venturebeat.com/technology/midjourney-engineer-debuts-new-vibe-coded-open-source-standard-pretext-to" style="color: #c9962c; word-break: break-all;">https://venturebeat.com/technology/midjourney-engineer-debuts-new-vibe-coded-open-source-standard-pretext-to</a></p>
 
-<p>I mention it because a few brothers have asked, "Why does the front page feel different from a normal website?" — that's why.</p>
+<p>Full transparency: no brother asked me to put this on the front page. I put it there because it is genuinely interesting and novel. When I first read about Pretext, I wanted to see if I could get it running inside the app within the hour — and I was frankly amazed when I could. It has no bearing on the rehearsal feature itself. It is there because we are among the first to sample a revolutionary new way of using the web — text that finally escapes the rectangle after thirty years — and our lodge's pilot page gets to be one of the earliest places on the open web to show it off.</p>
 
 <h2 style="font-family: Georgia, 'Times New Roman', serif; color: #8b6914; border-bottom: 1px solid #c9962c; padding-bottom: 6px; margin-top: 32px;">Under the hood — why this app is unique</h2>
 
@@ -59,20 +61,17 @@
 
 <p>When you speak, the app sends your audio to <strong>OpenAI Whisper-large-v3</strong> (running on Groq's hardware for near-instant response) with a vocabulary hint that primes the model for ritual terms — <em>Worshipful Master</em>, <em>Tyler</em>, <em>Jachin</em>, <em>Boaz</em>, <em>Fellowcraft</em>, and so on. If Whisper isn't reachable, it falls back automatically to your browser's built-in recognition.</p>
 
-<h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">Six voice engines, including voice cloning</h3>
+<h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">Voice playback — baked in, not streamed</h3>
 
-<p>Any of six text-to-speech engines can read the ritual aloud:</p>
+<p>Earlier iterations of this app let you pick from a dropdown of seven text-to-speech engines. That option is gone. The architecture got better.</p>
 
-<ul>
-  <li><strong>Mistral Voxtral</strong> (default) — supports <strong>zero-shot voice cloning</strong>. Record a short sample of a brother speaking and the app will read <em>his</em> officer's lines in <em>his</em> voice. No paid "voice clone" tier required.</li>
-  <li><strong>ElevenLabs</strong> — twelve distinct male voices, one per officer chair.</li>
-  <li><strong>Google Cloud Neural2</strong> — per-role voice, pitch, and rate tuning so the Worshipful Master sounds deeper than the Tyler.</li>
-  <li><strong>Deepgram Aura-2</strong> — seven mythologically-named voices (Zeus, Orion, Arcas, and so on).</li>
-  <li><strong>Kokoro</strong> — a self-hosted option with no cloud dependency.</li>
-  <li><strong>Browser built-in</strong> — always works, even offline.</li>
-</ul>
+<p>Your lodge's <code>.mram</code> file now ships with the <strong>Google Gemini 3.1 Flash TTS</strong> voice already rendered into it — each officer's lines pre-baked into audio at build time, per role, with the right cadence direction (<code>[slow, solemn]</code>, <code>[measured]</code>, and so on) embedded in the source. When you press play during rehearsal, the audio streams straight from the file on your device. <strong>No cloud voice call is made during playback.</strong> That's a stronger privacy posture than the old "pick your engine" flow, and it's faster — no network round-trip per line.</p>
 
-<p>If one cloud engine is down, the app automatically falls through to the next in the chain.</p>
+<p>One narrow case still uses a live cloud voice: <strong>voice cloning</strong>. If you've recorded a short sample of a brother — say, a Past Master whose delivery you want to emulate — the app uses <strong>Mistral Voxtral</strong> to read that officer's lines in his voice. Zero-shot cloning, no paid "voice clone" tier required. Everything else — every standard officer line, including single-letter exchanges like the spelling of the word in the catechism — is baked into your <code>.mram</code> file and never requires a cloud call.</p>
+
+<p>Short ritual tokens (the letter-by-letter spelling in the catechism, single-syllable responses) used to be the one awkward exception to "everything is baked in" — Gemini's TTS regresses on ultra-short prompts and would silently return empty audio. A new build-time technique called <em>speakAs</em> now handles these: the build pipeline sends Gemini a longer instructional prompt (<em>"say only this single letter name: Bee"</em>) while the file still stores the short traditional token (<em>"B."</em>) for display. The result is clean, phonetic baked audio for every line, no live-cloud fallback for any normal playback.</p>
+
+<p>Gemini sits at the top of the Artificial Analysis TTS quality leaderboard (Elo 1,211), supports 70+ languages, and watermarks every clip with SynthID. The pre-baking runs on my build machine before your file is sent to you, so the API quota burn is mine, not yours.</p>
 
 <h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">Five-layer feedback, not just text matching</h3>
 
@@ -88,6 +87,14 @@
 
 <p>After the diff, a large language model (Llama 3.3 70B via Groq) generates a short spoken coaching response — brief, contextual, and streamed to you as you listen.</p>
 
+<h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">Why delivery matters — and how Gemini solves it</h3>
+
+<p>Gemini fixes the one thing earlier text-to-speech still got wrong for ritual work: <em>delivery.</em> A flat, evenly-paced reading is fine for a shopping list — it's not fine for the gravitas of an obligation or the cadence of a lecture.</p>
+
+<p>Gemini 3.1 Flash TTS (released April 15, 2026) accepts inline <em>audio tags</em> — short bracketed directions like <code>[slow, solemn]</code> or <code>[whispered]</code> — that steer style, pace, and emotion at any point mid-sentence. The ritual source pre-marks the cadence shifts the work already calls for, and the voice engine honors them. The result is a reading that actually sounds like a Brother doing the work, not a satnav reciting an obligation.</p>
+
+<p><strong>Coming later:</strong> Microsoft's Azure Dragon HD / Neural HD 2.5 (rolling out mid-2026) is LLM-based — the model reads the <em>meaning</em> of each line and adjusts emotional tone automatically, no manual markup needed. When the public API lands I'll rebuild the .mram files against it and you'll get the upgrade for free by re-downloading your ritual file.</p>
+
 <h2 style="font-family: Georgia, 'Times New Roman', serif; color: #8b6914; border-bottom: 1px solid #c9962c; padding-bottom: 6px; margin-top: 32px;">Your data — what leaves your device, and what doesn't</h2>
 
 <p>Privacy is not an afterthought in this app. It is the design.</p>
@@ -102,7 +109,18 @@
   <li><strong>The ritual text itself.</strong> Encrypted with <strong>AES-GCM</strong> via the browser's Web Crypto API and stored in your device's local IndexedDB. Decrypted only in memory while you are practicing. Never written to disk unencrypted. <strong>Never sent to any server, at any time, for any reason.</strong></li>
   <li><strong>Your password.</strong> Used to derive the decryption key right there in your browser. Never transmitted anywhere.</li>
   <li><strong>Any voice samples you record</strong> for the voice-cloning feature. Kept locally in IndexedDB.</li>
-  <li><strong>Your progress, scores, and practice history.</strong> Local only. No analytics.</li>
+  <li><strong>Your progress, scores, and practice history.</strong> Stored locally in your browser only. The <em>content</em> of your practice — which line you were on, what you said, what score you got — never leaves your device.</li>
+</ul>
+
+<h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">Anonymous usage telemetry — event names only, no content</h3>
+
+<p>The app records a small, anonymized stream of <em>usage events</em> — things like "a rehearsal started," "a ritual file was uploaded," "a coaching response was played" — so I can see whether the pilot is being used and catch errors early. This stream is deliberately constructed to carry <strong>no ritual content of any kind</strong>:</p>
+
+<ul>
+  <li><strong>Event names only.</strong> A fixed TypeScript-enforced list of event labels like <code>rehearsal_completed</code>, <code>line_attempted</code>, <code>feedback_stream_error</code>. The event payload has no free-text fields. It is structurally impossible to leak ritual text through it.</li>
+  <li><strong>Hashed email identifier.</strong> Your email is one-way-hashed (SHA-256) before it is sent. The telemetry sees a string of gibberish characters that can be compared across events ("this is the same brother") but cannot be reversed back to the email.</li>
+  <li><strong>Hosted in the EU.</strong> The telemetry vendor is PostHog, and the pilot uses their EU region (<code>eu.i.posthog.com</code>) — data stays in Europe under GDPR.</li>
+  <li><strong>No transcripts, no ritual text, no audio.</strong> The paid cloud services (Groq, and Mistral Voxtral for the voice-clone case) see the specific line you just spoke for a second while they answer the request, then discard it under a no-retention contract. The telemetry stream sees <em>only</em> the event that a rehearsal happened — never what was said.</li>
 </ul>
 
 <h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">The sign-in cookie — the token of the pass</h3>
@@ -140,11 +158,11 @@
 
 <ul>
   <li><strong>The audio of the line you just spoke</strong> — sent to Groq's Whisper service to transcribe. A few seconds of audio per line.</li>
-  <li><strong>The text of the line about to be spoken</strong> — sent to whichever voice engine you have selected (Voxtral, ElevenLabs, Google, or Deepgram) to synthesize the sound. A single sentence at a time.</li>
   <li><strong>Your transcribed line and the expected line</strong> — sent to Groq's Llama service for the spoken coaching feedback.</li>
+  <li><strong>(Rarely) the text of a single line</strong> — sent to Mistral Voxtral only when you're using a voice-clone or the line is too short for the baked Gemini audio. Most lines play from the pre-baked audio in your <code>.mram</code> file and make no cloud call at all.</li>
 </ul>
 
-<p>Each of these is a single round-trip per line, answered in under a second, and the cloud service does not keep it. All four vendors — <strong>Groq, Mistral, Google Cloud, and Deepgram</strong> — contractually guarantee no retention and no training on request data. No one at those companies sees or stores your ritual.</p>
+<p>Each of these is a single round-trip per line, answered in under a second, and the cloud service does not keep it. <strong>Groq</strong> and <strong>Mistral</strong> — the two vendors the rehearsal flow actually calls — contractually guarantee no retention and no training on request data. No one at those companies sees or stores your ritual. The anonymous usage telemetry above also goes to <strong>PostHog</strong> (EU region), which does store its data but only sees event names, never content.</p>
 
 <h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">For complete on-device privacy</h3>
 
@@ -156,6 +174,21 @@
 </ul>
 
 <p>With these two selected, <strong>nothing — not audio, not text, not feedback — ever leaves your device.</strong> The voices are less natural and the recognition is a little less accurate, but the privacy guarantee is absolute.</p>
+
+<h2 style="font-family: Georgia, 'Times New Roman', serif; color: #8b6914; border-bottom: 1px solid #c9962c; padding-bottom: 6px; margin-top: 32px;">Cost and abuse protection — practice freely, without the app exploding</h2>
+
+<p>The transcription and coaching feedback use paid cloud services (Groq, occasionally Mistral). Without guardrails, a single compromised sign-in cookie could run up a bill fast. Several layers keep that from happening:</p>
+
+<ul>
+  <li><strong>Per-brother daily caps.</strong> Each sign-in gets a generous daily quota of transcription and coaching calls — enough to rehearse as hard as any brother should ever want to — after which the app pauses further paid calls until midnight. You will never see this unless you actively try to hit it.</li>
+  <li><strong>Short-burst rate limits.</strong> On top of the daily cap, a separate counter prevents rapid-fire abuse (e.g. a script hammering the feedback endpoint in a loop). Normal human pacing doesn't come close.</li>
+  <li><strong>Emergency kill-switch.</strong> A single environment setting I control turns every paid feature off site-wide in seconds. If an API key leaks, if costs spike unexpectedly, if anything goes sideways, the app gracefully degrades to browser-only voice and browser-only speech recognition — the work still goes on, just without cloud polish — while I investigate.</li>
+  <li><strong>Daily spend-alert email.</strong> An automated job runs once a day and emails me if spending has crossed a threshold. I find out before anything gets out of hand, not after.</li>
+  <li><strong>Degraded-mode banner.</strong> If any cloud service is down, throttled, or returning errors, the app shows a clear banner explaining what's happening and automatically falls back to the baked voice / browser speech recognition. You never hit a silent dead-end mid-practice.</li>
+  <li><strong>Defense-in-depth.</strong> Every paid endpoint re-verifies your sign-in cookie itself, in addition to the gateway check that happens earlier in the request. A future bug in the gateway cannot accidentally expose paid routes to anonymous traffic.</li>
+</ul>
+
+<p>The practical upshot: you can use the app hard and I won't need to beg for donations.</p>
 
 <h2 style="font-family: Georgia, 'Times New Roman', serif; color: #8b6914; border-bottom: 1px solid #c9962c; padding-bottom: 6px; margin-top: 32px;">See the code for yourself</h2>
 
@@ -177,9 +210,24 @@
 
 <p>If you want to poke around, start with the <strong>README</strong> at the top of the repository page — that is the plain-English summary — and the <strong><code>docs/</code> folder</strong>, where the written materials live.</p>
 
+<h3 style="font-family: Georgia, 'Times New Roman', serif; color: #5a4410; margin-top: 24px;">The license — AGPL, and why it matters</h3>
+
+<p>The code is published under the <strong>GNU Affero General Public License, version 3</strong> (AGPL-3.0). That is a deliberate choice, and it protects the brothers who use this app. In plain terms:</p>
+
+<ul>
+  <li><strong>Free of charge, free to use, free to study, free to modify, free to share.</strong> Any brother, any lodge, any jurisdiction is welcome to take a copy.</li>
+  <li><strong>It cannot be taken back.</strong> Once the code is published under AGPL, no future owner — not me, not a company that might buy the project, not anyone — can relicense it as closed, proprietary software. The freedom is locked in.</li>
+  <li><strong>Modifications stay open.</strong> If another person or organization takes this code, changes it, and runs it on their own server for brothers to use, AGPL requires them to publish their modifications under the same license. There is no way to fork the app, quietly add tracking or advertising, and keep those changes private.</li>
+  <li><strong>No warranty.</strong> Standard for open-source licenses — the software is provided as-is.</li>
+</ul>
+
+<p>The practical upshot for our lodge: the app you install today cannot become a closed, proprietary product trying to extract fees or data from brothers. If I ever became unable to maintain it, the code would remain available for someone else to take up. If another jurisdiction likes it, they can adopt it, and their improvements flow back to everyone.</p>
+
+<p>AGPL is the same license that covers Mastodon and Nextcloud — the established, privacy-respecting open-source projects in that space. The full license text is in the repository as <code>LICENSE</code>, or you can read it at <a href="https://www.gnu.org/licenses/agpl-3.0.html" style="color: #c9962c;">gnu.org/licenses/agpl-3.0.html</a>.</p>
+
 <h2 style="font-family: Georgia, 'Times New Roman', serif; color: #8b6914; border-bottom: 1px solid #c9962c; padding-bottom: 6px; margin-top: 32px;">The pilot URL</h2>
 
-<blockquote style="border-left: 4px solid #c9962c; padding: 10px 16px; margin: 16px 0; background: #faf6ed; font-size: 1.05em;"><strong><a href="https://masonic-ritual-ai-mentor.vercel.app" style="color: #8b6914; text-decoration: none;">https://masonic-ritual-ai-mentor.vercel.app</a></strong></blockquote>
+<blockquote style="border-left: 4px solid #c9962c; padding: 10px 16px; margin: 16px 0; background: #faf6ed; font-size: 1.05em;"><strong><a href="https://masonicmentor.app" style="color: #8b6914; text-decoration: none;">https://masonicmentor.app</a></strong></blockquote>
 
 <p>Please keep this address inside the pilot group.</p>
 
@@ -287,7 +335,9 @@
   <li>Your ritual file is encrypted. Without the password, it cannot be read.</li>
   <li>Decryption happens in your browser, on your device. The server never sees the decrypted ritual.</li>
   <li>The app never stores your ritual on any server, ever.</li>
-  <li>When the app reads lines aloud or evaluates what you've said, small pieces of text and audio are sent briefly to voice/AI services (Voxtral, Google, Deepgram, Groq). These services have no-retention policies — they do not save or train on the data.</li>
+  <li>Most ritual audio is pre-rendered (at build time) and embedded inside your <code>.mram</code> file. When the app plays a baked line, <strong>no cloud service is called at all</strong> — the audio is already on your device.</li>
+  <li>When you speak a line, the audio goes briefly to Groq for transcription and coaching feedback. For voice cloning or very short lines, Mistral Voxtral may synthesize a single clip. Both vendors operate under no-retention, no-training contracts — they do not save the request.</li>
+  <li>A small anonymous usage telemetry stream (event names only, no content, hashed identifier) goes to PostHog EU so I can see the pilot is being used and catch errors early.</li>
 </ul>
 
 <h2 style="font-family: Georgia, 'Times New Roman', serif; color: #8b6914; border-bottom: 1px solid #c9962c; padding-bottom: 6px; margin-top: 32px;">Troubleshooting</h2>
@@ -300,7 +350,7 @@
 
 <p><strong>Ritual file won't decrypt.</strong> Check the password carefully (it's case-sensitive). If the file itself is corrupted, I'll re-send.</p>
 
-<p><strong>AI voice or feedback isn't working.</strong> Try a different voice engine from the dropdown at the top of the rehearsal screen. If none of the cloud engines work, fall back to the <strong>Browser</strong> voice — it's less natural but always works.</p>
+<p><strong>AI voice or feedback isn't working.</strong> If you see a degraded-mode banner at the top of the screen, it means a cloud service is temporarily down or throttled — the app has automatically switched to the pre-baked audio (for voice) and browser-native speech recognition (for transcription), so practice continues without cloud polish. If you're not sure whether the pre-baked audio is playing, the rehearsal screen will still advance line by line normally. If something still seems wrong, reply to this email and tell me what you're seeing.</p>
 
 <hr style="border: none; border-top: 1px solid #d9cfb5; margin: 32px 0;">
 

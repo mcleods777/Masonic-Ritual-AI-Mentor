@@ -6,6 +6,7 @@ import Navigation from "@/components/Navigation";
 import PilotBanner from "@/components/PilotBanner";
 import PostHogProvider from "@/components/PostHogProvider";
 import TelemetryBanner from "@/components/TelemetryBanner";
+import DegradedModeBanner from "@/components/DegradedModeBanner";
 import {
   SESSION_COOKIE_NAME,
   isAuthConfigured,
@@ -75,6 +76,7 @@ export default async function RootLayout({
       <body className={`antialiased min-h-screen ${cinzel.variable} ${lato.variable}`}>
         <PostHogProvider initialUserId={optedOut ? undefined : initialUserId}>
           <PilotBanner />
+          <DegradedModeBanner />
           <Navigation />
           <main className="pt-4 md:pt-20 pb-20 md:pb-4 px-4 max-w-5xl mx-auto">
             {children}

@@ -16,6 +16,15 @@ let currentAudio: HTMLAudioElement | null = null;
 let currentResolve: (() => void) | null = null;
 let currentAbort: AbortController | null = null;
 
+// Monotonic token. stopCloudAudio() bumps it to invalidate anything
+// currently in flight; every playAudioBlob() captures the latest token
+// at entry and re-reads before calling audio.play(). If another caller
+// has bumped it since, this playback is stale and never starts.
+// Prevents the "two rapid taps both reach playAudioBlob, both start
+// audio.play() before the pause() from the second call catches the
+// first" race — which produces audible voice overlap on mobile.
+let playToken = 0;
+
 /** Get a new AbortSignal for a TTS fetch. Aborts any previous in-flight fetch. */
 export function getTTSAbortSignal(): AbortSignal {
   if (currentAbort) currentAbort.abort();
@@ -27,6 +36,11 @@ export function getTTSAbortSignal(): AbortSignal {
 export function playAudioBlob(blob: Blob): Promise<void> {
   return new Promise((resolve, reject) => {
     stopCloudAudio();
+    // After stopCloudAudio() (which bumped playToken to invalidate any
+    // prior call), claim the next token for this call. Anyone who
+    // bumps after this will be newer than us; we'll see it.
+    const myToken = ++playToken;
+
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
     currentAudio = audio;
@@ -34,21 +48,47 @@ export function playAudioBlob(blob: Blob): Promise<void> {
 
     audio.onended = () => {
       URL.revokeObjectURL(url);
-      currentAudio = null;
-      currentResolve = null;
+      if (currentAudio === audio) {
+        currentAudio = null;
+        currentResolve = null;
+      }
       resolve();
     };
     audio.onerror = () => {
       URL.revokeObjectURL(url);
-      currentAudio = null;
-      currentResolve = null;
+      if (currentAudio === audio) {
+        currentAudio = null;
+        currentResolve = null;
+      }
       reject(new Error("Cloud TTS audio playback failed"));
     };
 
+    // Final stale check just before actually starting playback. If
+    // another playAudioBlob() call bumped the token between our
+    // `++playToken` above and here, we're about to play a line the
+    // user already moved past — bail before the browser emits sound.
+    if (myToken !== playToken) {
+      URL.revokeObjectURL(url);
+      if (currentAudio === audio) {
+        currentAudio = null;
+        currentResolve = null;
+      }
+      resolve();
+      return;
+    }
+
     audio.play().catch((err) => {
       URL.revokeObjectURL(url);
-      currentAudio = null;
-      currentResolve = null;
+      if (currentAudio === audio) {
+        currentAudio = null;
+        currentResolve = null;
+      }
+      // Browser throws AbortError when we pause() a still-loading audio;
+      // that's expected during rapid-tap interruption, not a real error.
+      if (err instanceof DOMException && err.name === "AbortError") {
+        resolve();
+        return;
+      }
       reject(err);
     });
   });
@@ -56,6 +96,10 @@ export function playAudioBlob(blob: Blob): Promise<void> {
 
 /** Stop whatever cloud audio is currently playing and abort in-flight fetches. */
 export function stopCloudAudio(): void {
+  // Bump the token FIRST so any playAudioBlob() that is past its
+  // cache lookup but hasn't yet called audio.play() sees the bump
+  // and bails before starting playback.
+  playToken++;
   // Abort any in-flight TTS fetch so it doesn't start playback after we stop
   if (currentAbort) {
     currentAbort.abort();
@@ -659,14 +703,16 @@ let localVoicesCache: LocalVoice[] | null = null;
 let localVoicesFetchPromise: Promise<LocalVoice[]> | null = null;
 let defaultsEnsured = false;
 
-/** Load and cache local voices from IndexedDB. Ensures defaults are loaded first. */
+/** Load and cache local voices from IndexedDB. Ensures the 15 default Voxtral
+ *  voices are present in IndexedDB on first read so the Voxtral fallback
+ *  always has something to play. Defaults ship UNASSIGNED — they sit in the
+ *  pool for round-robin selection until the user assigns one to a role. */
 async function getLocalVoices(): Promise<LocalVoice[]> {
   if (localVoicesCache) return localVoicesCache;
   if (localVoicesFetchPromise) return localVoicesFetchPromise;
 
   localVoicesFetchPromise = (async () => {
     try {
-      // Ensure default voices are in IndexedDB before reading
       if (!defaultsEnsured) {
         await ensureDefaultVoices();
         defaultsEnsured = true;
@@ -714,8 +760,12 @@ const VOXTRAL_ROLE_GROUPS: string[][] = [
   ["Tr", "Treas", "Treas.", "Trs"],
   // Group 8: Marshal / Tyler
   ["Marshal", "T", "Tyler"],
-  // Group 9: Candidate / Brother / Narrator
-  ["Candidate", "BR", "Bro", "Bro.", "Voucher", "Vchr", "Narrator"],
+  // Group 9: Candidate / Brother
+  ["Candidate", "C", "BR", "Bro", "Bro.", "Voucher", "Vchr"],
+  // Group 10: Stewards
+  ["Steward", "SS", "JS"],
+  // Group 11: Narrator
+  ["Narrator"],
 ];
 
 /** Map a role to a group index (0-9). Returns -1 if not found. */
@@ -742,6 +792,7 @@ export const VOXTRAL_ROLE_OPTIONS = [
   { value: "Chap", label: "Chaplain" },
   { value: "Treas", label: "Treasurer" },
   { value: "Marshal", label: "Marshal / Tyler" },
+  { value: "Steward", label: "Steward" },
   { value: "Candidate", label: "Candidate / Brother" },
   { value: "Narrator", label: "Narrator" },
 ];
@@ -753,28 +804,43 @@ export const VOXTRAL_ROLE_OPTIONS = [
  * Caches per-group to avoid redundant IndexedDB reads.
  */
 async function getRefAudioForRole(role: string): Promise<string | undefined> {
+  const voice = await getAssignedVoiceForRole(role);
+  return voice?.audioBase64;
+}
+
+/**
+ * Same resolution logic as getRefAudioForRole but returns the full voice
+ * record (including the stable `id`) so callers can thread it into the
+ * TTS cache key. Returns undefined when no voices exist at all.
+ *
+ * The id is essential for caching — hashing the ~100KB base64 audio blob
+ * per TTS call would be slow, and the voice id is a permanent handle
+ * that survives across sessions.
+ */
+export async function getAssignedVoiceForRole(
+  role: string,
+): Promise<LocalVoice | undefined> {
   const group = roleToGroup(role);
   const groupKey = group >= 0 ? group : 0;
 
   const voices = await getLocalVoices();
   if (voices.length === 0) return undefined;
 
-  // Check for a voice explicitly assigned to this role group.
-  // Prefer user-recorded voices (createdAt > 0) over defaults (createdAt === 0).
+  // Check for a voice explicitly assigned to this role group. Every voice
+  // in storage is now user-recorded (default voices were removed) so the
+  // first match wins.
   const rolesInGroup = group >= 0 ? VOXTRAL_ROLE_GROUPS[group] : [];
-  const matchingVoices = voices.filter(
-    (v) => v.role && rolesInGroup.includes(v.role)
+  const assigned = voices.find(
+    (v) => v.role && rolesInGroup.includes(v.role),
   );
-  const assigned =
-    matchingVoices.find((v) => v.createdAt > 0) || matchingVoices[0];
 
-  if (assigned) return assigned.audioBase64;
+  if (assigned) return assigned;
 
   // Fallback: round-robin from unassigned voices (or all if none unassigned)
   const unassigned = voices.filter((v) => !v.role);
   const pool = unassigned.length > 0 ? unassigned : voices;
   const idx = groupKey % pool.length;
-  return pool[idx].audioBase64;
+  return pool[idx];
 }
 
 /** Check if any local voices exist (for pre-flight UI checks). */
@@ -783,11 +849,90 @@ export async function hasLocalVoices(): Promise<boolean> {
   return voices.length > 0;
 }
 
-/** Speak text using Voxtral TTS (with retry for transient errors). */
+/**
+ * Resolve a user-recorded Voxtral voice for a role, if one exists.
+ * Returns the ref_audio base64 for the assigned clone, or undefined
+ * otherwise. Used by speakAsRole() to let a Brother's own recording
+ * override the current engine (e.g. Gemini) on a per-role basis.
+ *
+ * The legacy default-voice exclusion (createdAt > 0) is gone because the
+ * default-voice system was removed. Every voice in storage is now a
+ * deliberate user recording, so any role assignment is treated as an
+ * explicit "play my clone here" signal regardless of the active engine.
+ */
+export async function getUserRecordedRefAudioForRole(
+  role: string
+): Promise<string | undefined> {
+  const group = roleToGroup(role);
+  if (group < 0) return undefined;
+  const rolesInGroup = VOXTRAL_ROLE_GROUPS[group];
+  const voices = await getLocalVoices();
+  const match = voices.find(
+    (v) => v.role && rolesInGroup.includes(v.role)
+  );
+  return match?.audioBase64;
+}
+
+/**
+ * Synchronous-style probe: does any user-recorded voice claim this role?
+ * Used by the preload panel to skip lines that would be overridden to
+ * Voxtral (no point burning Gemini API credits on audio we'll never play).
+ */
+export async function hasUserRecordedVoiceForRole(
+  role: string
+): Promise<boolean> {
+  return (await getUserRecordedRefAudioForRole(role)) !== undefined;
+}
+
+/**
+ * Build the cache key for a Voxtral rendering. The discriminator is the
+ * voice's stable `id` (assigned at record/import time by voice-storage),
+ * NOT the refAudio base64 itself — hashing ~100KB base64 per call would
+ * be slow, and the voice id is a permanent handle for the clone config.
+ *
+ * KEY_VERSION is namespaced separately from geminiCacheKey so the two
+ * key spaces never collide and bumping one doesn't invalidate the other.
+ */
+async function voxtralCacheKey(
+  text: string,
+  voiceId: string,
+): Promise<string> {
+  const KEY_VERSION = "voxtral-v1";
+  const material = `${KEY_VERSION}\x00${text}\x00${voiceId}`;
+  const bytes = new TextEncoder().encode(material);
+  const hash = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+/**
+ * Speak text using Voxtral TTS (with retry for transient errors).
+ *
+ * When `voiceId` is provided, the rendering goes through the IndexedDB
+ * audio cache — cache hits play instantly without hitting the API, cache
+ * misses call the API and write the result back to cache. When voiceId
+ * is absent (feedback/correction speech that picks any available voice),
+ * the cache is bypassed entirely — those calls aren't stable enough to
+ * cache against.
+ */
 export async function speakVoxtral(
   text: string,
-  refAudio?: string
+  refAudio?: string,
+  voiceId?: string,
 ): Promise<void> {
+  // Cache lookup: only when we have a stable voiceId. The cache key
+  // hashes (text, voiceId) so any change to the underlying voice record
+  // (user re-records, replaces) surfaces as a new id and a fresh miss.
+  if (voiceId) {
+    const cacheKey = await voxtralCacheKey(text, voiceId);
+    const hit = await getCachedAudio(cacheKey);
+    if (hit) {
+      await playAudioBlob(base64ToBlob(hit.audioBase64, hit.mimeType));
+      return;
+    }
+  }
+
   // If no refAudio provided (e.g. feedback/correction speech), use the
   // first available local voice so the request doesn't fail silently.
   if (!refAudio) {
@@ -830,7 +975,29 @@ export async function speakVoxtral(
     }
 
     if (resp.ok) {
-      await playAudioBlob(await resp.blob());
+      const blob = await resp.blob();
+
+      // Fire-and-forget cache write (only when we had a voiceId). Playback
+      // doesn't wait on the write — the audio starts immediately, and
+      // subsequent calls for the same (text, voiceId) will hit cache.
+      if (voiceId) {
+        void (async () => {
+          try {
+            const cacheKey = await voxtralCacheKey(text, voiceId);
+            const audioBase64 = await blobToBase64(blob);
+            await putCachedAudio({
+              key: cacheKey,
+              mimeType: blob.type || "audio/wav",
+              audioBase64,
+              createdAt: Date.now(),
+            });
+          } catch {
+            // Silent — cache is optimization, audio already played.
+          }
+        })();
+      }
+
+      await playAudioBlob(blob);
       return;
     }
 
@@ -848,13 +1015,519 @@ export async function speakVoxtral(
   }
 }
 
-/** Speak text as a Masonic officer role using Voxtral TTS. */
+/**
+ * Speak text as a Masonic officer role using Voxtral TTS. Threads the
+ * assigned voice's stable id through to speakVoxtral so cache reads and
+ * writes fire for rehearsal-mode playback.
+ */
 export async function speakVoxtralAsRole(
   text: string,
   role: string
 ): Promise<void> {
-  const refAudio = await getRefAudioForRole(role);
-  return speakVoxtral(text, refAudio);
+  const voice = await getAssignedVoiceForRole(role);
+  const refAudio = voice?.audioBase64;
+  return speakVoxtral(text, refAudio, voice?.id);
+}
+
+// ============================================================
+// Gemini 3.1 Flash TTS
+// ============================================================
+
+import {
+  AUDIO_CACHE_STORE as _AUDIO_CACHE_STORE_UNUSED, // keep import hint
+  getCachedAudio,
+  putCachedAudio,
+} from "./voice-storage";
+// unused re-export suppression — store name stays in voice-storage public API
+void _AUDIO_CACHE_STORE_UNUSED;
+
+/**
+ * Default Masonic-role → Gemini-voice mapping. All male voices (Masonry
+ * is a men's fraternity — female voices are never appropriate for these
+ * roles). Concrete voice names from Google's published roster for
+ * gemini-3.1-flash-tts-preview. Verified male via
+ * https://docs.cloud.google.com/text-to-speech/docs/gemini-tts — prior
+ * mapping accidentally used Kore, Zephyr, Aoede, Callirrhoe which are
+ * all female voices. Fixed here.
+ */
+export const GEMINI_ROLE_VOICES: Record<string, string> = {
+  WM: "Alnilam",         // firm and strong — authority of the Master
+  SW: "Charon",          // calm and professional — principal officer
+  JW: "Enceladus",       // deeper, weighted — the JW speaks with authority of station, not jovially
+  SD: "Algenib",         // gravelly — carries orders about, masculine
+  JD: "Orus",            // firm and decisive — gate-keeper role
+  Sec: "Iapetus",        // clear and articulate — fits the record-keeper
+  Trs: "Schedar",        // measured, steady — the treasurer's disposition
+  Ch: "Achird",          // friendly and approachable — prayers land warm
+  Marshal: "Fenrir",     // excitable and dynamic — the enforcer / Tyler
+  Steward: "Rasalgethi", // distinctive male voice — attendant role
+  Candidate: "Zubenelgenubi", // distinctive male — the new brother
+  Narrator: "Enceladus", // breathy and soft — scene-setter voice
+  // Catechism (explanatory lecture): instructor asking, candidate answering.
+  // Without these, Q/A fall through roleToGroup → -1 → "Kore" (female) default,
+  // producing a girl voice on explanatory bakes. Q reuses Achird (warm/pedagogical)
+  // since that matches the voice-cast; A reuses Zubenelgenubi since A is the candidate.
+  Q: "Achird",
+  A: "Zubenelgenubi",
+};
+
+/**
+ * Fallback voice for any path that can't find a mapped role (stale cache,
+ * typo in a role map, explanatory-lecture speaker label without a male
+ * mapping). Must be male — Masonry is a men's fraternity and female
+ * voices in ritual/lecture audio are never appropriate.
+ */
+const GEMINI_MALE_FALLBACK_VOICE = "Enceladus";
+
+/** Get the default Gemini voice for a Masonic role, or a male fallback. */
+export function getGeminiVoiceForRole(role: string): string {
+  // Try exact match first, then try group-based resolution for alias roles.
+  if (GEMINI_ROLE_VOICES[role]) return GEMINI_ROLE_VOICES[role];
+  const group = roleToGroup(role);
+  if (group >= 0) {
+    // Roles-to-group order must stay in sync with VOXTRAL_ROLE_GROUPS.
+    // Mirror of GEMINI_ROLE_VOICES by group index. All male voices.
+    // Groups 0-11 correspond to VOXTRAL_ROLE_GROUPS ordering.
+    const groupDefaults = [
+      "Alnilam", "Charon", "Enceladus", "Algenib", "Orus",
+      "Iapetus", "Achird", "Schedar", "Fenrir",
+      "Zubenelgenubi", "Rasalgethi", "Enceladus",
+    ];
+    return groupDefaults[group] ?? GEMINI_MALE_FALLBACK_VOICE;
+  }
+  return GEMINI_MALE_FALLBACK_VOICE;
+}
+
+/**
+ * Content-addressed cache key for Gemini audio output.
+ *
+ * KEY_VERSION prefix lets us invalidate the cache when the server audio
+ * format changes without clearing IndexedDB. Bump on any server-side
+ * change that affects bytes (PCM → WAV wrapping, codec change, etc.).
+ *
+ *   v1: initial release — raw PCM bytes served as audio/mpeg (broken —
+ *       browser played as garbled/robotic audio without WAV header)
+ *   v2: server wraps PCM in 44-byte WAV/RIFF header → audio/wav
+ *   v3: client patches the WAV header sizes to match the actual blob
+ *       length (fixes ERR_REQUEST_RANGE_NOT_SATISFIABLE on Chromium when
+ *       the streaming sentinel dataSize 0x7FFFFFFE was cached as-is and
+ *       the audio element tried to range-fetch beyond the blob's true end)
+ *   v4: server reverted from streamGenerateContent to batch generateContent
+ *       — the streaming + chunked-transfer combo broke blob playback in
+ *       Chromium even with patched WAV headers. v3 cache entries had
+ *       client-patched headers but the batch flow produces different
+ *       byte layouts, so invalidate.
+ *   v5: preview TTS models 404 on batch generateContent — only the
+ *       streamGenerateContent endpoint is exposed for them. Server now
+ *       buffers the SSE stream into a complete WAV and returns it as a
+ *       normal Content-Length response. Client gets a clean blob.
+ */
+async function geminiCacheKey(
+  text: string,
+  style: string | undefined,
+  voice: string
+): Promise<string> {
+  const KEY_VERSION = "v5";
+  const material = `${KEY_VERSION}\x00${text}\x00${style ?? ""}\x00${voice}`;
+  const bytes = new TextEncoder().encode(material);
+  const hash = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function base64ToBlob(b64: string, mimeType: string): Blob {
+  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  return new Blob([bytes], { type: mimeType });
+}
+
+/**
+ * Server streams audio with a sentinel WAV dataSize (0x7FFFFFFE ~= 2 GB)
+ * because the total length isn't known when the header is written. Once we
+ * have the full blob client-side, rewrite the RIFF chunk size (offset 4)
+ * and data chunk size (offset 40) to the real byte counts. Without this
+ * fix, browsers parse the inflated dataSize, issue Range requests beyond
+ * the actual blob length, and fail with ERR_REQUEST_RANGE_NOT_SATISFIABLE
+ * — observed on Chromium playback of blob: URLs.
+ *
+ * Safe no-op for non-WAV blobs (other engines, unknown formats).
+ */
+async function patchStreamingWavSize(blob: Blob): Promise<Blob> {
+  const buffer = await blob.arrayBuffer();
+  const totalBytes = buffer.byteLength;
+  if (totalBytes < 44) return blob;
+
+  const view = new DataView(buffer);
+  // 0x52494646 = "RIFF" (big-endian read of magic bytes)
+  // 0x57415645 = "WAVE"
+  if (view.getUint32(0, false) !== 0x52494646) return blob;
+  if (view.getUint32(8, false) !== 0x57415645) return blob;
+
+  const dataSize = totalBytes - 44;
+  const patched = new ArrayBuffer(totalBytes);
+  new Uint8Array(patched).set(new Uint8Array(buffer));
+  const pView = new DataView(patched);
+  pView.setUint32(4, totalBytes - 8, true);  // RIFF chunk size
+  pView.setUint32(40, dataSize, true);       // data chunk size
+
+  return new Blob([patched], { type: blob.type || "audio/wav" });
+}
+
+async function blobToBase64(blob: Blob): Promise<string> {
+  const buf = await blob.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+/**
+ * Speak text using Google Gemini 3.1 Flash TTS.
+ *
+ * Per eng-review decisions:
+ *   - 1A: Client-side IndexedDB cache (getCachedAudio / putCachedAudio)
+ *   - 2A + 13A: Caller is responsible for Voxtral fallback + error banner UX
+ *     on style-tagged lines. This function throws on failure; RehearsalMode
+ *     catches and decides.
+ *   - 3A: Server concatenates [style] text. Client sends separate params.
+ */
+export async function speakGemini(
+  text: string,
+  options: { style?: string; voice?: string; embeddedAudio?: string; role?: string } = {}
+): Promise<void> {
+  const voice = options.voice ?? "Kore";
+
+  // Embedded-audio short-circuit: if the .mram had audio baked in for
+  // this line at build time (v3+ format), play those bytes directly.
+  // Zero API call, zero network roundtrip, instant playback. The audio
+  // was rendered with a specific (voice, style) combo at build time —
+  // callers only pass embeddedAudio when that combo still matches what
+  // we're speaking now (see speakGeminiAsRole voice-cast match check).
+  if (options.embeddedAudio) {
+    await playAudioBlob(base64ToBlob(options.embeddedAudio, "audio/ogg"));
+    return;
+  }
+
+  const cacheKey = await geminiCacheKey(text, options.style, voice);
+
+  // Cache hit: play from IndexedDB, no network call.
+  const hit = await getCachedAudio(cacheKey);
+  if (hit) {
+    await playAudioBlob(base64ToBlob(hit.audioBase64, hit.mimeType));
+    return;
+  }
+
+  const signal = getTTSAbortSignal();
+  if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+
+  // Observability: baked audio is missing AND cache is cold, so we're
+  // about to hit the live /api/tts/gemini route. That's a bake gap.
+  // Users won't see anything (playback still proceeds), but you'll see
+  // these in devtools when debugging why a user had latency spikes.
+  console.warn("[tts-gap]", {
+    role: options.role ?? null,
+    voice,
+    style: options.style ?? null,
+    textPreview: text.slice(0, 60),
+    reason: "no-baked-audio",
+  });
+
+  // Retry transient failures (429 rate-limit, 5xx). Mirrors the Voxtral
+  // route's retry policy. Prevents mid-ritual fallback when Gemini
+  // briefly throttles.
+  const MAX_RETRIES = 2;
+  const RETRY_DELAYS = [500, 1500];
+  let resp: Response | null = null;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+
+    try {
+      resp = await fetchApi("/api/tts/gemini", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, style: options.style, voice }),
+        signal,
+      });
+    } catch (fetchErr) {
+      if (fetchErr instanceof DOMException && fetchErr.name === "AbortError") {
+        throw fetchErr;
+      }
+      if (attempt < MAX_RETRIES) {
+        console.warn(
+          `Gemini TTS network error, retrying in ${RETRY_DELAYS[attempt]}ms (attempt ${attempt + 1}/${MAX_RETRIES})...`
+        );
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+        continue;
+      }
+      throw fetchErr;
+    }
+
+    if (resp.ok) break;
+
+    const isRetryable = resp.status === 429 || resp.status >= 500;
+    if (isRetryable && attempt < MAX_RETRIES) {
+      console.warn(
+        `Gemini TTS returned ${resp.status}, retrying in ${RETRY_DELAYS[attempt]}ms (attempt ${attempt + 1}/${MAX_RETRIES})...`
+      );
+      await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+      continue;
+    }
+
+    const err = await resp.json().catch(() => ({ error: resp!.statusText }));
+    throw new Error((err as { error?: string }).error || `Gemini TTS ${resp.status}`);
+  }
+
+  if (!resp || !resp.ok) {
+    throw new Error("Gemini TTS failed after retries");
+  }
+
+  const rawBlob = await resp.blob();
+  const blob = await patchStreamingWavSize(rawBlob);
+
+  // Cache before playback so a re-request during the same rehearsal hits.
+  // Fire-and-forget: the playback doesn't wait on the write.
+  void (async () => {
+    try {
+      const audioBase64 = await blobToBase64(blob);
+      await putCachedAudio({
+        key: cacheKey,
+        mimeType: blob.type || "audio/wav",
+        audioBase64,
+        createdAt: Date.now(),
+      });
+    } catch {
+      // Silent — cache is optimization, audio already played.
+    }
+  })();
+
+  await playAudioBlob(blob);
+}
+
+/** Speak text as a Masonic officer role using Gemini TTS with optional style. */
+export async function speakGeminiAsRole(
+  text: string,
+  role: string,
+  style?: string,
+  embeddedAudio?: string,
+): Promise<void> {
+  return speakGemini(text, {
+    voice: getGeminiVoiceForRole(role),
+    style,
+    embeddedAudio,
+    role,
+  });
+}
+
+/**
+ * Prefetch and cache a single Gemini TTS rendering without playing it.
+ * Cache hit: returns immediately. Cache miss: fetches, caches, returns.
+ * Errors are swallowed — prefetch is best-effort; a failed prefetch just
+ * means the user eats the cold-cache latency on that line.
+ */
+export async function prefetchGeminiLine(
+  text: string,
+  role: string,
+  style?: string
+): Promise<"hit" | "fetched" | "error"> {
+  const voice = getGeminiVoiceForRole(role);
+  const cacheKey = await geminiCacheKey(text, style, voice);
+
+  const hit = await getCachedAudio(cacheKey);
+  if (hit) return "hit";
+
+  try {
+    const resp = await fetchApi("/api/tts/gemini", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, style, voice }),
+    });
+    if (!resp.ok) return "error";
+    const rawBlob = await resp.blob();
+    const blob = await patchStreamingWavSize(rawBlob);
+    const audioBase64 = await blobToBase64(blob);
+    await putCachedAudio({
+      key: cacheKey,
+      mimeType: blob.type || "audio/wav",
+      audioBase64,
+      createdAt: Date.now(),
+    });
+    return "fetched";
+  } catch {
+    return "error";
+  }
+}
+
+/**
+ * Count how many spoken lines are already cached in IndexedDB. Lets the
+ * preload panel show accurate state on mount (the cache is persistent
+ * across React component lifecycles and mode switches, but the panel's
+ * local useState is not). Skips lines without a speaker or empty text,
+ * matching preloadGeminiRitual's own skip rules.
+ */
+export async function countCachedGeminiLines(
+  lines: { text: string; role: string | null; style?: string }[]
+): Promise<{ cached: number; total: number }> {
+  let cached = 0;
+  let total = 0;
+  for (const line of lines) {
+    if (!line.role || !line.text.trim()) continue;
+    // Skip roles that will be played via a user-recorded Voxtral clone
+    // — Gemini audio for those roles is never used.
+    if (await hasUserRecordedVoiceForRole(line.role)) continue;
+    total++;
+    const voice = getGeminiVoiceForRole(line.role);
+    const key = await geminiCacheKey(line.text, line.style, voice);
+    const hit = await getCachedAudio(key);
+    if (hit) cached++;
+  }
+  return { cached, total };
+}
+
+/**
+ * Progress callback for batch prefetch. Called after each line finishes.
+ */
+export interface PrefetchProgress {
+  index: number;
+  total: number;
+  result: "hit" | "fetched" | "error" | "skipped";
+  aborted?: boolean;
+}
+
+/**
+ * Preload Gemini audio for an entire ritual. Iterates lines serially
+ * with a small delay between fetches to respect the paid-tier rate
+ * limits. Cache hits are free and fast; only uncached lines actually
+ * hit the network.
+ *
+ * Returns a controller that callers can abort() to stop the preload
+ * (e.g. when the user starts rehearsing before the preload finishes).
+ */
+export function preloadGeminiRitual(
+  lines: { text: string; role: string | null; style?: string }[],
+  onProgress?: (p: PrefetchProgress) => void,
+  delayMs: number = 250
+): { abort: () => void; done: Promise<void> } {
+  let aborted = false;
+  const abort = () => {
+    aborted = true;
+  };
+
+  const done = (async () => {
+    for (let i = 0; i < lines.length; i++) {
+      if (aborted) {
+        onProgress?.({ index: i, total: lines.length, result: "skipped", aborted: true });
+        return;
+      }
+      const line = lines[i];
+      if (!line.role || !line.text.trim()) {
+        onProgress?.({ index: i, total: lines.length, result: "skipped" });
+        continue;
+      }
+      const result = await prefetchGeminiLine(line.text, line.role, line.style);
+      onProgress?.({ index: i, total: lines.length, result });
+      if (result === "fetched" && i < lines.length - 1) {
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+  })();
+
+  return { abort, done };
+}
+
+// ============================================================
+// Voxtral prefetch — for custom voices assigned to roles
+// ============================================================
+
+/**
+ * Prefetch and cache a single Voxtral rendering without playing it.
+ * Mirrors prefetchGeminiLine: cache hit returns immediately, cache miss
+ * fetches + caches. Errors are swallowed — prefetch is best-effort.
+ */
+export async function prefetchVoxtralLine(
+  text: string,
+  voiceId: string,
+  refAudio: string,
+): Promise<"hit" | "fetched" | "error"> {
+  const cacheKey = await voxtralCacheKey(text, voiceId);
+
+  const hit = await getCachedAudio(cacheKey);
+  if (hit) return "hit";
+
+  try {
+    const resp = await fetchApi("/api/tts/voxtral", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, refAudio }),
+    });
+    if (!resp.ok) return "error";
+    const blob = await resp.blob();
+    const audioBase64 = await blobToBase64(blob);
+    await putCachedAudio({
+      key: cacheKey,
+      mimeType: blob.type || "audio/wav",
+      audioBase64,
+      createdAt: Date.now(),
+    });
+    return "fetched";
+  } catch {
+    return "error";
+  }
+}
+
+/**
+ * Preload Voxtral audio for every line assigned to a given role, across
+ * every loaded ritual. Lines are rendered in ceremony order (by
+ * `line.order`) so the first lines the Brother will hear cache first —
+ * eliminating the "rush path" where a user assigns a voice and
+ * immediately starts rehearsing before prefetch completes.
+ *
+ * Serial with a small inter-request delay to respect Voxtral's per-IP
+ * rate limits. A 150-line role takes roughly 2-4 minutes wall clock;
+ * rehearsal normally reaches a specific role's first line well after
+ * that window, so by the time the user gets there, cache is hot.
+ *
+ * Returns a controller mirroring preloadGeminiRitual. Callers can abort
+ * if the user reassigns the role or leaves the Voices page.
+ */
+export function preloadVoxtralForRole(
+  lines: { text: string; order: number }[],
+  voiceId: string,
+  refAudio: string,
+  onProgress?: (p: PrefetchProgress) => void,
+  delayMs: number = 300,
+): { abort: () => void; done: Promise<void> } {
+  let aborted = false;
+  const abort = () => {
+    aborted = true;
+  };
+
+  // Sort a copy so callers don't see side-effects on their input array.
+  // Ceremony order matters: render line 1 before line 50 so the rush
+  // path can only lose one line at worst (see README / BAKE-WORKFLOW).
+  const ordered = [...lines].sort((a, b) => a.order - b.order);
+  const total = ordered.length;
+
+  const done = (async () => {
+    for (let i = 0; i < total; i++) {
+      if (aborted) {
+        onProgress?.({ index: i, total, result: "skipped", aborted: true });
+        return;
+      }
+      const line = ordered[i];
+      if (!line.text.trim()) {
+        onProgress?.({ index: i, total, result: "skipped" });
+        continue;
+      }
+      const result = await prefetchVoxtralLine(line.text, voiceId, refAudio);
+      onProgress?.({ index: i, total, result });
+      if (result === "fetched" && i < total - 1) {
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+  })();
+
+  return { abort, done };
 }
 
 // ============================================================
@@ -868,12 +1541,14 @@ export async function fetchEngineAvailability(): Promise<{
   deepgram: boolean;
   kokoro: boolean;
   voxtral: boolean;
+  gemini: boolean;
 }> {
+  const empty = { elevenlabs: false, google: false, deepgram: false, kokoro: false, voxtral: false, gemini: false };
   try {
     const resp = await fetchApi("/api/tts/engines");
-    if (!resp.ok) return { elevenlabs: false, google: false, deepgram: false, kokoro: false, voxtral: false };
+    if (!resp.ok) return empty;
     return resp.json();
   } catch {
-    return { elevenlabs: false, google: false, deepgram: false, kokoro: false, voxtral: false };
+    return empty;
   }
 }

@@ -12,11 +12,28 @@ import {
 } from "./dialogue-format";
 
 import type { MRAMDocument } from "./mram-format";
+import { type StylesFile, isValidStyleTag, hashLineText } from "./styles";
 
 export interface BuildOptions {
   jurisdiction: string;
   degree: string;
   ceremony: string;
+  /**
+   * Optional styles sidecar payload. Keys are sha256(line.plain) — any
+   * entry whose hash doesn't match a current line is treated as an
+   * orphan and dropped with a warning (review decision 7A). Entries
+   * with invalid style tags are dropped too.
+   */
+  styles?: StylesFile;
+}
+
+/**
+ * Report accumulator for styles ingestion. Returned alongside MRAMDocument
+ * when building a styled ritual so the CLI can surface dropped orphans.
+ */
+export interface StyleIngestionReport {
+  applied: number;
+  dropped: { reason: "orphan" | "invalid-tag"; lineHash: string; style: string }[];
 }
 
 /**
@@ -34,9 +51,17 @@ export const ROLE_MAP: Record<string, { id: string; display: string }> = {
   sec: { id: "Sec", display: "Secretary" },
   trs: { id: "Trs", display: "Treasurer" },
   tyler: { id: "Tyl", display: "Tiler" },
+  ss: { id: "SS", display: "Senior Steward" },
+  js: { id: "JS", display: "Junior Steward" },
+  c: { id: "C", display: "Candidate" },
+  ch: { id: "Ch", display: "Chaplain" },
+  chp: { id: "Ch", display: "Chaplain" },
   voucher: { id: "Vchr", display: "Voucher" },
   all: { id: "ALL", display: "All Brethren" },
-  "wm/chaplain": { id: "Ch", display: "Chaplain (or WM)" },
+  // Legacy compound labels — always resolve to plain Chaplain.
+  "wm/chaplain": { id: "Ch", display: "Chaplain" },
+  "wm/chp": { id: "Ch", display: "Chaplain" },
+  "wm/ch": { id: "Ch", display: "Chaplain" },
 };
 
 /**
@@ -53,16 +78,50 @@ export function normalizeRole(speaker: string): { id: string; display: string } 
   return ROLE_MAP[speaker.toLowerCase()] ?? { id: speaker, display: speaker };
 }
 
-export function buildFromDialogue(
+export async function buildFromDialogue(
   plain: DialogueDocument,
   cipher: DialogueDocument,
   opts: BuildOptions,
-): MRAMDocument {
+): Promise<{ doc: MRAMDocument; report: StyleIngestionReport }> {
   if (structureSignature(plain) !== structureSignature(cipher)) {
     throw new Error(
       "Plain and cipher dialogue documents have divergent structure. " +
         "Run `npx tsx scripts/validate-rituals.ts` to see the diff.",
     );
+  }
+
+  // Pre-hash every plain line + build the styles lookup.
+  // Per review decision 12A: keys are sha256(plain text), not lineId,
+  // so insert/delete doesn't orphan suffix styles.
+  const plainLineHashes = new Map<number, string>();
+  const styleByHash = new Map<string, string>();
+  const report: StyleIngestionReport = { applied: 0, dropped: [] };
+
+  if (opts.styles) {
+    // Validate every entry before using it. Invalid tags are dropped
+    // with a report entry — never silently passed to Gemini.
+    for (const entry of opts.styles.styles) {
+      if (!isValidStyleTag(entry.style)) {
+        report.dropped.push({
+          reason: "invalid-tag",
+          lineHash: entry.lineHash,
+          style: entry.style,
+        });
+        continue;
+      }
+      styleByHash.set(entry.lineHash, entry.style);
+    }
+  }
+
+  if (styleByHash.size > 0) {
+    // Only hash lines when we have a styles file to match against.
+    // Skips the crypto.subtle round-trip on unstyled builds.
+    for (let i = 0; i < plain.nodes.length; i++) {
+      const n = plain.nodes[i];
+      if (n.kind === "line" && !n.isAction) {
+        plainLineHashes.set(i, await hashLineText(n.text));
+      }
+    }
   }
 
   const doc: MRAMDocument = {
@@ -111,6 +170,13 @@ export function buildFromDialogue(
           plain: "",
         });
       } else {
+        const hash = plainLineHashes.get(i);
+        const style = hash ? styleByHash.get(hash) : undefined;
+        if (style && hash) {
+          report.applied++;
+          // Mark this hash as consumed so we can detect orphans below.
+          styleByHash.delete(hash);
+        }
         doc.lines.push({
           id: lineId++,
           section: currentSectionId,
@@ -119,6 +185,7 @@ export function buildFromDialogue(
           action: null,
           cipher: cNode.text,
           plain: pNode.text,
+          ...(style ? { style } : {}),
         });
       }
       continue;
@@ -167,5 +234,12 @@ export function buildFromDialogue(
     }
   }
 
-  return doc;
+  // Any styles still in the map didn't match a current line — orphans.
+  // Collected for the caller's report; dropped from the build silently
+  // (the warning happens in the CLI or author UI that renders the report).
+  for (const [lineHash, style] of styleByHash) {
+    report.dropped.push({ reason: "orphan", lineHash, style });
+  }
+
+  return { doc, report };
 }

@@ -17,6 +17,11 @@ interface EngineOption {
 
 const ENGINE_OPTIONS: EngineOption[] = [
   {
+    value: "gemini",
+    label: "Gemini 3.1 Flash TTS",
+    description: "Expressive — directs delivery with audio tags",
+  },
+  {
     value: "voxtral",
     label: "Voxtral (Mistral)",
     description: "Voice cloning — default",
@@ -63,7 +68,8 @@ export default function TTSEngineSelector() {
     deepgram: boolean;
     kokoro: boolean;
     voxtral: boolean;
-  }>({ elevenlabs: false, google: false, deepgram: false, kokoro: false, voxtral: false });
+    gemini: boolean;
+  }>({ elevenlabs: false, google: false, deepgram: false, kokoro: false, voxtral: false, gemini: false });
   const [loaded, setLoaded] = useState(false);
   const [voxtralWarning, setVoxtralWarning] = useState(false);
 
@@ -102,6 +108,7 @@ export default function TTSEngineSelector() {
     if (engine === "deepgram") return availability.deepgram;
     if (engine === "kokoro") return availability.kokoro;
     if (engine === "voxtral") return availability.voxtral;
+    if (engine === "gemini") return availability.gemini;
     return false;
   };
 
