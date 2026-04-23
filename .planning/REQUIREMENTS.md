@@ -194,14 +194,14 @@ Each v1 requirement maps to exactly one phase. Populated by `gsd-roadmapper` on 
 | CONTENT-06 | Phase 4 | Pending |
 | CONTENT-07 | Phase 4 | Pending |
 | AUTHOR-01 | Phase 3 | Complete (03-05, 2026-04-23) |
-| AUTHOR-02 | Phase 3 | Partial (03-06 landed D-06 resume-state primitive; 03-07 will land the bake-all.ts orchestrator) |
+| AUTHOR-02 | Phase 3 | Complete (03-06 D-06 resume-state primitive + 03-07 bake-all.ts orchestrator, 2026-04-23) |
 | AUTHOR-03 | Phase 3 | Complete (03-05, 2026-04-23) |
 | AUTHOR-04 | Phase 3 | Complete (03-06, 2026-04-23) |
 | AUTHOR-05 | Phase 3 | Complete (03-04 primitive + 03-06 wired, 2026-04-23) |
 | AUTHOR-06 | Phase 3 | Complete (03-06, 2026-04-23) |
 | AUTHOR-07 | Phase 3 | Complete (03-06, 2026-04-23) |
 | AUTHOR-08 | Phase 3 | Complete (03-03 dev-guard primitive + 03-08 preview-bake.ts, 2026-04-23) |
-| AUTHOR-09 | Phase 3 | Pending |
+| AUTHOR-09 | Phase 3 | Complete (03-07 clampParallel + pLimit wiring, 2026-04-23) |
 | AUTHOR-10 | Phase 3 | Complete (03-02, 2026-04-23) |
 | ADMIN-01 | Phase 6 | Pending |
 | ADMIN-02 | Phase 6 | Pending |
