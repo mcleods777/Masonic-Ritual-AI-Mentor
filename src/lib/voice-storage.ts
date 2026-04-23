@@ -5,12 +5,22 @@
  * ref_audio with each Voxtral TTS request (zero-shot voice cloning).
  * No Mistral paid plan required — the audio never leaves the device
  * until it's sent with a TTS request.
+ *
+ * The shared openDB() + store-name constants live in src/lib/idb-schema.ts
+ * (AUTHOR-10 D-16). AUDIO_CACHE_STORE is re-exported here so downstream
+ * callers (e.g. src/lib/tts-cloud.ts) that imported it from this module
+ * pre-D-16 keep working without a grep-and-replace.
  */
 
-const DB_NAME = "masonic-ritual-mentor";
-const DB_VERSION = 4; // bumped from 3 to add audioCache store
-const VOICES_STORE = "voices";
-export const AUDIO_CACHE_STORE = "audioCache";
+import {
+  openDB,
+  VOICES_STORE,
+  AUDIO_CACHE_STORE,
+} from "./idb-schema";
+
+// Re-export for downstream callers that currently import AUDIO_CACHE_STORE
+// from voice-storage. See src/lib/tts-cloud.ts:1036-1040.
+export { AUDIO_CACHE_STORE };
 
 export interface LocalVoice {
   id: string;
@@ -35,50 +45,11 @@ export interface LocalVoice {
 // ============================================================
 // IndexedDB helpers
 // ============================================================
-
-function openDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result);
-
-    request.onupgradeneeded = (event) => {
-      const db = (event.target as IDBOpenDBRequest).result;
-
-      // Existing stores from storage.ts (recreate if missing)
-      if (!db.objectStoreNames.contains("documents")) {
-        db.createObjectStore("documents", { keyPath: "id" });
-      }
-      if (!db.objectStoreNames.contains("sections")) {
-        const sectionStore = db.createObjectStore("sections", {
-          keyPath: "id",
-        });
-        sectionStore.createIndex("documentId", "documentId", { unique: false });
-        sectionStore.createIndex("degree", "degree", { unique: false });
-      }
-      if (!db.objectStoreNames.contains("settings")) {
-        db.createObjectStore("settings", { keyPath: "key" });
-      }
-
-      // New: voices store
-      if (!db.objectStoreNames.contains(VOICES_STORE)) {
-        db.createObjectStore(VOICES_STORE, { keyPath: "id" });
-      }
-
-      // New in v4: audioCache for Gemini TTS output caching.
-      // Keyed by sha256(text|style|voice) to avoid re-rendering identical
-      // lines. Per eng-review decision 1A — client-side, not server-side
-      // (Vercel Fluid Compute's filesystem is ephemeral).
-      if (!db.objectStoreNames.contains(AUDIO_CACHE_STORE)) {
-        const cacheStore = db.createObjectStore(AUDIO_CACHE_STORE, {
-          keyPath: "key",
-        });
-        cacheStore.createIndex("createdAt", "createdAt", { unique: false });
-      }
-    };
-  });
-}
+//
+// openDB(), VOICES_STORE, AUDIO_CACHE_STORE now live in src/lib/idb-schema.ts
+// (imported above). Pre-D-16 this module declared its own openDB() with a
+// parallel consolidated upgrade handler — obsolete now that a single shared
+// onupgradeneeded creates all 6 stores.
 
 // ============================================================
 // Audio cache — exposed for Gemini TTS and any future engines
