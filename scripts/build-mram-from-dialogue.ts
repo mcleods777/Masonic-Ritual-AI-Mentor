@@ -39,10 +39,16 @@
 
 import * as fs from "node:fs";
 import * as crypto from "node:crypto";
+import { parseBuffer } from "music-metadata";
 import { parseDialogue } from "../src/lib/dialogue-format";
 import { buildFromDialogue } from "../src/lib/dialogue-to-mram";
 import type { MRAMDocument } from "../src/lib/mram-format";
-import { GEMINI_ROLE_VOICES, getGeminiVoiceForRole } from "../src/lib/tts-cloud";
+import {
+  GEMINI_ROLE_VOICES,
+  getGeminiVoiceForRole,
+  getGoogleVoiceForRole,
+} from "../src/lib/tts-cloud";
+import { validatePair } from "../src/lib/author-validation";
 import {
   renderLineAudio,
   deleteCacheEntry,
@@ -106,6 +112,97 @@ export function encryptMRAMNode(doc: MRAMDocument, passphrase: string): Buffer {
     encrypted,
     authTag,
   ]);
+}
+
+// ============================================================
+// Phase 3 bake-time gates (AUTHOR-04 / AUTHOR-05 / AUTHOR-06 / AUTHOR-07)
+// ============================================================
+
+/**
+ * Pre-render validator gate (AUTHOR-05 D-08).
+ * Run BEFORE any API call per ritual. Hard-fails the process with a
+ * structured issue report on any severity="error" issue — including
+ * D-08 bake-band word-ratio outliers from src/lib/author-validation.ts.
+ *
+ * No --force override in Phase 3 (CONTEXT D-08). Shannon's intent is
+ * "rewrite the bad cipher line rather than ship an .mram that scores
+ * wrong" — this gate makes that the default.
+ */
+function validateOrFail(plainPath: string, cipherPath: string): void {
+  const plain = fs.readFileSync(plainPath, "utf8");
+  const cipher = fs.readFileSync(cipherPath, "utf8");
+  const result = validatePair(plain, cipher);
+  const errors = result.lineIssues.filter((i) => i.severity === "error");
+  if (errors.length > 0 || !result.structureOk) {
+    console.error(`\n[AUTHOR-05 D-08] validator refused to bake ${plainPath}:`);
+    if (!result.structureOk) {
+      console.error(
+        `  structure parity failed: ${JSON.stringify(result.firstDivergence)}`,
+      );
+    }
+    for (const issue of errors) {
+      console.error(`  [${issue.kind}] line ${issue.index}: ${issue.message}`);
+    }
+    console.error(
+      `\nFix the cipher/plain drift and re-run. No --force in Phase 3 (CONTEXT D-08).`,
+    );
+    process.exit(1);
+  }
+}
+
+/**
+ * Direct Google Cloud TTS REST call for the short-line bake path (AUTHOR-04 D-09).
+ * Bypasses /api/tts/google because there is no dev server during an offline
+ * bake; uses GOOGLE_CLOUD_TTS_API_KEY from .env (set in Phase 2 deployment).
+ *
+ * CRITICAL: sends only {text, voiceName, languageCode}. NO preamble, NO style,
+ * NO voice-cast scene — Pitfall 4 in RESEARCH.md §Common Pitfalls flags the
+ * voice-cast-scene-leaks-into-audio failure mode; the short-line engine must
+ * stay isolated from it.
+ *
+ * Returns native Opus-in-Ogg (audioEncoding: "OGG_OPUS") byte-compatible
+ * with Gemini+ffmpeg output (Assumption A3). No ffmpeg transcode for short-
+ * line audio.
+ */
+async function googleTtsBakeCall(
+  text: string,
+  voiceName: string,
+  languageCode: string = "en-US",
+): Promise<{ opusBytes: Buffer; durationMs: number }> {
+  const apiKey = process.env.GOOGLE_CLOUD_TTS_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "[AUTHOR-04] GOOGLE_CLOUD_TTS_API_KEY required for short-line bake route. " +
+        "Set it in .env, or set MIN_BAKE_LINE_CHARS=999 to disable the short-line " +
+        "route (will re-introduce the pre-Phase-3 hard-skip behavior).",
+    );
+  }
+  const res = await fetch(
+    `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        input: { text }, // text only; NO preamble, NO style (Pitfall 4)
+        voice: { languageCode, name: voiceName },
+        audioConfig: { audioEncoding: "OGG_OPUS" },
+      }),
+    },
+  );
+  if (!res.ok) {
+    const body = await res.text();
+    // T-03-05 mitigation: redact any `?key=…` that might leak into the
+    // error surface before throwing.
+    const redacted = body.replace(/[?&]key=[^&"'\s]*/g, "?key=REDACTED");
+    throw new Error(
+      `[AUTHOR-04] google tts ${res.status}: ${redacted.slice(0, 500)}`,
+    );
+  }
+  const json = (await res.json()) as { audioContent: string };
+  const opusBytes = Buffer.from(json.audioContent, "base64");
+  const meta = await parseBuffer(opusBytes, { mimeType: "audio/ogg" });
+  const durationMs = Math.round((meta.format.duration ?? 0) * 1000);
+  return { opusBytes, durationMs };
 }
 
 // ============================================================
@@ -249,6 +346,13 @@ async function main() {
     console.error(`Error: cipher file not found: ${cipherPath}`);
     process.exit(1);
   }
+
+  // AUTHOR-05 D-08: run the cipher/plain parity validator BEFORE any API
+  // activity, passphrase prompt, or other expensive work. Any severity-error
+  // issue (including D-08 bake-band word-ratio outliers from Plan 04) exits
+  // non-zero. Prevents shipping an .mram with cipher/plain drift to invited
+  // Brothers (T-03-04 mitigation).
+  validateOrFail(plainPath, cipherPath);
 
   const passphrase = await promptPassphrase();
   if (!passphrase) {
@@ -625,17 +729,18 @@ async function bakeAudioIntoDoc(
     );
   }
 
-  // Pre-bake cache scan. Classify every spoken line into one of three
-  // buckets: already-cached, too-short-to-bake, or needs-fresh-render.
-  // Gives the user immediate resume visibility and flags lines that'll
-  // be hard-skipped up front rather than burning retries on them.
+  // Pre-bake cache scan. AUTHOR-04 D-09: short lines (< MIN_BAKE_LINE_CHARS)
+  // are no longer hard-skipped — they route to Google Cloud TTS at bake time
+  // via googleTtsBakeCall(). Every shipped .mram now ships audio for every
+  // spoken line. Tune via MIN_BAKE_LINE_CHARS env var.
   let preCached = 0;
   let preToRender = 0;
-  const preSkipShort: { id: number; role: string; text: string }[] = [];
+  const preShortLineGoogle: { id: number; role: string; text: string }[] = [];
   for (const line of spokenLines) {
     const bakeText = bakeTextFor(line);
     if (bakeText.length < MIN_BAKE_LINE_CHARS) {
-      preSkipShort.push({ id: line.id, role: line.role, text: bakeText });
+      // AUTHOR-04 D-09: count into Google short-line route, not hard-skip.
+      preShortLineGoogle.push({ id: line.id, role: line.role, text: bakeText });
       continue;
     }
     const voice = getGeminiVoiceForRole(line.role);
@@ -651,22 +756,22 @@ async function bakeAudioIntoDoc(
   }
   const preCachedPct = total > 0 ? Math.round((preCached / total) * 100) : 0;
   console.error(
-    `  Cache status: ${preCached}/${total} already cached (${preCachedPct}%), ${preToRender} to render fresh`,
+    `  Cache status: ${preCached}/${total} already cached (${preCachedPct}%), ${preToRender} to render fresh, ${preShortLineGoogle.length} short-line → Google TTS`,
   );
-  if (preSkipShort.length > 0) {
+  if (preShortLineGoogle.length > 0) {
     console.error(
-      `  Hard-skip (too short, <${MIN_BAKE_LINE_CHARS} chars): ${preSkipShort.length} line(s) — runtime TTS at rehearsal`,
+      `  Short-line route (D-09, <${MIN_BAKE_LINE_CHARS} chars, Google Cloud TTS): ${preShortLineGoogle.length} line(s)`,
     );
-    for (const s of preSkipShort.slice(0, 5)) {
+    for (const s of preShortLineGoogle.slice(0, 5)) {
       console.error(
         `    id=${s.id} ${s.role}: "${s.text}" (${s.text.length} chars)`,
       );
     }
-    if (preSkipShort.length > 5) {
-      console.error(`    … and ${preSkipShort.length - 5} more`);
+    if (preShortLineGoogle.length > 5) {
+      console.error(`    … and ${preShortLineGoogle.length - 5} more`);
     }
   }
-  if (preCached > 0 && preToRender === 0 && preSkipShort.length === 0) {
+  if (preCached > 0 && preToRender === 0 && preShortLineGoogle.length === 0) {
     console.error(
       `  Fully cached — this bake will re-emit the same audio with zero API calls.`,
     );
@@ -690,16 +795,13 @@ async function bakeAudioIntoDoc(
   // fallback line. A single decision covers the rest of the run.
   let fallbackResolved = false;
 
-  // Lines pre-flagged as too-short-to-bake (from the pre-scan). They
-  // skip the API entirely — no attempt, no retry, no wait. Counted
-  // as "regressed" in the final summary since the effect at playback
-  // time is identical: no embedded audio, runtime TTS handles them.
-  // Add them to regressedLines up front so the summary is accurate
-  // whether we hit any mid-bake regressions or not.
-  const tooShortIds = new Set(preSkipShort.map((s) => s.id));
-  for (const s of preSkipShort) {
-    regressedLines.push(s);
-  }
+  // AUTHOR-04 D-09: short lines (<MIN_BAKE_LINE_CHARS) were hard-skipped
+  // pre-Phase-3; now they route to Google Cloud TTS at bake time. Track
+  // which lineIds are short-routed so the main loop branches at the top
+  // of each iteration.
+  const shortLineIds = new Set(preShortLineGoogle.map((s) => s.id));
+  let shortLineRendered = 0;
+  let shortLineBytes = 0;
 
   for (const line of spokenLines) {
     const voice = getGeminiVoiceForRole(line.role);
@@ -713,17 +815,38 @@ async function bakeAudioIntoDoc(
     // leave a single degraded line cached that silently hits on re-run.
     let thisLineCacheKey: string | undefined;
 
-    // Hard-skip: line was flagged too-short at pre-scan time. Don't
-    // touch the API. Progress bar still updates so the percentage
-    // moves forward.
-    if (tooShortIds.has(line.id)) {
-      const done = spokenLines.indexOf(line) + 1;
-      const pct = Math.floor((done / total) * 100);
-      process.stderr.write(
-        `\r  [${done.toString().padStart(3)}/${total}] ${pct.toString().padStart(3)}% ` +
-          `${line.role.padEnd(10)} (${"skip-too-short".padEnd(30)}) ` +
-          `                `,
-      );
+    // AUTHOR-04 D-09: short-line Google TTS branch. Short lines (< MIN_BAKE_LINE_CHARS)
+    // call Google Cloud TTS REST directly and embed the OGG_OPUS bytes the
+    // same way as the Gemini path. NO preamble, NO style directive, NO voice-
+    // cast scene in the call body (Pitfall 4 — voice-cast scene leak).
+    // (Duration-anomaly check + --verify-audio hook are added in Task 2.)
+    if (shortLineIds.has(line.id)) {
+      try {
+        const googleVoice = getGoogleVoiceForRole(line.role);
+        const { opusBytes } = await googleTtsBakeCall(
+          cleanText,
+          googleVoice.name,
+        );
+        // Embed: same mechanism as Gemini path (line.audio = base64 Opus).
+        line.audio = opusBytes.toString("base64");
+        shortLineRendered++;
+        shortLineBytes += opusBytes.length;
+        totalBytes += opusBytes.length;
+        const done = spokenLines.indexOf(line) + 1;
+        const pct = Math.floor((done / total) * 100);
+        process.stderr.write(
+          `\r  [${done.toString().padStart(3)}/${total}] ${pct.toString().padStart(3)}% ` +
+            `${line.role.padEnd(10)} (${"google-short".padEnd(30)}) ` +
+            `${opusBytes.length.toString().padStart(6)}B         `,
+        );
+      } catch (err) {
+        console.error(
+          `\n[AUTHOR-04] short-line bake failed for line ${line.id} (${line.role}): ${(err as Error).message}`,
+        );
+        // Short-line failure: bake CAN continue — this line stays un-embedded,
+        // runtime TTS handles at rehearsal. Flag for summary so it's visible.
+        regressedLines.push({ id: line.id, role: line.role, text: cleanText });
+      }
       continue;
     }
 
@@ -942,6 +1065,11 @@ async function bakeAudioIntoDoc(
     }
   }
   console.error(`  Cache hits:        ${cacheHits}`);
+  if (shortLineRendered > 0) {
+    console.error(
+      `  Google TTS short-line (D-09):  ${shortLineRendered} line(s), ${(shortLineBytes / 1024).toFixed(1)} KB`,
+    );
+  }
   if (regressedLines.length > 0) {
     console.error(
       `  Skipped (text-token regression, will hit runtime TTS): ${regressedLines.length} line(s)`,
