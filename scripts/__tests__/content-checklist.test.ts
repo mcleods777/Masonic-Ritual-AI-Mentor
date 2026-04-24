@@ -274,9 +274,12 @@ describe("parseChecklist", () => {
   });
 
   // -------- Test 6: round-trip on disk --------
-  // TODO(04-02 Task 2): flip to `it(...)` once the real checklist file is
-  // seeded at .planning/phases/04-content-coverage/04-CONTENT-CHECKLIST.md.
-  it.skip("round-trip against on-disk checklist (Test 6)", () => {
+  // Enabled by Plan 04-02 Task 2 now that the real checklist file is seeded
+  // at .planning/phases/04-content-coverage/04-CONTENT-CHECKLIST.md. Plans
+  // 04-03..07 mutate this file; the round-trip test pins the shape so a bad
+  // edit (typo in a status cell, column reshuffle, dropped group header) is
+  // caught at commit time rather than silently corrupting the ledger.
+  it("round-trip against on-disk checklist (Test 6)", () => {
     const diskPath = path.resolve(
       __dirname,
       "..",
