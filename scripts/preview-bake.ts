@@ -167,7 +167,18 @@ export function handleOpusRequest(
     res.end("Bad Request");
     return;
   }
-  const stat = fs.statSync(resolved);
+  // ME-02: wrap statSync in try/catch — a race between the realpath
+  // check above and this stat can see ENOENT if the file is evicted
+  // mid-request. The cache dir is explicitly transient per the header
+  // comment; returning 404 is the correct signal to the client, not 500.
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(resolved);
+  } catch {
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end("not found");
+    return;
+  }
   const rangeHeader = req.headers.range;
   if (rangeHeader) {
     const rangeMatch = /^bytes=(\d+)-(\d*)$/.exec(rangeHeader);
