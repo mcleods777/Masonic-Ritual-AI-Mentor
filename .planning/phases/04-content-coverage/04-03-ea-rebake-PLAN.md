@@ -5,7 +5,6 @@ type: execute
 wave: 1
 depends_on: [01, 02]
 files_modified:
-  - rituals/_bake-cache/
   - rituals/ea-opening.mram
   - rituals/ea-initiation.mram
   - rituals/ea-explanatory.mram
@@ -175,7 +174,7 @@ From RESEARCH.md §Pitfalls and Known Hazards:
 
 <task type="auto">
   <name>Task 2: Execute the EA v3-cache bake + per-ritual scrub loop</name>
-  <files>rituals/_bake-cache/, rituals/ea-opening.mram, rituals/ea-initiation.mram, rituals/ea-explanatory.mram, rituals/ea-closing.mram</files>
+  <files>rituals/ea-opening.mram, rituals/ea-initiation.mram, rituals/ea-explanatory.mram, rituals/ea-closing.mram</files>
   <action>
     This task is the API-burn step. Claude orchestrates; Shannon judges scrubs. Execute bake + scrub for all 4 EA rituals in sequence. Rationale for all-in-one-task: the 4 EA rituals share the same voice-cast role profiles (WM, SW, SD, etc.) — sequential bakes benefit from warm-cache hits on cross-ritual lines (e.g., `"So mote it be"` spoken in opening AND closing; cached after the first).
 

@@ -16,16 +16,18 @@ tags: [verifier, release-gate, opus-audio, mram, content-coverage]
 
 must_haves:
   truths:
+    - "`scripts/verify-mram.ts` accepts v3 .mram files (the current throw-on-`version !== 1` check is replaced with `version !== 3`); v1/v2 files are rejected with a `v3 required` error — matches Plan 04-01 Test 5"
+    - "`scripts/verify-mram.ts` local interfaces (`MRAMDocument`, `MRAMMetadata`, `MRAMLine`) are extended to match the v3 shape from `src/lib/mram-format.ts`: `metadata.voiceCast?: Record<string,string>`, `metadata.audioFormat?: 'opus-32k-mono'`, `MRAMLine.audio?: string` (base64 Opus bytes)"
     - "`npx tsx scripts/verify-mram.ts rituals/{slug}.mram --check-audio-coverage` exits 0 when every spoken line has valid base64 Opus with OGG magic; exits 1 with per-line failure list otherwise"
     - "The audio-coverage check reuses `scripts/lib/bake-math.ts:isDurationAnomaly` (same >3×/<0.3× per-ritual-median thresholds as AUTHOR-06 D-10) — a belt-and-suspenders re-check at verify time"
     - "`npm run verify-content` discovers every `rituals/*.mram`, pairs it with `{slug}-dialogue.md` + `{slug}-dialogue-cipher.md`, runs `validatePair()` (refusing on any `severity: 'error'` issue per D-08), runs `--check-audio-coverage`, aggregates results, exits 1 on any failure"
     - "`npm run verify-content` prints a per-ritual pass/fail summary table; CONTENT-06 and CONTENT-07 are enforceable from a single command"
-    - "Existing Phase 3 behaviour of `verify-mram.ts` is preserved when `--check-audio-coverage` is NOT passed (no regression to role breakdown / section table / sample-line display)"
+    - "Existing Phase 3 behaviour of `verify-mram.ts` is preserved when `--check-audio-coverage` is NOT passed (role breakdown / section table / sample-line display — BUT operating against v3 files now, since the version byte bump is what unlocks this; Phase 3 shipped these features but the `version !== 1` throw made them unreachable against real baked content)"
     - "Unit tests synthesize tiny fixture `.mram` files on-the-fly (no large binaries committed to git)"
   artifacts:
     - path: "scripts/verify-mram.ts"
-      provides: "Decrypter + checksum verifier extended with --check-audio-coverage, --json flag, Opus OGG-magic sanity, duration-anomaly belt-and-suspenders check, metadata.audioFormat/voiceCast presence assertion"
-      contains: "--check-audio-coverage, isDurationAnomaly, MRAMLine.audio, audioFormat, voiceCast, opus-32k-mono"
+      provides: "Decrypter + checksum verifier with version bump (v1→v3 accept), extended v3 interfaces (audio, audioFormat, voiceCast), --check-audio-coverage flag, --json flag, Opus OGG-magic sanity, duration-anomaly belt-and-suspenders check, metadata.audioFormat/voiceCast presence assertion"
+      contains: "--check-audio-coverage, isDurationAnomaly, MRAMLine.audio, audioFormat, voiceCast, opus-32k-mono, version !== 3"
     - path: "scripts/verify-content.ts"
       provides: "Release-gate orchestrator: discover → pair → validatePair → verify-mram --check-audio-coverage → aggregate → exit code"
       min_lines: 80
@@ -67,7 +69,9 @@ Extend `scripts/verify-mram.ts` with a `--check-audio-coverage` flag that assert
 
 Purpose: CONTENT-06 ("verified to have per-line Opus embedded") and CONTENT-07 ("passes cipher/plain parity validator before release") must be enforceable as a single local command. Because `rituals/*.md` and `*.mram` are gitignored (copyright — see `.gitignore:110-115`), no GitHub Actions workflow is viable. The release gate is local-only, and every Wave 1 content plan (04-03..07) depends on this verifier existing as their per-ritual acceptance criterion.
 
-Output: Extended `verify-mram.ts` (audio-coverage check + --json output); new `scripts/verify-content.ts` orchestrator; `npm run verify-content` alias; unit tests with on-the-fly synthesized tiny `.mram` fixtures (<100KB each; avoids committing 3-8 MB binaries).
+**Pre-existing bug being fixed:** The current `scripts/verify-mram.ts:63` throws `Unsupported .mram version: <n>` on any file whose version byte is not `1`. Every on-disk `.mram` in `rituals/` was baked at v3 (confirmed by inspecting `rituals/ea-opening.mram` header bytes: `4d52414d 03 ...`) — so the currently-shipped verifier is inoperable against real baked content. This plan's Task 2 bumps the accepted version to `3` AND extends the local interfaces to match the v3 shape that `src/lib/mram-format.ts` has been producing since Phase 3 Plan 05.
+
+Output: Extended `verify-mram.ts` (v3 interface + audio-coverage check + --json output); new `scripts/verify-content.ts` orchestrator; `npm run verify-content` alias; unit tests with on-the-fly synthesized tiny `.mram` fixtures (<100KB each; avoids committing 3-8 MB binaries).
 </objective>
 
 <execution_context>
@@ -94,7 +98,7 @@ Output: Extended `verify-mram.ts` (audio-coverage check + --json output); new `s
 <interfaces>
 <!-- Key types and contracts. Executor uses these directly — no codebase exploration needed. -->
 
-From src/lib/mram-format.ts:
+From src/lib/mram-format.ts (Phase 3 Plan 05 — canonical v3 shape):
 ```typescript
 export interface MRAMDocument {
   format: "MRAM";
@@ -168,8 +172,32 @@ From scripts/bake-all.ts (Phase 3 Plan 07):
 export function getAllRituals(): string[]; // returns sorted slugs in rituals/
 ```
 
-From scripts/verify-mram.ts (current Phase 3 state):
+From scripts/verify-mram.ts (current Phase 3 state — the code Plan 04-01 Task 2 edits):
 ```typescript
+// Current line 41-53 (LOCAL interfaces, narrower than src/lib/mram-format.ts):
+interface MRAMDocument {
+  format: "MRAM";
+  version: number;
+  metadata: {
+    jurisdiction: string;
+    degree: string;
+    ceremony: string;
+    checksum: string;
+    // MISSING: voiceCast, audioFormat (v3 fields) — Plan 04-01 Task 2 adds these.
+  };
+  roles: Record<string, string>;
+  sections: { id: string; title: string; note?: string }[];
+  lines: MRAMLine[];
+  // MRAMLine currently lacks the v3 `audio?: string` field — Plan 04-01 Task 2 adds it.
+}
+
+// Current line 63:
+// const version = buffer[4];
+// if (version !== 1) {
+//   throw new Error(`Unsupported .mram version: ${version}`);
+// }
+// Plan 04-01 Task 2 replaces this with `version !== 3` (see Task 2 action step 1).
+
 // function decryptMRAM(buffer: Buffer, passphrase: string): MRAMDocument — NOT exported today.
 // This plan MUST export it so verify-content.ts can reuse it without spawning a subprocess.
 ```
@@ -207,14 +235,14 @@ From scripts/verify-mram.ts (current Phase 3 state):
   <files>scripts/__tests__/verify-mram.test.ts, scripts/__tests__/verify-content.test.ts</files>
   <behavior>
     Test file `scripts/__tests__/verify-mram.test.ts` — RED tests:
-    - Synthesize a tiny good `.mram` in a `beforeAll` using the existing encryption machinery in `src/lib/mram-format.ts:encryptMRAM` (WebCrypto-based; wrap in a helper that Node can call via the `crypto.webcrypto` global). Fixture: 2 spoken lines + 1 action + valid base64 Opus payload per spoken line (use a 400-byte prerecorded OGG/Opus blob checked into the test file as a base64 constant — real Opus bytes captured from a known-good cached ea-opening line; <100KB total fixture size per VALIDATION.md constraint).
+    - Synthesize a tiny good v3 `.mram` in a `beforeAll` using the existing encryption machinery in `src/lib/mram-format.ts:encryptMRAM` (WebCrypto-based; wrap in a helper that Node can call via the `crypto.webcrypto` global). Fixture: 2 spoken lines + 1 action + valid base64 Opus payload per spoken line (use a 400-byte prerecorded OGG/Opus blob checked into the test file as a base64 constant — real Opus bytes captured from a known-good cached ea-opening line; <100KB total fixture size per VALIDATION.md constraint). The fixture MUST serialize with `version = 3` so Task 2's version-throw change is testable.
     - Test 1: `verify-mram --check-audio-coverage good.mram` exits 0, prints "Audio Coverage" section with "X/X lines OK".
     - Test 2: A `.mram` with ONE spoken line where `audio` is deleted before encryption → exits 1; stderr includes the offending `line.id`.
     - Test 3: A `.mram` where one line's `audio` contains base64 decoding to 4 bytes not matching OGG magic → exits 1; error message mentions "OGG magic".
     - Test 4: A `.mram` with per-line durations intentionally rigged so one line triggers `isDurationAnomaly` (synthesize by cramming 3× the median sec/char into a line) → exits 1; error message quotes the `ratio` and `kind: "too-long"`.
-    - Test 5: A v2-era `.mram` (no `metadata.audioFormat`, no `metadata.voiceCast`) → exits 1; message says "v3+ required".
+    - Test 5: A v2-era `.mram` (version byte = 2; no `metadata.audioFormat`, no `metadata.voiceCast`) → exits 1; message says "v3 required" (the implementation's `if (version !== 3)` throw path). A v1 file must ALSO be rejected the same way.
     - Test 6: `--json` mode prints a machine-readable shape `{ ritual, totalLines, spokenLines, linesWithAudio, failures: [{ lineId, kind, message }] }` and DOES NOT include `plain` or `cipher` text anywhere in the output.
-    - Test 7: Without `--check-audio-coverage`, existing Phase 3 behaviour (role breakdown, section table, first/last-3 sample) is preserved → output contains "Role breakdown" and the existing "✓ Verification complete" sentinel.
+    - Test 7: Without `--check-audio-coverage`, the v3-accepting script preserves the existing Phase 3 output sentinels against a v3 fixture → stdout contains `"Role breakdown"` AND `"✓ Verification complete"`. Assert sentinel-presence only (not byte-identical; the existing script was never exercised against v3 in Phase 3 because of the `version !== 1` throw — so "byte-identical" is not a coherent baseline. The sentinels are the contract; exact output formatting may differ because this is the first time the script runs successfully against v3.).
 
     Test file `scripts/__tests__/verify-content.test.ts` — RED tests:
     - Test 1: A tmpdir with 2 good `.mram` files + their 2 dialogue/cipher pairs → `main()` exits 0, stdout summary table has 2 PASS rows.
@@ -232,6 +260,7 @@ From scripts/verify-mram.ts (current Phase 3 state):
     - Use `vitest.tmpDir` / `os.tmpdir()` + `fs.mkdtempSync` for per-test tmpdirs; clean up in `afterEach`.
     - For the Opus fixture byte array: run `npx tsx scripts/preview-bake.ts` briefly against the existing ea-opening cache, copy one 400-byte `.opus` file, base64-encode it into a test-only `FIXTURE_OPUS_B64` constant. Document the source at the top of the test file. Do NOT commit the raw `.opus` fixture — the base64 string inside the `.test.ts` file is the only committed form.
     - The `encryptMRAM()` helper lives in `src/lib/mram-format.ts` and uses WebCrypto; in Node 22 it's `globalThis.crypto.subtle`, so import should work without shims. If it fails under vitest node env, wrap via `import { webcrypto } from 'node:crypto'` + `globalThis.crypto = webcrypto as Crypto`.
+    - When synthesizing the v2 fixture for Test 5, the test must hand-craft a buffer with version byte = 2 (and separately version = 1) rather than calling `encryptMRAM` (which only emits v3). Reuse the serialize layout from `src/lib/mram-format.ts` with a different version byte.
     - All tests MUST capture stdout/stderr via vitest's `vi.spyOn(console, 'log')` and `vi.spyOn(console, 'error')` so they can assert against output without relying on subprocess spawning.
     - For `verify-content.test.ts` Test 2: create a tmpdir under `os.tmpdir()`, copy `ea-opening-dialogue.md` + `ea-opening-dialogue-cipher.md` as the good ritual, then write a deliberately-mismatched cipher for ritual-A (e.g., change first speaker). CRITICAL: do NOT write to the real `rituals/` directory — the release gate must accept a path arg (`--rituals-dir <path>`) for test isolation. Add this flag as part of Task 2's implementation.
     - Nyquist compliance: a single `npx vitest run --no-coverage scripts/__tests__/verify-mram.test.ts scripts/__tests__/verify-content.test.ts` completes in <5s and fails clearly.
@@ -245,10 +274,58 @@ From scripts/verify-mram.ts (current Phase 3 state):
 </task>
 
 <task type="auto" tdd="true">
-  <name>Task 2: Implement --check-audio-coverage in verify-mram.ts + build verify-content.ts release gate + wire npm script</name>
+  <name>Task 2: Bump verify-mram.ts to v3 (version + interfaces) + implement --check-audio-coverage + build verify-content.ts release gate + wire npm script</name>
   <files>scripts/verify-mram.ts, scripts/verify-content.ts, package.json</files>
   <behavior>
     After this task the tests from Task 1 go GREEN.
+
+    **Mandatory prerequisite edits to `scripts/verify-mram.ts` (do these FIRST before adding new features):**
+
+    1. **Version byte bump (line 63 today):** Replace `if (version !== 1) { throw new Error(\`Unsupported .mram version: ${version}\`); }` with:
+       ```typescript
+       if (version !== 3) {
+         throw new Error(`Unsupported .mram version: ${version} (v3 required)`);
+       }
+       ```
+       Before editing, verify the target by inspecting a real file: `xxd rituals/ea-opening.mram | head -1` — the 5th byte (index 4) of the `MRAM` magic should be `03`. This is the v3 indicator. Any `.mram` file that is NOT v3 (older Phase 3 builds pre-Plan-05, v2 hand-crafts) must be rejected — the pilot cannot ship heterogeneous .mram versions to invited officers. Note: this deliberately makes v1/v2 files unreadable; that matches CONTENT-06's intent ("every shipped .mram has per-line Opus", which is a v3-only property).
+
+    2. **Local interface extension (line 41-53 today):** The local `MRAMDocument` / `MRAMMetadata` / `MRAMLine` interfaces in `scripts/verify-mram.ts` are narrower than the canonical shape in `src/lib/mram-format.ts`. Add the v3 fields:
+       ```typescript
+       interface MRAMDocument {
+         format: "MRAM";
+         version: number;
+         metadata: {
+           jurisdiction: string;
+           degree: string;
+           ceremony: string;
+           checksum: string;
+           expiresAt?: string;
+           /** v3+: base64-Opus audio per-line tagged with this voice cast. */
+           voiceCast?: Record<string, string>;
+           /** v3+: codec identifier. */
+           audioFormat?: "opus-32k-mono";
+         };
+         roles: Record<string, string>;
+         sections: { id: string; title: string; note?: string }[];
+         lines: MRAMLine[];
+       }
+
+       interface MRAMLine {
+         id: number;
+         section: string;
+         role: string;
+         gavels: number;
+         action: string | null;
+         cipher: string;
+         plain: string;
+         style?: string;
+         /** v3+: base64 Opus bytes. Absent on CUE/action-only rows. */
+         audio?: string;
+       }
+       ```
+       Alternative: import the shared types from `src/lib/mram-format.ts` directly instead of re-declaring locally. Either approach is fine; importing is DRY-er but the local duplication is the Phase 3 pattern. Pick one.
+
+    **After the version + interface prerequisite edits, add the new features:**
 
     `scripts/verify-mram.ts` gains:
     - New flag `--check-audio-coverage` (position-independent).
@@ -267,7 +344,7 @@ From scripts/verify-mram.ts (current Phase 3 state):
     - Under `--check-audio-coverage` + `--json`: output `{ ritual: <file basename>, totalLines, spokenLines, linesWithAudio, failures: [{ lineId: number, kind: "missing-audio" | "bad-base64" | "bad-ogg-magic" | "byte-len-out-of-range" | "duration-anomaly" | "missing-metadata", message: string }] }`. No `plain` / `cipher` text in output.
     - Under `--check-audio-coverage` (human-readable): print "=== Audio Coverage ===" section with per-failure lines and a final roll-up; suppress the existing "first 3 / last 3 spoken" sample blocks.
     - Exit code: 0 on pass, 1 on any coverage failure.
-    - Existing Phase 3 CLI behaviour (no flags or --summary) preserved byte-identical.
+    - Existing Phase 3 CLI sentinels (`Role breakdown`, `✓ Verification complete`) preserved under no-flag invocation against v3 files — this is the first time the script actually runs successfully against v3 content; Test 7 pins the sentinels, not byte-identity.
 
     `scripts/verify-content.ts` (new, ~120 LOC):
     - Accepts `--rituals-dir <path>` (defaults to `rituals/` relative to cwd) and `--json` flags.
@@ -283,10 +360,16 @@ From scripts/verify-mram.ts (current Phase 3 state):
 
     `package.json`: add `"verify-content": "npx tsx scripts/verify-content.ts"` alongside existing `bake-all` / `preview-bake` scripts. Alphabetize with existing alias order.
 
-    Commit prefix: `content-01: implement --check-audio-coverage in verify-mram + build verify-content release gate`
+    Commit prefix: `content-01: bump verify-mram to v3 + implement --check-audio-coverage + build verify-content release gate`
   </behavior>
   <action>
     Implement per the behavior contract above. Key engineering decisions:
+
+    0. **Do the prerequisite version+interface bump FIRST** (before any new feature work). Without it, Task 1 Test 1 crashes with "Unsupported .mram version: 3" before any audio-coverage logic runs. Edit sequence:
+       - Open `scripts/verify-mram.ts`.
+       - Edit line 63 to `if (version !== 3) throw new Error(\`Unsupported .mram version: ${version} (v3 required)\`);`.
+       - Edit the local interfaces (lines 41-53 in current state) to add `voiceCast?`, `audioFormat?`, `expiresAt?` to metadata and `audio?` to MRAMLine. See behavior block above for exact shape.
+       - Run `npx vitest run --no-coverage scripts/__tests__/verify-mram.test.ts` — Tests 1, 5, 7 should now at least get past the version throw on v3 fixtures and fail at the audio-coverage / sentinel assertions (expected partial progress).
 
     1. **Opus OGG-magic check**: hardcode `OGG_MAGIC = Buffer.from([0x4f, 0x67, 0x67, 0x53])`. Compare first 4 bytes via `Buffer.compare(buf.subarray(0, 4), OGG_MAGIC) === 0`.
 
@@ -310,34 +393,36 @@ From scripts/verify-mram.ts (current Phase 3 state):
 
     8. **Exports must be tree-shaken cleanly**: `verify-mram.ts`'s own `main()` stays bottom-of-file + `if (isDirectRun()) main().catch(...)` pattern (match `scripts/preview-bake.ts:isDirectRun` convention) so test imports don't trigger the CLI.
 
-    9. **Preserve no-flag behaviour bit-for-bit** — Test 7 of verify-mram.test.ts locks this. Role breakdown, section table, sample lines, "✓ Verification complete" sentinel must all still print.
+    9. **Preserve no-flag sentinel output** — Test 7 locks `"Role breakdown"` + `"✓ Verification complete"` strings. Exact output formatting may differ from the Phase 3-era expectation because Phase 3 never successfully ran this code path against a v3 file; the sentinels are the contract.
 
     10. **Run tests + expect GREEN**: `npx vitest run --no-coverage scripts/__tests__/verify-mram.test.ts scripts/__tests__/verify-content.test.ts` — all should pass. Then `npx vitest run --no-coverage` full suite — 517 baseline + new tests, zero regressions.
 
     11. **Smoke test against a real existing EA `.mram`** (only runs locally, not in CI; Shannon does this manually after the plan lands):
         ```bash
         MRAM_PASSPHRASE=$PASSPHRASE npx tsx scripts/verify-mram.ts rituals/ea-opening.mram --check-audio-coverage
-        # Expected: exits 0 (or 1 if v2-baked; that's WAI per Test 5's v3+ requirement)
+        # Expected: exits 0 against a freshly-baked v3 file. Previously (pre-Plan-04-01), this command exited 1 with "Unsupported .mram version: 3" — the interface bump above is what makes this work.
         ```
 
-    12. **Commit prefix**: `content-01: implement --check-audio-coverage in verify-mram + build verify-content release gate`
+    12. **Commit prefix**: `content-01: bump verify-mram to v3 + implement --check-audio-coverage + build verify-content release gate`
   </action>
   <verify>
     <automated>npx vitest run --no-coverage scripts/__tests__/verify-mram.test.ts scripts/__tests__/verify-content.test.ts && npx vitest run --no-coverage 2>&1 | tail -5</automated>
   </verify>
   <done>
-    All tests from Task 1 pass. Full vitest suite green: Phase 3 baseline 517 tests + ~15-20 new tests = ~535+ passing, zero regressions. `npm run verify-content` is a valid npm alias (`npm run verify-content -- --help` prints usage). `decryptMRAM`, `checkAudioCoverage`, `promptPassphrase` are exported from `scripts/verify-mram.ts`. Existing no-flag `verify-mram.ts` behaviour unchanged.
+    All tests from Task 1 pass. Full vitest suite green: Phase 3 baseline 517 tests + ~15-20 new tests = ~535+ passing, zero regressions. `verify-mram.ts` accepts v3 files (rejects v1/v2 with "v3 required"). Local interfaces include `voiceCast`, `audioFormat`, `audio`. `npm run verify-content` is a valid npm alias (`npm run verify-content -- --help` prints usage). `decryptMRAM`, `checkAudioCoverage`, `promptPassphrase` are exported from `scripts/verify-mram.ts`.
   </done>
 </task>
 
 </tasks>
 
 <verification>
+- [ ] `scripts/verify-mram.ts` line 63 (or equivalent) now asserts `version !== 3`; v1/v2 fixtures are rejected with "v3 required"
+- [ ] Local `MRAMDocument.metadata` interface in verify-mram.ts includes `voiceCast?` and `audioFormat?`; `MRAMLine` includes `audio?`
 - [ ] `npx vitest run --no-coverage scripts/__tests__/verify-mram.test.ts` passes all tests
 - [ ] `npx vitest run --no-coverage scripts/__tests__/verify-content.test.ts` passes all tests
 - [ ] Full `npx vitest run --no-coverage` green (Phase 3 baseline 517 + new ~15-20 tests)
 - [ ] `npm run verify-content -- --help` prints usage without crashing
-- [ ] `npx tsx scripts/verify-mram.ts rituals/ea-opening.mram` (with passphrase) preserves existing human-readable output (manual smoke, post-plan)
+- [ ] `npx tsx scripts/verify-mram.ts rituals/ea-opening.mram` (with passphrase) exits 0 and prints `Role breakdown` + `✓ Verification complete` (manual smoke, post-plan — this is the first successful run of this command against real v3 content)
 - [ ] TypeScript check clean on touched files: `npx tsc --noEmit` regression count ≤ Phase 3 baseline (26)
 </verification>
 
@@ -356,4 +441,5 @@ After completion, create `.planning/phases/04-content-coverage/04-01-SUMMARY.md`
 - Any deviations from the plan (documented with rationale)
 - A one-line smoke-test result against an existing EA `.mram` (or "deferred — EA re-bake lands in 04-03")
 - The commit SHAs landed by this plan
+- Confirmation that the pre-existing `version !== 1` throw is no longer in the code
 </output>

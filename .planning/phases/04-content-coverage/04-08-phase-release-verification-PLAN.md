@@ -19,7 +19,7 @@ must_haves:
   truths:
     - "`npm run verify-content` exits 0 when run across every shipped Phase 4 `.mram` — single-command confirmation that CONTENT-06 + CONTENT-07 hold aggregate"
     - "Full vitest suite is green (Phase 3 baseline 517 + Phase 4 additions from plans 01-02 = ~535+ tests, zero regressions)"
-    - "Every in-scope ritual row in `04-CONTENT-CHECKLIST.md` shows shipped=[x]; every removed row has a documented rationale"
+    - "Every in-scope ritual row in `04-CONTENT-CHECKLIST.md` shows shipped=[x]; every descoped row has every status cell set to `—` and a notes-column rationale (see 04-07 Task 4 for protocol)"
     - "Shannon has dogfooded at least one ritual per degree (EA, FC, MM) + the installation + one lecture on the real deployed pilot at `masonicmentor.app` — upload + rehearse + verify playback loop works end-to-end as an invited user would experience it"
     - "`.planning/REQUIREMENTS.md` marks CONTENT-01 through CONTENT-07 as [x] Complete"
     - "`.planning/STATE.md` + `.planning/ROADMAP.md` updated to reflect Phase 4 complete"
@@ -159,12 +159,12 @@ Non-autonomous: dogfood step requires Shannon interacting with the deployed pilo
     The Phase 4 release gate confirmed bytes-level correctness; this task confirms the user experience works end-to-end. Shannon uploads the baked `.mram` files to the deployed pilot at `https://masonicmentor.app`, signs in as an invited user, and rehearses representative rituals.
   </what-built>
   <how-to-verify>
-    **Dogfood set** (at minimum one per category; adjust based on Shannon's available bandwidth):
-    1. `ea-initiation.mram` — EA representative (most content-dense EA ritual)
-    2. `fc-passing.mram` — FC representative (longest FC + contains winding-stairs material)
-    3. `mm-raising.mram` — MM representative (longest MM; emotionally heavy)
-    4. `installation.mram` — Installation (only ritual in its category; multi-section test)
-    5. One lecture — e.g., `lec-wm-charge.mram` (single-speaker test; shortest)
+    **Dogfood set** (at minimum one per category; adjust based on Shannon's available bandwidth). Every file listed below is the post-04-03..07 v3 `.mram` — freshly baked during Wave 1, not a pre-Phase-4 cached artifact:
+    1. `ea-initiation.mram` — EA representative (most content-dense EA ritual; post-04-03 v3 re-bake)
+    2. `fc-passing.mram` — FC representative (longest FC + contains winding-stairs material; post-04-04 fresh bake)
+    3. `mm-raising.mram` — MM representative (longest MM; emotionally heavy; post-04-05 fresh bake)
+    4. `installation.mram` — Installation (only ritual in its category; multi-section test; post-04-06 fresh bake)
+    5. One lecture — e.g., `lec-wm-charge.mram` (single-speaker test; shortest; post-04-07 fresh bake)
 
     **Per-ritual dogfood procedure:**
     1. Sign in at `https://masonicmentor.app` with an invited-user account from `LODGE_ALLOWLIST` (NOT Shannon's admin account — the pilot's invited-user experience is the target).
@@ -290,7 +290,6 @@ Non-autonomous: dogfood step requires Shannon interacting with the deployed pilo
        ```
   </action>
   <verify>
-    <automated>grep -c "\[x\] \*\*CONTENT-0" .planning/REQUIREMENTS.md && grep -q "Phase 4 | Content Coverage | 8/8 | Complete\|Phase 4.*Complete" .planning/STATE.md && grep -q "\[x\] \*\*Phase 4" .planning/ROADMAP.md && test -f .planning/phases/04-content-coverage/04-08-SUMMARY.md && test -f .planning/phases/04-content-coverage/04-HUMAN-UAT.md && npx vitest run --no-coverage 2>&1 | tail -3  <verify>
     <automated>grep -c "\[x\] \*\*CONTENT-0" .planning/REQUIREMENTS.md && grep -q "Phase 4.*Complete" .planning/STATE.md && grep -q "\[x\] \*\*Phase 4" .planning/ROADMAP.md && test -f .planning/phases/04-content-coverage/04-08-SUMMARY.md && test -f .planning/phases/04-content-coverage/04-HUMAN-UAT.md && npx vitest run --no-coverage 2>&1 | tail -3</automated>
   </verify>
   <done>REQUIREMENTS.md shows 7 [x] CONTENT-* entries. STATE.md shows Phase 4 complete. ROADMAP.md shows Phase 4 checkbox ticked + success criteria annotated. 04-08-SUMMARY.md + 04-HUMAN-UAT.md files exist. Single atomic commit `content-08: close phase 4 content coverage (CONTENT-01..07 complete)` landed. No rituals/ files staged. Full vitest suite green.</done>
