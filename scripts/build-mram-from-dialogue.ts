@@ -710,6 +710,32 @@ async function main() {
   console.error("Encrypting...");
   const encrypted = encryptMRAMNode(doc, passphrase);
 
+  // Auto-backup on overwrite: if outputPath exists, rotate it to a
+  // timestamped sibling before writing the new version. Keeps the most
+  // recent 3 backups per ritual (.mram.backup-<ts> files) so a bad bake
+  // can be recovered even though rituals/*.mram is gitignored. Ordered
+  // BEFORE the tmp+rename so the new output still lands atomically.
+  if (fs.existsSync(outputPath)) {
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    const backupPath = `${outputPath}.backup-${ts}`;
+    fs.renameSync(outputPath, backupPath);
+    console.error(`Backed up existing output → ${backupPath}`);
+    const backupDir = path.dirname(outputPath);
+    const base = path.basename(outputPath);
+    const existing = fs
+      .readdirSync(backupDir)
+      .filter((f) => f.startsWith(`${base}.backup-`))
+      .sort()
+      .reverse();
+    for (const stale of existing.slice(3)) {
+      try {
+        fs.unlinkSync(path.join(backupDir, stale));
+      } catch {
+        // Best-effort cleanup — failing to prune an old backup is not fatal.
+      }
+    }
+  }
+
   // Atomic write: stage to a temp file, then rename. Prevents a corrupt
   // output if the process is killed mid-write (Ctrl-C, OOM, disk full).
   // POSIX rename within the same filesystem is atomic.

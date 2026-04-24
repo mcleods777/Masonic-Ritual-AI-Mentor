@@ -43,6 +43,7 @@ next-env.d.ts
 # ritual files (lodge-specific, should not be committed)
 # only encrypted .mram may exist in the rituals dir; plaintext is local-only
 *.mram
+*.mram.backup-*
 rituals/*.md
 rituals/*.txt
 rituals/*.json
