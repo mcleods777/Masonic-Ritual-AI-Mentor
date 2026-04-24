@@ -103,7 +103,7 @@ Plans:
   5. Every shipped `.mram` passes the cipher/plain parity validator before being committed — no phantom scoring failures from cipher-only edits reach users
 **Plans**: 8 plans
 Plans:
-- [ ] 04-01-verifier-release-gate-PLAN.md — CONTENT-06, CONTENT-07: extend verify-mram with --check-audio-coverage + build verify-content release gate (Wave 0, engineering)
+- [x] 04-01-verifier-release-gate-PLAN.md — CONTENT-06, CONTENT-07: extend verify-mram with --check-audio-coverage + build verify-content release gate (Wave 0, engineering) (2026-04-23, commits 87e7415 + 65b8172)
 - [ ] 04-02-content-checklist-PLAN.md — create 04-CONTENT-CHECKLIST.md ritual-readiness ledger + parseable-markdown shape test (Wave 0, tracking)
 - [ ] 04-03-ea-rebake-PLAN.md — CONTENT-01: re-bake 4 existing EA rituals under v3 cache (Wave 1, content-labor)
 - [ ] 04-04-fc-authoring-bake-PLAN.md — CONTENT-02: author + bake 4 fresh FC rituals (opening, passing, middle-chamber-lecture, closing) (Wave 1, content-labor)
