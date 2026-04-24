@@ -82,33 +82,43 @@ export const CACHE_KEY_VERSION = "v3";
  * The `oldDir` param defaults to OLD_CACHE_DIR but tests inject a tmp
  * dir so they never touch the developer's real ~/.cache/masonic-mram-audio/.
  */
-let migrationRan = false;
-export async function migrateLegacyCacheIfNeeded(
+// One-shot guard implemented as a memoized promise rather than a boolean
+// (ME-01 in 03-REVIEW.md): a check-then-set boolean has a concurrency
+// race when renderLineAudio is called for two lines in parallel — both
+// could pass the guard before either has finished, producing partial
+// copies. A memoized Promise is re-entrant and concurrent-safe by
+// construction: the first caller starts the migration; all subsequent
+// callers (same tick OR later) await the SAME promise.
+let migrationPromise: Promise<void> | null = null;
+
+export function migrateLegacyCacheIfNeeded(
   cacheDir: string,
   oldDir: string = OLD_CACHE_DIR,
 ): Promise<void> {
-  if (migrationRan) return;
-  migrationRan = true;
-  if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
-  const hasAny = fs.readdirSync(cacheDir).some((f) => f.endsWith(".opus"));
-  if (hasAny) return;
-  if (!fs.existsSync(oldDir)) return;
-  const files = fs.readdirSync(oldDir).filter((f) => f.endsWith(".opus"));
-  if (files.length === 0) return;
-  console.error(
-    `[AUTHOR-01] migrating legacy cache ${oldDir} → ${cacheDir} ` +
-      `(${files.length} entries; old location preserved for rollback)`,
-  );
-  await fs.promises.cp(oldDir, cacheDir, {
-    recursive: true,
-    filter: (src) => src === oldDir || src.endsWith(".opus"),
-  });
-  console.error(`[AUTHOR-01] migrated ${files.length} entries.`);
+  if (migrationPromise) return migrationPromise;
+  migrationPromise = (async () => {
+    if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
+    const hasAny = fs.readdirSync(cacheDir).some((f) => f.endsWith(".opus"));
+    if (hasAny) return;
+    if (!fs.existsSync(oldDir)) return;
+    const files = fs.readdirSync(oldDir).filter((f) => f.endsWith(".opus"));
+    if (files.length === 0) return;
+    console.error(
+      `[AUTHOR-01] migrating legacy cache ${oldDir} → ${cacheDir} ` +
+        `(${files.length} entries; old location preserved for rollback)`,
+    );
+    await fs.promises.cp(oldDir, cacheDir, {
+      recursive: true,
+      filter: (src) => src === oldDir || src.endsWith(".opus"),
+    });
+    console.error(`[AUTHOR-01] migrated ${files.length} entries.`);
+  })();
+  return migrationPromise;
 }
 
 /** Test-only hook: reset the one-shot guard between tests. */
 export function __resetMigrationFlagForTests(): void {
-  migrationRan = false;
+  migrationPromise = null;
 }
 
 // ============================================================

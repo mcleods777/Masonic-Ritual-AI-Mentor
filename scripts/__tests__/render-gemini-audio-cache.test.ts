@@ -242,7 +242,8 @@ describe("migrateLegacyCacheIfNeeded (AUTHOR-01 D-01)", () => {
   });
 
   it("is idempotent across repeated calls (module-level guard)", async () => {
-    // First call runs (empty OLD → no-op); second call short-circuits on migrationRan.
+    // First call runs (empty OLD → no-op); second call short-circuits on
+    // the memoized migrationPromise (ME-01 replaced the boolean with a Promise).
     const emptyOld = fs.mkdtempSync(path.join(os.tmpdir(), "bake-empty-old-"));
     try {
       await migrateLegacyCacheIfNeeded(tmpRoot, emptyOld);
