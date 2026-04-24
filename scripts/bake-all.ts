@@ -44,8 +44,8 @@ import * as path from "node:path";
 import * as crypto from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 import pLimit from "p-limit";
-import { validatePair } from "../src/lib/author-validation";
 import { type ResumeState, readResumeState } from "./lib/resume-state";
+import { validateOrFail as validateOrFailShared } from "./lib/validate-or-fail";
 
 // ============================================================
 // Constants
@@ -209,6 +209,11 @@ export function getAllRituals(): string[] {
 // ============================================================
 // Validator gate (D-08) — runs BEFORE any API call per PATTERNS.md
 // §Validator-gate; anti-pattern §4 — waste zero quota on corrupted pairs.
+//
+// The orchestrator-level gate catches drift early (before spawning any
+// build-mram sub-process). The sub-process runs the SAME shared
+// validateOrFail from scripts/lib/validate-or-fail.ts (HI-01) so the
+// two gates cannot diverge.
 // ============================================================
 export function validateOrFail(slug: string): void {
   const plainPath = path.join(RITUALS_DIR, `${slug}-dialogue.md`);
@@ -217,24 +222,7 @@ export function validateOrFail(slug: string): void {
     console.error(`  ✗ ${slug}: missing plain or cipher file`);
     process.exit(1);
   }
-  const plain = fs.readFileSync(plainPath, "utf8");
-  const cipher = fs.readFileSync(cipherPath, "utf8");
-  const result = validatePair(plain, cipher);
-  const errors = result.lineIssues.filter((i) => i.severity === "error");
-  if (errors.length > 0 || !result.structureOk) {
-    console.error(
-      `[AUTHOR-05 D-08] ${slug}: validator refused to bake (${errors.length} issues)`,
-    );
-    for (const issue of errors) {
-      console.error(`  [${issue.kind}] line ${issue.index}: ${issue.message}`);
-    }
-    if (!result.structureOk) {
-      console.error(
-        `  structure parity failed: ${JSON.stringify(result.firstDivergence)}`,
-      );
-    }
-    process.exit(1);
-  }
+  validateOrFailShared(plainPath, cipherPath, slug);
 }
 
 // ============================================================

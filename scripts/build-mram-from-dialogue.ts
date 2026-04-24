@@ -54,7 +54,7 @@ import {
   getGeminiVoiceForRole,
   getGoogleVoiceForRole,
 } from "../src/lib/tts-cloud";
-import { validatePair } from "../src/lib/author-validation";
+import { validateOrFail } from "./lib/validate-or-fail";
 import {
   renderLineAudio,
   deleteCacheEntry,
@@ -134,38 +134,11 @@ export function encryptMRAMNode(doc: MRAMDocument, passphrase: string): Buffer {
 // ============================================================
 // Phase 3 bake-time gates (AUTHOR-04 / AUTHOR-05 / AUTHOR-06 / AUTHOR-07)
 // ============================================================
-
-/**
- * Pre-render validator gate (AUTHOR-05 D-08).
- * Run BEFORE any API call per ritual. Hard-fails the process with a
- * structured issue report on any severity="error" issue — including
- * D-08 bake-band word-ratio outliers from src/lib/author-validation.ts.
- *
- * No --force override in Phase 3 (CONTEXT D-08). Shannon's intent is
- * "rewrite the bad cipher line rather than ship an .mram that scores
- * wrong" — this gate makes that the default.
- */
-function validateOrFail(plainPath: string, cipherPath: string): void {
-  const plain = fs.readFileSync(plainPath, "utf8");
-  const cipher = fs.readFileSync(cipherPath, "utf8");
-  const result = validatePair(plain, cipher);
-  const errors = result.lineIssues.filter((i) => i.severity === "error");
-  if (errors.length > 0 || !result.structureOk) {
-    console.error(`\n[AUTHOR-05 D-08] validator refused to bake ${plainPath}:`);
-    if (!result.structureOk) {
-      console.error(
-        `  structure parity failed: ${JSON.stringify(result.firstDivergence)}`,
-      );
-    }
-    for (const issue of errors) {
-      console.error(`  [${issue.kind}] line ${issue.index}: ${issue.message}`);
-    }
-    console.error(
-      `\nFix the cipher/plain drift and re-run. No --force in Phase 3 (CONTEXT D-08).`,
-    );
-    process.exit(1);
-  }
-}
+//
+// Pre-render validator gate (AUTHOR-05 D-08) now lives in
+// scripts/lib/validate-or-fail.ts and is imported as validateOrFail.
+// The same shared function is used by the orchestrator (scripts/bake-all.ts)
+// so the two gates cannot silently drift (HI-01 in 03-REVIEW.md).
 
 /**
  * Direct Google Cloud TTS REST call for the short-line bake path (AUTHOR-04 D-09).
