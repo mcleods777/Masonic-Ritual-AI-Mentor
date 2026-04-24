@@ -346,23 +346,42 @@ async function promptPassphrase(): Promise<string> {
 
   return new Promise((resolve, reject) => {
     let passphrase = "";
+    // ME-05: centralized cleanup so SIGINT/SIGTERM (external kill, laptop
+    // suspend, etc.) restore cooked-mode stdin before the default signal
+    // handling runs. Without this the user's shell is left in raw mode
+    // after the bake exits — input becomes uninterpretable.
+    const cleanup = () => {
+      try {
+        process.stdin.setRawMode(false);
+      } catch {
+        // best-effort: setRawMode can throw if stdin isn't a TTY at exit time
+      }
+      process.stdin.pause();
+      process.stdin.removeListener("data", onData);
+      process.removeListener("SIGINT", onSignal);
+      process.removeListener("SIGTERM", onSignal);
+    };
+    const onSignal = () => {
+      cleanup();
+      process.stderr.write("\n");
+      // 128 + signal number; SIGINT=2, SIGTERM=15 — use 130 for SIGINT
+      // parity with shells and accept a rough 143 for SIGTERM isn't worth
+      // the discrimination cost here (consistent exit is enough).
+      process.exit(130);
+    };
     const onData = (chunk: string) => {
       for (const ch of chunk) {
         const code = ch.charCodeAt(0);
         if (code === 13 || code === 10) {
           // Enter
-          process.stdin.setRawMode(false);
-          process.stdin.pause();
-          process.stdin.removeListener("data", onData);
+          cleanup();
           process.stderr.write("\n");
           resolve(passphrase);
           return;
         }
         if (code === 3) {
           // Ctrl-C
-          process.stdin.setRawMode(false);
-          process.stdin.pause();
-          process.stdin.removeListener("data", onData);
+          cleanup();
           process.stderr.write("\n");
           reject(new Error("Interrupted"));
           return;
@@ -377,6 +396,8 @@ async function promptPassphrase(): Promise<string> {
       }
     };
     process.stdin.on("data", onData);
+    process.on("SIGINT", onSignal);
+    process.on("SIGTERM", onSignal);
   });
 }
 
@@ -1469,15 +1490,34 @@ async function promptFallbackChoice(): Promise<"continue" | "abort"> {
   process.stdin.setEncoding("utf-8");
 
   return new Promise((resolve) => {
-    const onData = (chunk: string) => {
-      const ch = chunk[0] ?? "";
-      process.stdin.setRawMode(false);
+    // ME-05: same signal-safe cleanup as promptPassphrase — restore
+    // cooked-mode stdin on SIGINT/SIGTERM so the user's shell doesn't
+    // get stuck in raw mode if the bake is killed mid-prompt.
+    const cleanup = () => {
+      try {
+        process.stdin.setRawMode(false);
+      } catch {
+        // best-effort
+      }
       process.stdin.pause();
       process.stdin.removeListener("data", onData);
+      process.removeListener("SIGINT", onSignal);
+      process.removeListener("SIGTERM", onSignal);
+    };
+    const onSignal = () => {
+      cleanup();
+      process.stderr.write("\n");
+      process.exit(130);
+    };
+    const onData = (chunk: string) => {
+      const ch = chunk[0] ?? "";
+      cleanup();
       process.stderr.write(ch + "\n");
       resolve(ch === "y" || ch === "Y" ? "continue" : "abort");
     };
     process.stdin.on("data", onData);
+    process.on("SIGINT", onSignal);
+    process.on("SIGTERM", onSignal);
   });
 }
 
