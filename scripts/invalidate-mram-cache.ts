@@ -64,33 +64,45 @@ function parseArgs(argv: string[]): ParsedArgs {
   const positional = argv.filter((a) => !a.startsWith("--"));
   const yes = argv.includes("--yes");
 
+  // ME-03: collect IDs from both --lines=X and --lines Y forms, then
+  // dedupe via Set so passing both forms (or two equals-forms) doesn't
+  // double-attempt deletion and inflate the "deleted" count.
+  const rawIds: number[] = [];
   const linesFlag = argv.find((a) => a.startsWith("--lines="));
-  const lineIds = linesFlag
-    ? linesFlag
+  if (linesFlag) {
+    rawIds.push(
+      ...linesFlag
         .slice("--lines=".length)
-        .split(",")
-        .map((s) => Number(s.trim()))
-        .filter((n) => Number.isFinite(n))
-    : [];
-
-  // Also accept --lines 66,67 (space-separated value) for muscle-memory
-  // parity with other CLI tools.
-  const linesIdx = argv.indexOf("--lines");
-  if (linesIdx >= 0 && argv[linesIdx + 1] && !argv[linesIdx + 1].startsWith("--")) {
-    lineIds.push(
-      ...argv[linesIdx + 1]
         .split(",")
         .map((s) => Number(s.trim()))
         .filter((n) => Number.isFinite(n)),
     );
   }
 
-  const roleFlag = argv.find((a) => a.startsWith("--role="));
-  const roles = roleFlag ? [roleFlag.slice("--role=".length)] : [];
-  const roleIdx = argv.indexOf("--role");
-  if (roleIdx >= 0 && argv[roleIdx + 1] && !argv[roleIdx + 1].startsWith("--")) {
-    roles.push(argv[roleIdx + 1]);
+  // Also accept --lines 66,67 (space-separated value) for muscle-memory
+  // parity with other CLI tools. Pull the next arg into a local so the
+  // guard is readable and the optional-undefined access isn't re-done.
+  const linesIdx = argv.indexOf("--lines");
+  const nextLinesArg = linesIdx >= 0 ? argv[linesIdx + 1] : undefined;
+  if (nextLinesArg && !nextLinesArg.startsWith("--")) {
+    rawIds.push(
+      ...nextLinesArg
+        .split(",")
+        .map((s) => Number(s.trim()))
+        .filter((n) => Number.isFinite(n)),
+    );
   }
+
+  const lineIds = Array.from(new Set(rawIds));
+
+  const roleFlag = argv.find((a) => a.startsWith("--role="));
+  const rawRoles: string[] = roleFlag ? [roleFlag.slice("--role=".length)] : [];
+  const roleIdx = argv.indexOf("--role");
+  const nextRoleArg = roleIdx >= 0 ? argv[roleIdx + 1] : undefined;
+  if (nextRoleArg && !nextRoleArg.startsWith("--")) {
+    rawRoles.push(nextRoleArg);
+  }
+  const roles = Array.from(new Set(rawRoles));
 
   if (positional.length < 1 || positional.length > 2) {
     throw new Error(

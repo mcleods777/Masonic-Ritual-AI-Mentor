@@ -54,7 +54,7 @@ import {
   getGeminiVoiceForRole,
   getGoogleVoiceForRole,
 } from "../src/lib/tts-cloud";
-import { validatePair } from "../src/lib/author-validation";
+import { validateOrFail } from "./lib/validate-or-fail";
 import {
   renderLineAudio,
   deleteCacheEntry,
@@ -134,38 +134,11 @@ export function encryptMRAMNode(doc: MRAMDocument, passphrase: string): Buffer {
 // ============================================================
 // Phase 3 bake-time gates (AUTHOR-04 / AUTHOR-05 / AUTHOR-06 / AUTHOR-07)
 // ============================================================
-
-/**
- * Pre-render validator gate (AUTHOR-05 D-08).
- * Run BEFORE any API call per ritual. Hard-fails the process with a
- * structured issue report on any severity="error" issue — including
- * D-08 bake-band word-ratio outliers from src/lib/author-validation.ts.
- *
- * No --force override in Phase 3 (CONTEXT D-08). Shannon's intent is
- * "rewrite the bad cipher line rather than ship an .mram that scores
- * wrong" — this gate makes that the default.
- */
-function validateOrFail(plainPath: string, cipherPath: string): void {
-  const plain = fs.readFileSync(plainPath, "utf8");
-  const cipher = fs.readFileSync(cipherPath, "utf8");
-  const result = validatePair(plain, cipher);
-  const errors = result.lineIssues.filter((i) => i.severity === "error");
-  if (errors.length > 0 || !result.structureOk) {
-    console.error(`\n[AUTHOR-05 D-08] validator refused to bake ${plainPath}:`);
-    if (!result.structureOk) {
-      console.error(
-        `  structure parity failed: ${JSON.stringify(result.firstDivergence)}`,
-      );
-    }
-    for (const issue of errors) {
-      console.error(`  [${issue.kind}] line ${issue.index}: ${issue.message}`);
-    }
-    console.error(
-      `\nFix the cipher/plain drift and re-run. No --force in Phase 3 (CONTEXT D-08).`,
-    );
-    process.exit(1);
-  }
-}
+//
+// Pre-render validator gate (AUTHOR-05 D-08) now lives in
+// scripts/lib/validate-or-fail.ts and is imported as validateOrFail.
+// The same shared function is used by the orchestrator (scripts/bake-all.ts)
+// so the two gates cannot silently drift (HI-01 in 03-REVIEW.md).
 
 /**
  * Direct Google Cloud TTS REST call for the short-line bake path (AUTHOR-04 D-09).
@@ -373,23 +346,42 @@ async function promptPassphrase(): Promise<string> {
 
   return new Promise((resolve, reject) => {
     let passphrase = "";
+    // ME-05: centralized cleanup so SIGINT/SIGTERM (external kill, laptop
+    // suspend, etc.) restore cooked-mode stdin before the default signal
+    // handling runs. Without this the user's shell is left in raw mode
+    // after the bake exits — input becomes uninterpretable.
+    const cleanup = () => {
+      try {
+        process.stdin.setRawMode(false);
+      } catch {
+        // best-effort: setRawMode can throw if stdin isn't a TTY at exit time
+      }
+      process.stdin.pause();
+      process.stdin.removeListener("data", onData);
+      process.removeListener("SIGINT", onSignal);
+      process.removeListener("SIGTERM", onSignal);
+    };
+    const onSignal = () => {
+      cleanup();
+      process.stderr.write("\n");
+      // 128 + signal number; SIGINT=2, SIGTERM=15 — use 130 for SIGINT
+      // parity with shells and accept a rough 143 for SIGTERM isn't worth
+      // the discrimination cost here (consistent exit is enough).
+      process.exit(130);
+    };
     const onData = (chunk: string) => {
       for (const ch of chunk) {
         const code = ch.charCodeAt(0);
         if (code === 13 || code === 10) {
           // Enter
-          process.stdin.setRawMode(false);
-          process.stdin.pause();
-          process.stdin.removeListener("data", onData);
+          cleanup();
           process.stderr.write("\n");
           resolve(passphrase);
           return;
         }
         if (code === 3) {
           // Ctrl-C
-          process.stdin.setRawMode(false);
-          process.stdin.pause();
-          process.stdin.removeListener("data", onData);
+          cleanup();
           process.stderr.write("\n");
           reject(new Error("Interrupted"));
           return;
@@ -404,6 +396,8 @@ async function promptPassphrase(): Promise<string> {
       }
     };
     process.stdin.on("data", onData);
+    process.on("SIGINT", onSignal);
+    process.on("SIGTERM", onSignal);
   });
 }
 
@@ -1496,15 +1490,34 @@ async function promptFallbackChoice(): Promise<"continue" | "abort"> {
   process.stdin.setEncoding("utf-8");
 
   return new Promise((resolve) => {
-    const onData = (chunk: string) => {
-      const ch = chunk[0] ?? "";
-      process.stdin.setRawMode(false);
+    // ME-05: same signal-safe cleanup as promptPassphrase — restore
+    // cooked-mode stdin on SIGINT/SIGTERM so the user's shell doesn't
+    // get stuck in raw mode if the bake is killed mid-prompt.
+    const cleanup = () => {
+      try {
+        process.stdin.setRawMode(false);
+      } catch {
+        // best-effort
+      }
       process.stdin.pause();
       process.stdin.removeListener("data", onData);
+      process.removeListener("SIGINT", onSignal);
+      process.removeListener("SIGTERM", onSignal);
+    };
+    const onSignal = () => {
+      cleanup();
+      process.stderr.write("\n");
+      process.exit(130);
+    };
+    const onData = (chunk: string) => {
+      const ch = chunk[0] ?? "";
+      cleanup();
       process.stderr.write(ch + "\n");
       resolve(ch === "y" || ch === "Y" ? "continue" : "abort");
     };
     process.stdin.on("data", onData);
+    process.on("SIGINT", onSignal);
+    process.on("SIGTERM", onSignal);
   });
 }
 

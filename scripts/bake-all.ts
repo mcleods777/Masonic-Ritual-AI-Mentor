@@ -44,8 +44,8 @@ import * as path from "node:path";
 import * as crypto from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 import pLimit from "p-limit";
-import { validatePair } from "../src/lib/author-validation";
 import { type ResumeState, readResumeState } from "./lib/resume-state";
+import { validateOrFail as validateOrFailShared } from "./lib/validate-or-fail";
 
 // ============================================================
 // Constants
@@ -209,6 +209,11 @@ export function getAllRituals(): string[] {
 // ============================================================
 // Validator gate (D-08) — runs BEFORE any API call per PATTERNS.md
 // §Validator-gate; anti-pattern §4 — waste zero quota on corrupted pairs.
+//
+// The orchestrator-level gate catches drift early (before spawning any
+// build-mram sub-process). The sub-process runs the SAME shared
+// validateOrFail from scripts/lib/validate-or-fail.ts (HI-01) so the
+// two gates cannot diverge.
 // ============================================================
 export function validateOrFail(slug: string): void {
   const plainPath = path.join(RITUALS_DIR, `${slug}-dialogue.md`);
@@ -217,24 +222,7 @@ export function validateOrFail(slug: string): void {
     console.error(`  ✗ ${slug}: missing plain or cipher file`);
     process.exit(1);
   }
-  const plain = fs.readFileSync(plainPath, "utf8");
-  const cipher = fs.readFileSync(cipherPath, "utf8");
-  const result = validatePair(plain, cipher);
-  const errors = result.lineIssues.filter((i) => i.severity === "error");
-  if (errors.length > 0 || !result.structureOk) {
-    console.error(
-      `[AUTHOR-05 D-08] ${slug}: validator refused to bake (${errors.length} issues)`,
-    );
-    for (const issue of errors) {
-      console.error(`  [${issue.kind}] line ${issue.index}: ${issue.message}`);
-    }
-    if (!result.structureOk) {
-      console.error(
-        `  structure parity failed: ${JSON.stringify(result.firstDivergence)}`,
-      );
-    }
-    process.exit(1);
-  }
+  validateOrFailShared(plainPath, cipherPath, slug);
 }
 
 // ============================================================
@@ -404,10 +392,15 @@ async function main(): Promise<void> {
     ? readResumeState(RESUME_FILE)
     : null;
 
-  // Collect both successes and failures for a final report (Pitfall 7).
-  // Current bake loop is sequential (per-ritual); when ritual-level
-  // parallelism is added, swap this for Promise.allSettled over
-  // `limit(() => bakeRitual(...))` and iterate BOTH sides.
+  // Halt-on-first-error (03-07-SUMMARY.md §Failure): record each
+  // ritual's outcome as we go, but the loop below `break`s on the
+  // first failure — so `results` will contain at most one failure
+  // plus any successes that preceded it. The final summary below
+  // reports that failure plus the "not attempted" skipped-after
+  // count explicitly, so the user sees scope ("N of M rituals").
+  // When ritual-level parallelism lands, switch to Promise.allSettled
+  // over `limit(() => bakeRitual(...))` and iterate BOTH sides — at
+  // that point the halt-on-first semantics no longer apply.
   const results: { slug: string; ok: boolean; error?: string }[] = [];
 
   for (const slug of slugs) {
@@ -457,12 +450,22 @@ async function main(): Promise<void> {
     }
   }
 
-  // Surface BOTH fulfilled and rejected per Pitfall 7.
+  // Halt-on-first-error summary: report the failing ritual AND the
+  // "not attempted" skipped-after scope so the user sees how many
+  // rituals the orchestrator stopped short of (vs. silently showing
+  // "1 failed" when 7-of-8 would have failed had we kept going).
   const failures = results.filter((r) => !r.ok);
   if (failures.length > 0) {
-    console.error(`\n${failures.length} ritual(s) failed:`);
+    const remainingCount = slugs.length - results.length;
+    const skippedSlugs = slugs.slice(results.length);
+    console.error(
+      `\n${failures.length} ritual(s) failed, ${remainingCount} not attempted (halt-on-first):`,
+    );
     for (const f of failures) {
       console.error(`  ${f.slug}: ${f.error ?? "unknown"}`);
+    }
+    if (remainingCount > 0) {
+      console.error(`  Not attempted: ${skippedSlugs.join(", ")}`);
     }
     process.exit(1);
   }
