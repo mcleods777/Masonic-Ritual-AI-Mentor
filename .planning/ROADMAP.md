@@ -104,7 +104,7 @@ Plans:
 **Plans**: 8 plans
 Plans:
 - [x] 04-01-verifier-release-gate-PLAN.md — CONTENT-06, CONTENT-07: extend verify-mram with --check-audio-coverage + build verify-content release gate (Wave 0, engineering) (2026-04-23, commits 87e7415 + 65b8172)
-- [ ] 04-02-content-checklist-PLAN.md — create 04-CONTENT-CHECKLIST.md ritual-readiness ledger + parseable-markdown shape test (Wave 0, tracking)
+- [x] 04-02-content-checklist-PLAN.md — create 04-CONTENT-CHECKLIST.md ritual-readiness ledger + parseable-markdown shape test (Wave 0, tracking) (2026-04-23, commits a8f3412 + 4d121a1)
 - [ ] 04-03-ea-rebake-PLAN.md — CONTENT-01: re-bake 4 existing EA rituals under v3 cache (Wave 1, content-labor)
 - [ ] 04-04-fc-authoring-bake-PLAN.md — CONTENT-02: author + bake 4 fresh FC rituals (opening, passing, middle-chamber-lecture, closing) (Wave 1, content-labor)
 - [ ] 04-05-mm-authoring-bake-PLAN.md — CONTENT-03: author + bake 4 fresh MM rituals (opening, raising, hiramic-legend, closing) (Wave 1, content-labor)
@@ -164,7 +164,7 @@ Plans:
 | 1. Pre-invite Hygiene | 7/7 | Complete (UAT pending) | 2026-04-21 |
 | 2. Safety Floor | 9/9 | Complete (merged to main PR #68) | 2026-04-22 |
 | 3. Authoring Throughput | 8/8 | Execution complete (merge PR pending) | 2026-04-23 |
-| 4. Content Coverage | 0/8 | Planned | - |
+| 4. Content Coverage | 2/8 | Executing | - |
 | 5. Coach Quality Lift | 0/0 | Not started | - |
 | 6. Admin Substrate & Distribution | 0/0 | Not started | - |
 | 7. Onboarding Polish | 0/0 | Not started | - |
