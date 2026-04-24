@@ -121,4 +121,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-20 after initialization*
+*Last updated: 2026-04-23 after Phase 3 (Authoring Throughput) execution — bake cache + orchestrator + validators + preview server now enable Phase 4 content work.*

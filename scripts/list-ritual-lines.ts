@@ -34,7 +34,7 @@ import {
   type VoiceCastFile,
 } from "../src/lib/voice-cast";
 import { getGeminiVoiceForRole } from "../src/lib/tts-cloud";
-import type { StylesFile } from "../src/lib/styles";
+import { hashLineText, isValidSpeakAs, type StylesFile } from "../src/lib/styles";
 
 // Must stay in sync with build-mram-from-dialogue.ts defaults.
 const MIN_PREAMBLE_LINE_CHARS = Number(
@@ -140,6 +140,27 @@ async function main() {
     }
   }
 
+  // Build speakAs-by-lineId map so cache status reflects the same key
+  // the bake pipeline would compute. Without this, speakAs-overridden
+  // lines would incorrectly appear uncached after a successful bake.
+  const speakAsByLineId = new Map<number, string>();
+  if (stylesPayload) {
+    const speakAsByHash = new Map<string, string>();
+    for (const entry of stylesPayload.styles) {
+      if (entry.speakAs && isValidSpeakAs(entry.speakAs)) {
+        speakAsByHash.set(entry.lineHash, entry.speakAs);
+      }
+    }
+    if (speakAsByHash.size > 0) {
+      for (const l of doc.lines) {
+        if (!l.plain || !l.role) continue;
+        const h = await hashLineText(l.plain);
+        const sa = speakAsByHash.get(h);
+        if (sa) speakAsByLineId.set(l.id, sa);
+      }
+    }
+  }
+
   // Header
   console.log(`# ${plain.metadata.ceremony} (${plain.metadata.degree})`);
   console.log(
@@ -162,24 +183,36 @@ async function main() {
     const text = line.plain?.trim() ?? "";
     if (!text && !line.action) continue;
 
-    // Apply filters.
-    if (grep && !(text.toLowerCase().includes(grep) || (line.action ?? "").toLowerCase().includes(grep))) continue;
+    // Apply filters. Grep matches display text OR the speakAs override
+    // so an operator can find a line by either surface.
+    const speakAs = speakAsByLineId.get(line.id);
+    const bakeText = (speakAs ?? text).trim();
+    if (
+      grep &&
+      !(
+        text.toLowerCase().includes(grep) ||
+        (line.action ?? "").toLowerCase().includes(grep) ||
+        (speakAs ?? "").toLowerCase().includes(grep)
+      )
+    ) continue;
     if (role && line.role !== role) continue;
 
-    // Determine cache status. Matches the bake's decision logic.
+    // Determine cache status. Matches the bake's decision logic exactly:
+    // hard-skip is on bakeText (speakAs or plain), cache key uses bakeText,
+    // preamble is suppressed when speakAs is set.
     let cacheSymbol: string;
     let isCachedNow = false;
-    if (!line.role || !text) {
+    if (!line.role || !bakeText) {
       cacheSymbol = "—";
-    } else if (text.length < MIN_BAKE_LINE_CHARS) {
+    } else if (bakeText.length < MIN_BAKE_LINE_CHARS) {
       cacheSymbol = "⨯"; // hard-skip
     } else {
       const voice = getGeminiVoiceForRole(line.role);
       const preamble =
-        text.length >= MIN_PREAMBLE_LINE_CHARS
+        !speakAs && bakeText.length >= MIN_PREAMBLE_LINE_CHARS
           ? preambleByRole[line.role] ?? ""
           : "";
-      isCachedNow = isLineCached(text, line.style, voice, preamble);
+      isCachedNow = isLineCached(bakeText, line.style, voice, preamble);
       cacheSymbol = isCachedNow ? "✓" : "·";
     }
 
@@ -190,9 +223,10 @@ async function main() {
       line.role === "CUE" && line.action
         ? `[${line.action}]`
         : text.slice(0, 80) + (text.length > 80 ? "…" : "");
+    const sayMarker = speakAs ? " 🎤" : "";
 
     console.log(
-      `${line.id.toString().padStart(5)}  ${line.role.padEnd(8)}   ${cacheSymbol}      ${displayText}`,
+      `${line.id.toString().padStart(5)}  ${line.role.padEnd(8)}   ${cacheSymbol}      ${displayText}${sayMarker}`,
     );
     shown++;
   }
@@ -200,7 +234,7 @@ async function main() {
   console.log("");
   console.log(`# ${shown} line(s) shown`);
   console.log("");
-  console.log("# Legend:  ✓ cached   · uncached   ⨯ hard-skipped (too short)");
+  console.log("# Legend:  ✓ cached   · uncached   ⨯ hard-skipped (too short)   🎤 speakAs override");
   console.log("# To regenerate a specific line, run:");
   console.log(
     `#   npx tsx scripts/invalidate-mram-cache.ts ${plainPath} --lines=<ID> --yes`,

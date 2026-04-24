@@ -67,3 +67,7 @@ files/
 .claude/skills/gstack/.factory/
 .gstack/
 .env.vercel-temp
+
+# bake cache — AUTHOR-01 D-01 (content-addressed Opus cache)
+rituals/_bake-cache/*
+!rituals/_bake-cache/.gitignore

@@ -32,6 +32,12 @@
  *   continue — silently continue, just log a warning (good for CI)
  *   abort    — exit with code 2 on first fallback, cache preserved
  *
+ * --verify-audio          (AUTHOR-07 D-11) Pipe each rendered line's Opus
+ *                         through Groq Whisper and print a word-diff
+ *                         roll-up at the end. Default off. Warn-only
+ *                         (never fails the bake). Threshold controlled
+ *                         by VERIFY_AUDIO_DIFF_THRESHOLD env (default 2).
+ *
  * The passphrase is read interactively with echo disabled. It is NEVER
  * accepted on the command line (that would leak it to shell history and
  * `ps -ef` output).
@@ -39,10 +45,16 @@
 
 import * as fs from "node:fs";
 import * as crypto from "node:crypto";
+import { parseBuffer } from "music-metadata";
 import { parseDialogue } from "../src/lib/dialogue-format";
 import { buildFromDialogue } from "../src/lib/dialogue-to-mram";
 import type { MRAMDocument } from "../src/lib/mram-format";
-import { GEMINI_ROLE_VOICES, getGeminiVoiceForRole } from "../src/lib/tts-cloud";
+import {
+  GEMINI_ROLE_VOICES,
+  getGeminiVoiceForRole,
+  getGoogleVoiceForRole,
+} from "../src/lib/tts-cloud";
+import { validateOrFail } from "./lib/validate-or-fail";
 import {
   renderLineAudio,
   deleteCacheEntry,
@@ -54,6 +66,18 @@ import {
   validateVoiceCast,
   type VoiceCastFile,
 } from "../src/lib/voice-cast";
+import { hashLineText, isValidSpeakAs } from "../src/lib/styles";
+import {
+  type ResumeState,
+  readResumeState,
+  writeResumeStateAtomic,
+} from "./lib/resume-state";
+import {
+  computeMedianSecPerChar as computeMedianSecPerCharExtracted,
+  isDurationAnomaly,
+  wordDiff,
+  type DurationSample,
+} from "./lib/bake-math";
 
 // ============================================================
 // Encryption (Node crypto — binary layout matches Web Crypto
@@ -108,6 +132,194 @@ export function encryptMRAMNode(doc: MRAMDocument, passphrase: string): Buffer {
 }
 
 // ============================================================
+// Phase 3 bake-time gates (AUTHOR-04 / AUTHOR-05 / AUTHOR-06 / AUTHOR-07)
+// ============================================================
+//
+// Pre-render validator gate (AUTHOR-05 D-08) now lives in
+// scripts/lib/validate-or-fail.ts and is imported as validateOrFail.
+// The same shared function is used by the orchestrator (scripts/bake-all.ts)
+// so the two gates cannot silently drift (HI-01 in 03-REVIEW.md).
+
+/**
+ * Direct Google Cloud TTS REST call for the short-line bake path (AUTHOR-04 D-09).
+ * Bypasses /api/tts/google because there is no dev server during an offline
+ * bake; uses GOOGLE_CLOUD_TTS_API_KEY from .env (set in Phase 2 deployment).
+ *
+ * CRITICAL: sends only {text, voiceName, languageCode}. NO preamble, NO style,
+ * NO voice-cast scene — Pitfall 4 in RESEARCH.md §Common Pitfalls flags the
+ * voice-cast-scene-leaks-into-audio failure mode; the short-line engine must
+ * stay isolated from it.
+ *
+ * Returns native Opus-in-Ogg (audioEncoding: "OGG_OPUS") byte-compatible
+ * with Gemini+ffmpeg output (Assumption A3). No ffmpeg transcode for short-
+ * line audio.
+ */
+async function googleTtsBakeCall(
+  text: string,
+  voiceName: string,
+  languageCode: string = "en-US",
+): Promise<{ opusBytes: Buffer; durationMs: number }> {
+  const apiKey = process.env.GOOGLE_CLOUD_TTS_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "[AUTHOR-04] GOOGLE_CLOUD_TTS_API_KEY required for short-line bake route. " +
+        "Set it in .env, or set MIN_BAKE_LINE_CHARS=999 to disable the short-line " +
+        "route (will re-introduce the pre-Phase-3 hard-skip behavior).",
+    );
+  }
+  const res = await fetch(
+    `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        input: { text }, // text only; NO preamble, NO style (Pitfall 4)
+        voice: { languageCode, name: voiceName },
+        audioConfig: { audioEncoding: "OGG_OPUS" },
+      }),
+    },
+  );
+  if (!res.ok) {
+    const body = await res.text();
+    // T-03-05 mitigation: redact any `?key=…` that might leak into the
+    // error surface before throwing.
+    const redacted = body.replace(/[?&]key=[^&"'\s]*/g, "?key=REDACTED");
+    throw new Error(
+      `[AUTHOR-04] google tts ${res.status}: ${redacted.slice(0, 500)}`,
+    );
+  }
+  const json = (await res.json()) as { audioContent: string };
+  const opusBytes = Buffer.from(json.audioContent, "base64");
+  const meta = await parseBuffer(opusBytes, { mimeType: "audio/ogg" });
+  const durationMs = Math.round((meta.format.duration ?? 0) * 1000);
+  return { opusBytes, durationMs };
+}
+
+// ============================================================
+// AUTHOR-06 D-10: audio-duration anomaly detector
+// ============================================================
+//
+// Per-ritual rolling median sec-per-char; hard-fails on >3.0× or <0.3×
+// the median. Pitfall 6: skip check for the first 30 samples (median
+// is unstable below that). D-10 explicitly rejects auto-evict — the
+// failing cache entry stays, surfaced in the error message so the user
+// can rm it and investigate (don't mask recurring failures).
+//
+// Historical failure this catches (`gemini-tts-voice-cast-scene-leaks-into-
+// audio` skill): a Gemini TTS bake leaked the voice-cast preamble into
+// the rendered audio, producing ~30s of audio for a ~5s expected line.
+// >3× median triggers on exactly this pattern.
+interface AnomalyCheckState {
+  samples: DurationSample[];
+  medianSecPerChar: number | null;
+}
+
+function newAnomalyState(): AnomalyCheckState {
+  return { samples: [], medianSecPerChar: null };
+}
+
+// Thin wrapper over the extracted pure helper — keeps the local name stable
+// while delegating the ordering + median arithmetic to bake-math (unit-tested
+// separately in scripts/__tests__/bake-helpers.test.ts).
+function computeMedianSecPerChar(samples: DurationSample[]): number {
+  return computeMedianSecPerCharExtracted(samples);
+}
+
+function addAndCheckAnomaly(
+  state: AnomalyCheckState,
+  lineId: number,
+  durationMs: number,
+  charCount: number,
+): void {
+  state.samples.push({ durationMs, charCount });
+  // Pitfall 6: insufficient sample — median unstable below 30 data points.
+  if (state.samples.length < 30) return;
+  state.medianSecPerChar = computeMedianSecPerChar(state.samples);
+  const thisSample: DurationSample = { durationMs, charCount };
+  if (!isDurationAnomaly(thisSample, state.medianSecPerChar)) return;
+  const thisRatio = (durationMs / 1000) / Math.max(charCount, 1);
+  const r = thisRatio / state.medianSecPerChar;
+  // Error preserves the same structured-message shape (callers grep for
+  // the "[AUTHOR-06 D-10]" prefix + ratio=N× token). Strict > 3.0 / < 0.3
+  // comparisons match isDurationAnomaly's band semantics — boundary
+  // values pass (see bake-math.ts + bake-helpers.test.ts).
+  if (r > 3.0 || r < 0.3) {
+    throw new Error(
+      `[AUTHOR-06 D-10] duration anomaly on line ${lineId}: ` +
+        `durationMs=${durationMs}, charCount=${charCount}, ` +
+        `ritualMedianSecPerChar=${state.medianSecPerChar.toFixed(4)}, ` +
+        `ratio=${r.toFixed(2)}× (allowed band: [0.3×, 3×]). ` +
+        `Likely voice-cast scene leak (>3×) or cropped output (<0.3×). ` +
+        `Manually rm rituals/_bake-cache/{cacheKey}.opus for this line, ` +
+        `verify the dialogue text, and re-run.`,
+    );
+  }
+}
+
+// ============================================================
+// AUTHOR-07 D-11: optional --verify-audio STT round-trip
+// ============================================================
+//
+// Opt-in flag (default off). Pipes each rendered Opus through Groq
+// Whisper directly (bypassing /api/transcribe since the bake has no
+// dev server) and prints a word-diff roll-up at the end. Warn-only:
+// never hard-fails the bake — Whisper itself mis-transcribes
+// occasionally, so surfacing for review beats false-positive blocking.
+// Default threshold: "diff > 2 words" (env-overridable via
+// VERIFY_AUDIO_DIFF_THRESHOLD).
+const VERIFY_AUDIO_DIFF_THRESHOLD = Number(
+  process.env.VERIFY_AUDIO_DIFF_THRESHOLD ?? "2",
+);
+
+interface VerifyAudioEntry {
+  lineId: number;
+  role: string;
+  expected: string;
+  transcript: string;
+  wordDiffCount: number;
+}
+
+async function verifyAudioRoundTrip(
+  opusBytes: Buffer,
+  expectedText: string,
+): Promise<{ transcript: string; wordDiffCount: number }> {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "[AUTHOR-07] --verify-audio requires GROQ_API_KEY set in .env",
+    );
+  }
+  const form = new FormData();
+  // Copy into a fresh non-shared ArrayBuffer so the Uint8Array satisfies
+  // DOM's strict BlobPart typing (Node Buffer's ArrayBufferLike union
+  // includes SharedArrayBuffer which Blob rejects).
+  const opusCopy = new Uint8Array(opusBytes.byteLength);
+  opusCopy.set(opusBytes);
+  const opusBlob = new Blob([opusCopy], { type: "audio/ogg" });
+  form.append("file", opusBlob, "line.opus");
+  form.append("model", "whisper-large-v3");
+  form.append("response_format", "json");
+  const res = await fetch(
+    "https://api.groq.com/openai/v1/audio/transcriptions",
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: form,
+    },
+  );
+  if (!res.ok) {
+    throw new Error(
+      `[AUTHOR-07] groq whisper ${res.status}: ${(await res.text()).slice(0, 200)}`,
+    );
+  }
+  const { text: transcript } = (await res.json()) as { text: string };
+  // wordDiff is unit-tested in scripts/__tests__/bake-helpers.test.ts —
+  // regression coverage for the case-insensitive set-diff arithmetic.
+  const { missed, inserted } = wordDiff(expectedText, transcript);
+  return { transcript, wordDiffCount: missed.length + inserted.length };
+}
+
+// ============================================================
 // CLI
 // ============================================================
 
@@ -134,23 +346,42 @@ async function promptPassphrase(): Promise<string> {
 
   return new Promise((resolve, reject) => {
     let passphrase = "";
+    // ME-05: centralized cleanup so SIGINT/SIGTERM (external kill, laptop
+    // suspend, etc.) restore cooked-mode stdin before the default signal
+    // handling runs. Without this the user's shell is left in raw mode
+    // after the bake exits — input becomes uninterpretable.
+    const cleanup = () => {
+      try {
+        process.stdin.setRawMode(false);
+      } catch {
+        // best-effort: setRawMode can throw if stdin isn't a TTY at exit time
+      }
+      process.stdin.pause();
+      process.stdin.removeListener("data", onData);
+      process.removeListener("SIGINT", onSignal);
+      process.removeListener("SIGTERM", onSignal);
+    };
+    const onSignal = () => {
+      cleanup();
+      process.stderr.write("\n");
+      // 128 + signal number; SIGINT=2, SIGTERM=15 — use 130 for SIGINT
+      // parity with shells and accept a rough 143 for SIGTERM isn't worth
+      // the discrimination cost here (consistent exit is enough).
+      process.exit(130);
+    };
     const onData = (chunk: string) => {
       for (const ch of chunk) {
         const code = ch.charCodeAt(0);
         if (code === 13 || code === 10) {
           // Enter
-          process.stdin.setRawMode(false);
-          process.stdin.pause();
-          process.stdin.removeListener("data", onData);
+          cleanup();
           process.stderr.write("\n");
           resolve(passphrase);
           return;
         }
         if (code === 3) {
           // Ctrl-C
-          process.stdin.setRawMode(false);
-          process.stdin.pause();
-          process.stdin.removeListener("data", onData);
+          cleanup();
           process.stderr.write("\n");
           reject(new Error("Interrupted"));
           return;
@@ -165,6 +396,8 @@ async function promptPassphrase(): Promise<string> {
       }
     };
     process.stdin.on("data", onData);
+    process.on("SIGINT", onSignal);
+    process.on("SIGTERM", onSignal);
   });
 }
 
@@ -190,8 +423,49 @@ function parseFallbackMode(args: string[]): FallbackMode {
 async function main() {
   const rawArgs = process.argv.slice(2);
   const withAudio = rawArgs.includes("--with-audio");
+  // AUTHOR-07 D-11: opt-in STT round-trip verify flag (warn-only, default off).
+  const verifyAudio = rawArgs.includes("--verify-audio");
+
+  // AUTHOR-02 D-06: line-level resume state. When --resume-state-path +
+  // --ritual-slug are both set (typically by the bake-all.ts orchestrator,
+  // Plan 07), this script writes _RESUME.json atomically before AND after
+  // every rendered line. --skip-line-ids lets the orchestrator skip lines
+  // already completed in a prior interrupted run. When none of these are
+  // set, behavior is pre-D-06 (no resume side effects).
+  const argValue = (flag: string): string | undefined => {
+    const idx = rawArgs.indexOf(flag);
+    if (idx < 0 || idx + 1 >= rawArgs.length) return undefined;
+    const next = rawArgs[idx + 1];
+    if (!next || next.startsWith("--")) return undefined;
+    return next;
+  };
+  const resumeStatePath = argValue("--resume-state-path");
+  const ritualSlugArg = argValue("--ritual-slug");
+  const skipLineIdsArg = argValue("--skip-line-ids");
+  const skipLineIds = new Set(
+    (skipLineIdsArg ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
+
   const fallbackMode = parseFallbackMode(rawArgs);
-  const positional = rawArgs.filter((a) => !a.startsWith("--"));
+  // Filter positional args to exclude --flag tokens AND the value-consuming
+  // args that follow --resume-state-path / --ritual-slug / --skip-line-ids.
+  const valueConsumingFlags = new Set([
+    "--resume-state-path",
+    "--ritual-slug",
+    "--skip-line-ids",
+  ]);
+  const positional: string[] = [];
+  for (let i = 0; i < rawArgs.length; i++) {
+    const a = rawArgs[i]!;
+    if (a.startsWith("--")) {
+      if (valueConsumingFlags.has(a)) i++; // consume the value that follows
+      continue;
+    }
+    positional.push(a);
+  }
 
   if (positional.length !== 3) {
     console.error(
@@ -248,6 +522,13 @@ async function main() {
     console.error(`Error: cipher file not found: ${cipherPath}`);
     process.exit(1);
   }
+
+  // AUTHOR-05 D-08: run the cipher/plain parity validator BEFORE any API
+  // activity, passphrase prompt, or other expensive work. Any severity-error
+  // issue (including D-08 bake-band word-ratio outliers from Plan 04) exits
+  // non-zero. Prevents shipping an .mram with cipher/plain drift to invited
+  // Brothers (T-03-04 mitigation).
+  validateOrFail(plainPath, cipherPath);
 
   const passphrase = await promptPassphrase();
   if (!passphrase) {
@@ -388,7 +669,42 @@ async function main() {
   console.error(`  Roles:    ${Object.keys(doc.roles).join(", ")}`);
 
   if (withAudio) {
-    await bakeAudioIntoDoc(doc, fallbackMode, voiceCast);
+    // Build the speakAs-by-lineId map from the styles payload (if any).
+    // This enables bake-time prompt-vs-display separation for lines whose
+    // ritually-correct plain text is too short or too stochastic to bake
+    // reliably. The map stays local to the bake — never written to .mram.
+    const speakAsByLineId = new Map<number, string>();
+    if (stylesPayload) {
+      const speakAsByHash = new Map<string, string>();
+      for (const entry of stylesPayload.styles) {
+        if (entry.speakAs && isValidSpeakAs(entry.speakAs)) {
+          speakAsByHash.set(entry.lineHash, entry.speakAs);
+        } else if (entry.speakAs) {
+          console.error(
+            `Warning: invalid speakAs for lineHash ${entry.lineHash.slice(0, 12)}… (dropped)`,
+          );
+        }
+      }
+      if (speakAsByHash.size > 0) {
+        for (const line of doc.lines) {
+          if (!line.plain || !line.role) continue;
+          const hash = await hashLineText(line.plain);
+          const sa = speakAsByHash.get(hash);
+          if (sa) speakAsByLineId.set(line.id, sa);
+        }
+        console.error(
+          `  speakAs overrides: ${speakAsByLineId.size} line(s) will bake on instructional prompts`,
+        );
+      }
+    }
+    await bakeAudioIntoDoc(
+      doc,
+      fallbackMode,
+      voiceCast,
+      speakAsByLineId,
+      verifyAudio,
+      { resumeStatePath, ritualSlug: ritualSlugArg, skipLineIds },
+    );
   }
 
   console.error("Encrypting...");
@@ -416,11 +732,44 @@ async function main() {
  * at ~/.cache/masonic-mram-audio so re-runs and resumed runs after quota
  * hits don't re-burn API calls.
  */
+/**
+ * Line-level resume-state options (AUTHOR-02 D-06). All three fields are
+ * optional; when `resumeStatePath` is undefined the bake runs with no
+ * resume side effects (pre-D-06 behavior).
+ */
+interface ResumeOptions {
+  /** Path where _RESUME.json is written (e.g. rituals/_bake-cache/_RESUME.json). */
+  resumeStatePath?: string | undefined;
+  /** Ritual slug identifying this bake — guards against mixed-ritual resume. */
+  ritualSlug?: string | undefined;
+  /** Line IDs (strings) to skip entirely — already completed in a prior run. */
+  skipLineIds?: Set<string>;
+}
+
 async function bakeAudioIntoDoc(
   doc: MRAMDocument,
   fallbackMode: FallbackMode,
   voiceCast: VoiceCastFile | undefined,
+  speakAsByLineId: Map<number, string> = new Map(),
+  verifyAudio: boolean = false,
+  resumeOpts: ResumeOptions = {},
 ): Promise<void> {
+  const { resumeStatePath, ritualSlug, skipLineIds = new Set<string>() } =
+    resumeOpts;
+  // Resolve the text that gets sent to Gemini TTS for a given line.
+  // When a speakAs override is registered for this line, it takes the
+  // place of `line.plain` as the prompt text, the cache-key text, and
+  // the hard-skip / preamble threshold input. When no override is set,
+  // behavior is identical to the pre-speakAs path.
+  const bakeTextFor = (line: { id: number; plain: string }): string => {
+    const override = speakAsByLineId.get(line.id);
+    return (override ?? line.plain).trim();
+  };
+  // Lines with a speakAs override skip the voice-cast preamble: the
+  // instructional prompt is already explicit ("Say only X") and the
+  // additional role-card preamble tends to confuse Gemini into speaking
+  // the preamble content or ignoring the instruction.
+  const hasSpeakAs = (lineId: number) => speakAsByLineId.has(lineId);
   // Pool of API keys. Prefer GOOGLE_GEMINI_API_KEYS (comma-separated)
   // when set — the render loop rotates through keys on 429, effectively
   // multiplying the daily preview-model quota by pool size. Falls back
@@ -581,25 +930,26 @@ async function bakeAudioIntoDoc(
     );
   }
 
-  // Pre-bake cache scan. Classify every spoken line into one of three
-  // buckets: already-cached, too-short-to-bake, or needs-fresh-render.
-  // Gives the user immediate resume visibility and flags lines that'll
-  // be hard-skipped up front rather than burning retries on them.
+  // Pre-bake cache scan. AUTHOR-04 D-09: short lines (< MIN_BAKE_LINE_CHARS)
+  // are no longer hard-skipped — they route to Google Cloud TTS at bake time
+  // via googleTtsBakeCall(). Every shipped .mram now ships audio for every
+  // spoken line. Tune via MIN_BAKE_LINE_CHARS env var.
   let preCached = 0;
   let preToRender = 0;
-  const preSkipShort: { id: number; role: string; text: string }[] = [];
+  const preShortLineGoogle: { id: number; role: string; text: string }[] = [];
   for (const line of spokenLines) {
-    const cleanText = line.plain.trim();
-    if (cleanText.length < MIN_BAKE_LINE_CHARS) {
-      preSkipShort.push({ id: line.id, role: line.role, text: cleanText });
+    const bakeText = bakeTextFor(line);
+    if (bakeText.length < MIN_BAKE_LINE_CHARS) {
+      // AUTHOR-04 D-09: count into Google short-line route, not hard-skip.
+      preShortLineGoogle.push({ id: line.id, role: line.role, text: bakeText });
       continue;
     }
     const voice = getGeminiVoiceForRole(line.role);
     const preamble =
-      cleanText.length >= MIN_PREAMBLE_LINE_CHARS
+      !hasSpeakAs(line.id) && bakeText.length >= MIN_PREAMBLE_LINE_CHARS
         ? preambleByRole[line.role] ?? ""
         : "";
-    if (isLineCached(cleanText, line.style, voice, preamble)) {
+    if (isLineCached(bakeText, line.style, voice, preamble)) {
       preCached++;
     } else {
       preToRender++;
@@ -607,22 +957,22 @@ async function bakeAudioIntoDoc(
   }
   const preCachedPct = total > 0 ? Math.round((preCached / total) * 100) : 0;
   console.error(
-    `  Cache status: ${preCached}/${total} already cached (${preCachedPct}%), ${preToRender} to render fresh`,
+    `  Cache status: ${preCached}/${total} already cached (${preCachedPct}%), ${preToRender} to render fresh, ${preShortLineGoogle.length} short-line → Google TTS`,
   );
-  if (preSkipShort.length > 0) {
+  if (preShortLineGoogle.length > 0) {
     console.error(
-      `  Hard-skip (too short, <${MIN_BAKE_LINE_CHARS} chars): ${preSkipShort.length} line(s) — runtime TTS at rehearsal`,
+      `  Short-line route (D-09, <${MIN_BAKE_LINE_CHARS} chars, Google Cloud TTS): ${preShortLineGoogle.length} line(s)`,
     );
-    for (const s of preSkipShort.slice(0, 5)) {
+    for (const s of preShortLineGoogle.slice(0, 5)) {
       console.error(
         `    id=${s.id} ${s.role}: "${s.text}" (${s.text.length} chars)`,
       );
     }
-    if (preSkipShort.length > 5) {
-      console.error(`    … and ${preSkipShort.length - 5} more`);
+    if (preShortLineGoogle.length > 5) {
+      console.error(`    … and ${preShortLineGoogle.length - 5} more`);
     }
   }
-  if (preCached > 0 && preToRender === 0 && preSkipShort.length === 0) {
+  if (preCached > 0 && preToRender === 0 && preShortLineGoogle.length === 0) {
     console.error(
       `  Fully cached — this bake will re-emit the same audio with zero API calls.`,
     );
@@ -646,20 +996,69 @@ async function bakeAudioIntoDoc(
   // fallback line. A single decision covers the rest of the run.
   let fallbackResolved = false;
 
-  // Lines pre-flagged as too-short-to-bake (from the pre-scan). They
-  // skip the API entirely — no attempt, no retry, no wait. Counted
-  // as "regressed" in the final summary since the effect at playback
-  // time is identical: no embedded audio, runtime TTS handles them.
-  // Add them to regressedLines up front so the summary is accurate
-  // whether we hit any mid-bake regressions or not.
-  const tooShortIds = new Set(preSkipShort.map((s) => s.id));
-  for (const s of preSkipShort) {
-    regressedLines.push(s);
+  // AUTHOR-04 D-09: short lines (<MIN_BAKE_LINE_CHARS) were hard-skipped
+  // pre-Phase-3; now they route to Google Cloud TTS at bake time. Track
+  // which lineIds are short-routed so the main loop branches at the top
+  // of each iteration.
+  const shortLineIds = new Set(preShortLineGoogle.map((s) => s.id));
+  let shortLineRendered = 0;
+  let shortLineBytes = 0;
+
+  // AUTHOR-06 D-10: per-ritual rolling median sec-per-char + >3×/<0.3×
+  // anomaly check. Fed by both Gemini and Google short-line paths; first
+  // 30 samples skip the check (Pitfall 6).
+  const anomalyState = newAnomalyState();
+
+  // AUTHOR-07 D-11: per-line verify-audio entries (only populated when
+  // --verify-audio is set). Printed as a roll-up at the end of the bake.
+  const verifyEntries: VerifyAudioEntry[] = [];
+
+  // AUTHOR-02 D-06: line-level resume state. When resumeStatePath +
+  // ritualSlug are both set (typically the bake-all.ts orchestrator),
+  // the bake writes _RESUME.json atomically before AND after every
+  // rendered line. When unset, markLineInFlight / markLineCompleted
+  // short-circuit — pre-D-06 behavior.
+  const resumeActive = Boolean(resumeStatePath && ritualSlug);
+  let resumeState: ResumeState | null = null;
+  if (resumeActive && resumeStatePath && ritualSlug) {
+    const existing = readResumeState(resumeStatePath);
+    if (existing && existing.ritual === ritualSlug) {
+      resumeState = existing;
+    } else {
+      // No state, or state was for a different ritual → fresh start for
+      // THIS ritual. Plan 07's orchestrator is responsible for any
+      // cross-ritual mismatch refusal BEFORE spawning this process.
+      resumeState = {
+        ritual: ritualSlug,
+        completedLineIds: [],
+        inFlightLineIds: [],
+        startedAt: Date.now(),
+      };
+      writeResumeStateAtomic(resumeStatePath, resumeState);
+    }
   }
+  const markLineInFlight = (lineId: string): void => {
+    if (!resumeState || !resumeStatePath) return;
+    if (!resumeState.inFlightLineIds.includes(lineId)) {
+      resumeState.inFlightLineIds.push(lineId);
+      writeResumeStateAtomic(resumeStatePath, resumeState);
+    }
+  };
+  const markLineCompleted = (lineId: string): void => {
+    if (!resumeState || !resumeStatePath) return;
+    resumeState.inFlightLineIds = resumeState.inFlightLineIds.filter(
+      (id) => id !== lineId,
+    );
+    if (!resumeState.completedLineIds.includes(lineId)) {
+      resumeState.completedLineIds.push(lineId);
+    }
+    writeResumeStateAtomic(resumeStatePath, resumeState);
+  };
 
   for (const line of spokenLines) {
     const voice = getGeminiVoiceForRole(line.role);
-    const cleanText = line.plain.trim();
+    const cleanText = bakeTextFor(line);
+    const lineIdStr = String(line.id);
     let statusLabel = "";
     let thisLineModel: string | undefined;
     // Cache key for this line's render, captured from the onProgress
@@ -669,27 +1068,100 @@ async function bakeAudioIntoDoc(
     // leave a single degraded line cached that silently hits on re-run.
     let thisLineCacheKey: string | undefined;
 
-    // Hard-skip: line was flagged too-short at pre-scan time. Don't
-    // touch the API. Progress bar still updates so the percentage
-    // moves forward.
-    if (tooShortIds.has(line.id)) {
-      const done = spokenLines.indexOf(line) + 1;
-      const pct = Math.floor((done / total) * 100);
-      process.stderr.write(
-        `\r  [${done.toString().padStart(3)}/${total}] ${pct.toString().padStart(3)}% ` +
-          `${line.role.padEnd(10)} (${"skip-too-short".padEnd(30)}) ` +
-          `                `,
-      );
+    // AUTHOR-02 D-06: skip lines already completed in a prior run
+    // (orchestrator passes --skip-line-ids=<completedLineIds>). No
+    // render, no embed, no anomaly mutation, no state write — the
+    // prior run's bytes are still in the cache and the orchestrator
+    // is the source of truth for completedLineIds.
+    if (skipLineIds.has(lineIdStr)) {
+      continue;
+    }
+
+    // AUTHOR-04 D-09: short-line Google TTS branch. Short lines (< MIN_BAKE_LINE_CHARS)
+    // call Google Cloud TTS REST directly and embed the OGG_OPUS bytes the
+    // same way as the Gemini path. NO preamble, NO style directive, NO voice-
+    // cast scene in the call body (Pitfall 4 — voice-cast scene leak).
+    if (shortLineIds.has(line.id)) {
+      // AUTHOR-02 D-06: mark in-flight BEFORE the render. If the process
+      // crashes mid-render, the orchestrator sees lineId in
+      // inFlightLineIds (not completedLineIds) and retries this line.
+      markLineInFlight(lineIdStr);
+      try {
+        const googleVoice = getGoogleVoiceForRole(line.role);
+        const { opusBytes, durationMs } = await googleTtsBakeCall(
+          cleanText,
+          googleVoice.name,
+        );
+        // AUTHOR-06 D-10: feed the short-line duration into the same
+        // per-ritual rolling median as Gemini lines. Short lines will
+        // likely be in the first 30 samples (Pitfall 6 → skip), but they
+        // still help build the median for subsequent Gemini lines.
+        addAndCheckAnomaly(anomalyState, line.id, durationMs, cleanText.length);
+        // AUTHOR-07 D-11: optional STT round-trip (warn-only, same
+        // contract as Gemini path).
+        if (verifyAudio) {
+          try {
+            const { transcript, wordDiffCount } = await verifyAudioRoundTrip(
+              opusBytes,
+              cleanText,
+            );
+            verifyEntries.push({
+              lineId: line.id,
+              role: line.role,
+              expected: cleanText,
+              transcript,
+              wordDiffCount,
+            });
+          } catch (err) {
+            console.error(
+              `\n[AUTHOR-07] verify-audio failed on line ${line.id}: ${(err as Error).message}`,
+            );
+          }
+        }
+        // Embed: same mechanism as Gemini path (line.audio = base64 Opus).
+        line.audio = opusBytes.toString("base64");
+        shortLineRendered++;
+        shortLineBytes += opusBytes.length;
+        totalBytes += opusBytes.length;
+        // AUTHOR-02 D-06: move lineId from inFlightLineIds to
+        // completedLineIds; atomic write so a crash after this line
+        // leaves a consistent resume target.
+        markLineCompleted(lineIdStr);
+        const done = spokenLines.indexOf(line) + 1;
+        const pct = Math.floor((done / total) * 100);
+        process.stderr.write(
+          `\r  [${done.toString().padStart(3)}/${total}] ${pct.toString().padStart(3)}% ` +
+            `${line.role.padEnd(10)} (${"google-short".padEnd(30)}) ` +
+            `${opusBytes.length.toString().padStart(6)}B         `,
+        );
+      } catch (err) {
+        console.error(
+          `\n[AUTHOR-04] short-line bake failed for line ${line.id} (${line.role}): ${(err as Error).message}`,
+        );
+        // Short-line failure: bake CAN continue — this line stays un-embedded,
+        // runtime TTS handles at rehearsal. Flag for summary so it's visible.
+        // NOTE: don't call markLineCompleted — lineId stays in
+        // inFlightLineIds so the orchestrator retries it next time.
+        regressedLines.push({ id: line.id, role: line.role, text: cleanText });
+      }
       continue;
     }
 
     // Skip the preamble for utterances too short to carry character
     // direction — the preamble:content ratio confuses Gemini's
     // classifier and causes empty-audio-stream regressions.
+    // Also skip when speakAs is set: the instructional prompt is already
+    // explicit, and layering the role preamble on top tends to make
+    // Gemini speak the preamble instead of following the instruction.
     const preamble =
-      cleanText.length >= MIN_PREAMBLE_LINE_CHARS
+      !hasSpeakAs(line.id) && cleanText.length >= MIN_PREAMBLE_LINE_CHARS
         ? preambleByRole[line.role] ?? ""
         : "";
+
+    // AUTHOR-02 D-06: mark in-flight BEFORE the render. A crash during
+    // renderLineAudio leaves lineId in inFlightLineIds (not
+    // completedLineIds); the orchestrator re-dispatches it on resume.
+    markLineInFlight(lineIdStr);
 
     try {
       const opus = await renderLineAudio(
@@ -731,6 +1203,48 @@ async function bakeAudioIntoDoc(
       );
 
       line.audio = opus.toString("base64");
+
+      // AUTHOR-06 D-10: duration-anomaly check on the rendered Opus.
+      // parseBuffer decodes the Ogg container header for the duration
+      // without transcoding. First 30 samples per ritual skip the check
+      // (Pitfall 6 — median unstable below that threshold).
+      const geminiMeta = await parseBuffer(opus, { mimeType: "audio/ogg" });
+      const geminiDurationMs = Math.round(
+        (geminiMeta.format.duration ?? 0) * 1000,
+      );
+      addAndCheckAnomaly(
+        anomalyState,
+        line.id,
+        geminiDurationMs,
+        cleanText.length,
+      );
+
+      // AUTHOR-07 D-11: optional STT round-trip. Warn-only: errors and
+      // mismatches never hard-fail the bake; roll-up printed at the end.
+      if (verifyAudio) {
+        try {
+          const { transcript, wordDiffCount } = await verifyAudioRoundTrip(
+            opus,
+            cleanText,
+          );
+          verifyEntries.push({
+            lineId: line.id,
+            role: line.role,
+            expected: cleanText,
+            transcript,
+            wordDiffCount,
+          });
+        } catch (err) {
+          console.error(
+            `\n[AUTHOR-07] verify-audio failed on line ${line.id}: ${(err as Error).message}`,
+          );
+        }
+      }
+
+      // AUTHOR-02 D-06: line fully rendered + embedded + verified — move
+      // lineId from inFlightLineIds to completedLineIds. Atomic write so
+      // a crash after this point leaves a recoverable resume target.
+      markLineCompleted(lineIdStr);
 
       // Quality-drop detection: this line was served by something other
       // than the preferred model. If we haven't already resolved the
@@ -895,6 +1409,11 @@ async function bakeAudioIntoDoc(
     }
   }
   console.error(`  Cache hits:        ${cacheHits}`);
+  if (shortLineRendered > 0) {
+    console.error(
+      `  Google TTS short-line (D-09):  ${shortLineRendered} line(s), ${(shortLineBytes / 1024).toFixed(1)} KB`,
+    );
+  }
   if (regressedLines.length > 0) {
     console.error(
       `  Skipped (text-token regression, will hit runtime TTS): ${regressedLines.length} line(s)`,
@@ -915,6 +1434,38 @@ async function bakeAudioIntoDoc(
     .map(([role, voice]) => `${role}=${voice}`)
     .join(", ")}`);
   console.error("");
+
+  // AUTHOR-07 D-11: --verify-audio roll-up. Warn-only — prints even when
+  // every line matches, so Shannon sees the flag's doing its job; flags
+  // the worst 3 diffs when any exceed the threshold (N=2 by default).
+  if (verifyAudio && verifyEntries.length > 0) {
+    const flagged = verifyEntries.filter(
+      (e) => e.wordDiffCount > VERIFY_AUDIO_DIFF_THRESHOLD,
+    );
+    console.error(`[AUTHOR-07] --verify-audio summary:`);
+    console.error(`  Lines checked: ${verifyEntries.length}`);
+    console.error(
+      `  Lines with word-diff > ${VERIFY_AUDIO_DIFF_THRESHOLD}: ${flagged.length}`,
+    );
+    if (flagged.length > 0) {
+      const worst = [...flagged]
+        .sort((a, b) => b.wordDiffCount - a.wordDiffCount)
+        .slice(0, 3);
+      console.error(`  Worst 3 (warn-only; bake still proceeded):`);
+      for (const e of worst) {
+        console.error(
+          `    line ${e.lineId} (${e.role}) diff=${e.wordDiffCount}`,
+        );
+        console.error(
+          `      expected: "${e.expected.slice(0, 80)}${e.expected.length > 80 ? "…" : ""}"`,
+        );
+        console.error(
+          `      got:      "${e.transcript.slice(0, 80)}${e.transcript.length > 80 ? "…" : ""}"`,
+        );
+      }
+    }
+    console.error("");
+  }
 }
 
 /**
@@ -939,15 +1490,34 @@ async function promptFallbackChoice(): Promise<"continue" | "abort"> {
   process.stdin.setEncoding("utf-8");
 
   return new Promise((resolve) => {
-    const onData = (chunk: string) => {
-      const ch = chunk[0] ?? "";
-      process.stdin.setRawMode(false);
+    // ME-05: same signal-safe cleanup as promptPassphrase — restore
+    // cooked-mode stdin on SIGINT/SIGTERM so the user's shell doesn't
+    // get stuck in raw mode if the bake is killed mid-prompt.
+    const cleanup = () => {
+      try {
+        process.stdin.setRawMode(false);
+      } catch {
+        // best-effort
+      }
       process.stdin.pause();
       process.stdin.removeListener("data", onData);
+      process.removeListener("SIGINT", onSignal);
+      process.removeListener("SIGTERM", onSignal);
+    };
+    const onSignal = () => {
+      cleanup();
+      process.stderr.write("\n");
+      process.exit(130);
+    };
+    const onData = (chunk: string) => {
+      const ch = chunk[0] ?? "";
+      cleanup();
       process.stderr.write(ch + "\n");
       resolve(ch === "y" || ch === "Y" ? "continue" : "abort");
     };
     process.stdin.on("data", onData);
+    process.on("SIGINT", onSignal);
+    process.on("SIGTERM", onSignal);
   });
 }
 
