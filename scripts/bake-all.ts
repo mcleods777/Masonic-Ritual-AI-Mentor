@@ -392,10 +392,15 @@ async function main(): Promise<void> {
     ? readResumeState(RESUME_FILE)
     : null;
 
-  // Collect both successes and failures for a final report (Pitfall 7).
-  // Current bake loop is sequential (per-ritual); when ritual-level
-  // parallelism is added, swap this for Promise.allSettled over
-  // `limit(() => bakeRitual(...))` and iterate BOTH sides.
+  // Halt-on-first-error (03-07-SUMMARY.md §Failure): record each
+  // ritual's outcome as we go, but the loop below `break`s on the
+  // first failure — so `results` will contain at most one failure
+  // plus any successes that preceded it. The final summary below
+  // reports that failure plus the "not attempted" skipped-after
+  // count explicitly, so the user sees scope ("N of M rituals").
+  // When ritual-level parallelism lands, switch to Promise.allSettled
+  // over `limit(() => bakeRitual(...))` and iterate BOTH sides — at
+  // that point the halt-on-first semantics no longer apply.
   const results: { slug: string; ok: boolean; error?: string }[] = [];
 
   for (const slug of slugs) {
@@ -445,12 +450,22 @@ async function main(): Promise<void> {
     }
   }
 
-  // Surface BOTH fulfilled and rejected per Pitfall 7.
+  // Halt-on-first-error summary: report the failing ritual AND the
+  // "not attempted" skipped-after scope so the user sees how many
+  // rituals the orchestrator stopped short of (vs. silently showing
+  // "1 failed" when 7-of-8 would have failed had we kept going).
   const failures = results.filter((r) => !r.ok);
   if (failures.length > 0) {
-    console.error(`\n${failures.length} ritual(s) failed:`);
+    const remainingCount = slugs.length - results.length;
+    const skippedSlugs = slugs.slice(results.length);
+    console.error(
+      `\n${failures.length} ritual(s) failed, ${remainingCount} not attempted (halt-on-first):`,
+    );
     for (const f of failures) {
       console.error(`  ${f.slug}: ${f.error ?? "unknown"}`);
+    }
+    if (remainingCount > 0) {
+      console.error(`  Not attempted: ${skippedSlugs.join(", ")}`);
     }
     process.exit(1);
   }
