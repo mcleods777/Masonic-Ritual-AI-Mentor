@@ -10,7 +10,8 @@
     "test": "vitest",
     "test:run": "vitest run",
     "bake-all": "npx tsx scripts/bake-all.ts",
-    "preview-bake": "npx tsx scripts/preview-bake.ts"
+    "preview-bake": "npx tsx scripts/preview-bake.ts",
+    "verify-content": "npx tsx scripts/verify-content.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.71",

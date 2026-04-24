@@ -170,8 +170,8 @@ describe("verify-content release gate (CONTENT-07)", () => {
 
     const { code, stdout } = await runGate(ritualsDir);
     expect(code).toBe(0);
-    expect(stdout).toMatch(/ritual-a.*PASS|PASS.*ritual-a/s);
-    expect(stdout).toMatch(/ritual-b.*PASS|PASS.*ritual-b/s);
+    expect(stdout).toMatch(/ritual-a.*PASS|PASS.*ritual-a/);
+    expect(stdout).toMatch(/ritual-b.*PASS|PASS.*ritual-b/);
   }, 30_000);
 
   // ============================================================
@@ -185,7 +185,7 @@ describe("verify-content release gate (CONTENT-07)", () => {
 
     const { code, stdout } = await runGate(ritualsDir);
     expect(code).toBe(1);
-    expect(stdout).toMatch(/ritual-a.*FAIL|FAIL.*ritual-a/s);
+    expect(stdout).toMatch(/ritual-a.*FAIL|FAIL.*ritual-a/);
     expect(stdout).toMatch(/validator/i);
   }, 30_000);
 
@@ -200,7 +200,7 @@ describe("verify-content release gate (CONTENT-07)", () => {
 
     const { code, stdout } = await runGate(ritualsDir);
     expect(code).toBe(1);
-    expect(stdout).toMatch(/ritual-b.*FAIL|FAIL.*ritual-b/s);
+    expect(stdout).toMatch(/ritual-b.*FAIL|FAIL.*ritual-b/);
     expect(stdout).toMatch(/audio-coverage|audio/i);
   }, 30_000);
 
@@ -213,7 +213,7 @@ describe("verify-content release gate (CONTENT-07)", () => {
 
     const { code, stdout } = await runGate(ritualsDir);
     expect(code).toBe(1);
-    expect(stdout).toMatch(/ritual-c.*FAIL|FAIL.*ritual-c/s);
+    expect(stdout).toMatch(/ritual-c.*FAIL|FAIL.*ritual-c/);
     expect(stdout).toMatch(/missing-dialogue-pair|missing/i);
   }, 30_000);
 
@@ -236,6 +236,6 @@ describe("verify-content release gate (CONTENT-07)", () => {
     expect(stdout).toMatch(/ritual-val-fail/);
     expect(stdout).toMatch(/ritual-audio-fail/);
     // The pass-row must be PASS; fails must be FAIL.
-    expect(stdout).toMatch(/ritual-pass.*PASS|PASS.*ritual-pass/s);
+    expect(stdout).toMatch(/ritual-pass.*PASS|PASS.*ritual-pass/);
   }, 40_000);
 });

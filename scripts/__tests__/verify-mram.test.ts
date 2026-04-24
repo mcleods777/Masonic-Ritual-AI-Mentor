@@ -195,8 +195,11 @@ describe("verify-mram --check-audio-coverage (CONTENT-06)", () => {
   // ============================================================
   it("exits 1 when a line's audio decodes but lacks OGG magic", async () => {
     const doc = buildGoodDoc(2);
-    // "AAAA" base64 decodes to 3 bytes of zeros — definitely not OggS.
-    doc.lines[0]!.audio = "AAAAAAAAAAAAAAAA"; // decodes to 12 zero bytes
+    // 1024 bytes of zeros, base64-encoded. Above the 500-byte MIN floor
+    // so the byte-len gate passes → the OGG-magic gate is what should
+    // fire (first 4 bytes are 0x00 0x00 0x00 0x00, not "OggS").
+    const zeros = Buffer.alloc(1024, 0);
+    doc.lines[0]!.audio = zeros.toString("base64");
     const p = path.join(tmpDir, "bad-magic.mram");
     await encryptToPath(doc, p);
 
