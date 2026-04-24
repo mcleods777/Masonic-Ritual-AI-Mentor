@@ -266,7 +266,10 @@ export function buildMramSpawnArgs(
   const args: string[] = [
     "tsx",
     "scripts/build-mram-from-dialogue.ts",
-    slug,
+    `rituals/${slug}-dialogue.md`,
+    `rituals/${slug}-dialogue-cipher.md`,
+    `rituals/${slug}.mram`,
+    "--with-audio",
     "--resume-state-path",
     resumeFilePath,
     "--ritual-slug",

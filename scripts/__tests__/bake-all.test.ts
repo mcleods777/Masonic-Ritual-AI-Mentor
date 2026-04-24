@@ -276,6 +276,19 @@ describe("bake-all buildMramSpawnArgs (AUTHOR-02 D-06)", () => {
     expect(args).not.toContain("--verify-audio");
   });
 
+  it("emits the 3 positional paths build-mram-from-dialogue.ts requires", () => {
+    const args = buildMramSpawnArgs("ea-opening", { verifyAudio: false }, []);
+    // build-mram-from-dialogue.ts: Usage: <plain.md> <cipher.md> <output.mram>
+    expect(args).toContain("rituals/ea-opening-dialogue.md");
+    expect(args).toContain("rituals/ea-opening-dialogue-cipher.md");
+    expect(args).toContain("rituals/ea-opening.mram");
+  });
+
+  it("emits --with-audio so the baker renders Opus (not structure-only)", () => {
+    const args = buildMramSpawnArgs("ea-opening", { verifyAudio: false }, []);
+    expect(args).toContain("--with-audio");
+  });
+
   it("emits --skip-line-ids with comma-joined IDs when skip list is non-empty", () => {
     const args = buildMramSpawnArgs(
       "ea-opening",
