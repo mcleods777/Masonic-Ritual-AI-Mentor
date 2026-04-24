@@ -65,12 +65,17 @@ const usage = [
   "                      Passes completedLineIds to build-mram via --skip-line-ids.",
   "  --parallel <N>      Max concurrent renders (default 4; clamped [1, 16]).",
   "  --verify-audio      Forward to bake script; Groq Whisper word-diff warn-only.",
+  "  --on-fallback=MODE  Forward to bake script. MODE: ask|continue|abort|wait.",
+  "                      wait = sleep until midnight PT on all-models-429, auto-resume.",
+  "                      Best for overnight bakes when daily quota is close.",
   "  --help              Print this usage and exit 1.",
 ].join("\n");
 
 // ============================================================
 // Flag parsing
 // ============================================================
+export type OnFallbackMode = "ask" | "continue" | "abort" | "wait";
+
 export interface Flags {
   /** ref value — set when --since was given (with or without arg). */
   since?: string;
@@ -81,6 +86,8 @@ export interface Flags {
   /** Raw; use clampParallel() before passing to pLimit. */
   parallel: number;
   verifyAudio: boolean;
+  /** Forwarded to build-mram as --on-fallback=<mode> when set. */
+  onFallback?: OnFallbackMode;
 }
 
 export function parseFlags(argv: string[]): Flags {
@@ -121,6 +128,25 @@ export function parseFlags(argv: string[]): Flags {
       i++;
     } else if (a === "--verify-audio") {
       flags.verifyAudio = true;
+    } else if (a === "--on-fallback" || a.startsWith("--on-fallback=")) {
+      // Support both --on-fallback=wait and --on-fallback wait
+      let mode: string | undefined;
+      if (a.startsWith("--on-fallback=")) {
+        mode = a.slice("--on-fallback=".length);
+      } else {
+        const next = rest[i + 1];
+        if (!next || next.startsWith("--")) {
+          console.error(`--on-fallback requires a mode arg\n${usage}`);
+          process.exit(1);
+        }
+        mode = next;
+        i++;
+      }
+      if (mode !== "ask" && mode !== "continue" && mode !== "abort" && mode !== "wait") {
+        console.error(`--on-fallback mode must be one of: ask, continue, abort, wait (got: ${mode})\n${usage}`);
+        process.exit(1);
+      }
+      flags.onFallback = mode;
     } else {
       console.error(`Unknown flag: ${a}\n${usage}`);
       process.exit(1);
@@ -259,7 +285,7 @@ export function clearResumeStateFile(): void {
 // ============================================================
 export function buildMramSpawnArgs(
   slug: string,
-  flags: { verifyAudio: boolean },
+  flags: { verifyAudio: boolean; onFallback?: OnFallbackMode },
   skipLineIds: string[],
   resumeFilePath: string = RESUME_FILE,
 ): string[] {
@@ -279,6 +305,7 @@ export function buildMramSpawnArgs(
     args.push("--skip-line-ids", skipLineIds.join(","));
   }
   if (flags.verifyAudio) args.push("--verify-audio");
+  if (flags.onFallback) args.push(`--on-fallback=${flags.onFallback}`);
   return args;
 }
 

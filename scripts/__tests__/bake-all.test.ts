@@ -289,6 +289,20 @@ describe("bake-all buildMramSpawnArgs (AUTHOR-02 D-06)", () => {
     expect(args).toContain("--with-audio");
   });
 
+  it("forwards --on-fallback=wait when set in flags", () => {
+    const args = buildMramSpawnArgs(
+      "ea-opening",
+      { verifyAudio: false, onFallback: "wait" },
+      [],
+    );
+    expect(args).toContain("--on-fallback=wait");
+  });
+
+  it("omits --on-fallback when not set", () => {
+    const args = buildMramSpawnArgs("ea-opening", { verifyAudio: false }, []);
+    expect(args.filter((a) => a.startsWith("--on-fallback")).length).toBe(0);
+  });
+
   it("emits --skip-line-ids with comma-joined IDs when skip list is non-empty", () => {
     const args = buildMramSpawnArgs(
       "ea-opening",
