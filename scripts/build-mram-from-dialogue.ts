@@ -1245,12 +1245,30 @@ async function bakeAudioIntoDoc(
         (geminiMeta.format.duration ?? 0) * 1000,
       );
       if (!hasSpeakAs(line.id)) {
-        addAndCheckAnomaly(
-          anomalyState,
-          line.id,
-          geminiDurationMs,
-          cleanText.length,
-        );
+        try {
+          addAndCheckAnomaly(
+            anomalyState,
+            line.id,
+            geminiDurationMs,
+            cleanText.length,
+          );
+        } catch (anomalyErr) {
+          // Cache cleanup on anomaly hard-fail. renderLineAudio writes
+          // the audio to cache before this check runs, so a D-10 fail
+          // leaves the bad bytes behind — `--resume` would cache-hit
+          // and infinite-loop on the same defect. Delete the entry
+          // here so the next attempt re-renders fresh against Gemini.
+          if (thisLineCacheKey) {
+            const removed = deleteCacheEntry(thisLineCacheKey);
+            if (removed) {
+              process.stderr.write("\r" + " ".repeat(80) + "\r");
+              console.error(
+                `   Auto-removed cached defect for line ${line.id} (${thisLineCacheKey.slice(0, 12)}…) — resume will re-render.`,
+              );
+            }
+          }
+          throw anomalyErr;
+        }
       }
 
       // AUTHOR-07 D-11: optional STT round-trip. Warn-only: errors and
