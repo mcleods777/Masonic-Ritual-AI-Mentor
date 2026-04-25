@@ -1234,16 +1234,24 @@ async function bakeAudioIntoDoc(
       // parseBuffer decodes the Ogg container header for the duration
       // without transcoding. First 30 samples per ritual skip the check
       // (Pitfall 6 — median unstable below that threshold).
+      // Skip the check entirely for lines with a speakAs override: the
+      // prompt is instructional ("Say only X: <target>"), so cleanText
+      // length doesn't correspond to spoken-output length and the ratio
+      // calculation produces false positives. The user has taken
+      // explicit responsibility for these lines via speakAs; rely on
+      // preview-bake scrubbing for quality verification instead.
       const geminiMeta = await parseBuffer(opus, { mimeType: "audio/ogg" });
       const geminiDurationMs = Math.round(
         (geminiMeta.format.duration ?? 0) * 1000,
       );
-      addAndCheckAnomaly(
-        anomalyState,
-        line.id,
-        geminiDurationMs,
-        cleanText.length,
-      );
+      if (!hasSpeakAs(line.id)) {
+        addAndCheckAnomaly(
+          anomalyState,
+          line.id,
+          geminiDurationMs,
+          cleanText.length,
+        );
+      }
 
       // AUTHOR-07 D-11: optional STT round-trip. Warn-only: errors and
       // mismatches never hard-fail the bake; roll-up printed at the end.
