@@ -4,6 +4,7 @@ import "./globals.css";
 import Navigation from "@/components/Navigation";
 import PilotBanner from "@/components/PilotBanner";
 import DegradedModeBanner from "@/components/DegradedModeBanner";
+import HeartbeatClient from "@/components/HeartbeatClient";
 
 const cinzel = Cinzel({
   subsets: ["latin"],
@@ -44,6 +45,7 @@ export default function RootLayout({
       <body className={`antialiased min-h-screen ${cinzel.variable} ${lato.variable}`}>
         <PilotBanner />
         <DegradedModeBanner />
+        <HeartbeatClient />
         <Navigation />
         <main className="pt-4 md:pt-20 pb-20 md:pb-4 px-4 max-w-5xl mx-auto">
           {children}
