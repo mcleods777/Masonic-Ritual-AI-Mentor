@@ -4,11 +4,18 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { SESSION_COOKIE_NAME } from "@/lib/auth";
+import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/auth";
+import { finalizeSession } from "@/lib/login-tracking";
 
 export const runtime = "nodejs";
 
-function clearCookieAndRedirect(req: NextRequest) {
+async function clearCookieAndRedirect(req: NextRequest) {
+  const cookie = req.cookies.get(SESSION_COOKIE_NAME)?.value;
+  const session = await verifySessionToken(cookie);
+  if (session) {
+    await finalizeSession(session.email);
+  }
+
   const res = NextResponse.redirect(new URL("/signin?signed-out=1", req.url));
   res.cookies.set(SESSION_COOKIE_NAME, "", {
     httpOnly: true,
