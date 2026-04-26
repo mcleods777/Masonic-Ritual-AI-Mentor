@@ -1,13 +1,14 @@
 #!/usr/bin/env npx tsx
 /**
- * preview-bake.ts — localhost-only cache-scrubber server (AUTHOR-08).
+ * preview-bake.ts — localhost-only ritual-scrubber server (AUTHOR-08).
  *
- * Read-only browser UI over rituals/_bake-cache/. Lists rituals → lines →
- * streams the cached .opus for a selected line. Dev-only; bound to
- * 127.0.0.1 and refuses to start on any non-loopback interface.
+ * Read-only browser UI for reviewing baked .mram files. Decrypts each
+ * ritual on demand (using MRAM_PASSPHRASE) and shows role + dialogue
+ * text + audio together, organized per-ritual. Also keeps the
+ * /a/{cacheKey}.opus route for backwards-compat hash-based playback.
  *
  * Usage:
- *   npx tsx scripts/preview-bake.ts
+ *   MRAM_PASSPHRASE='...' npx tsx scripts/preview-bake.ts
  *   PREVIEW_BAKE_PORT=9999 npx tsx scripts/preview-bake.ts
  *
  * CRITICAL invariants (T-03-01, T-03-02, T-03-03):
@@ -18,19 +19,21 @@
  *      MUST start with path.resolve(cacheDir) + path.sep (containment
  *      assertion — T-03-03 layer 2). Two independent gates so a future
  *      regex-relaxation OR a symlink planted inside the cache dir does
- *      NOT re-enable traversal. Prevents path-traversal via
- *      ../../../etc/passwd.opus AND via `cache/innocuous-symlink.opus`
- *      that resolves outside the cache dir.
- *   4. No Gemini/Google/Groq API key loaded — server is read-only (D-14).
+ *      NOT re-enable traversal.
+ *   4. /api/ritual/{slug} and /api/ritual/{slug}/line/{lineId}.opus —
+ *      slug and lineId are validated against strict regexes before any
+ *      filesystem access (T-03-03 layer 1 equivalent for the new routes).
+ *   5. No Gemini/Google/Groq API key loaded — server is read-only (D-14).
  *
  * Related: src/lib/dev-guard.ts (D-15 single source of truth),
- * scripts/render-gemini-audio.ts (CACHE_DIR — where the .opus files live).
+ * src/lib/mram-format.ts (decryptMRAM — the .mram → MRAMDocument boundary).
  */
 
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { assertDevOnly } from "../src/lib/dev-guard";
+import { decryptMRAM, type MRAMDocument } from "../src/lib/mram-format";
 
 // Module-load guard: fail fast in production (T-03-02).
 assertDevOnly();
@@ -38,15 +41,10 @@ assertDevOnly();
 const BIND_HOST = "127.0.0.1";
 const BIND_PORT = Number(process.env.PREVIEW_BAKE_PORT ?? "8883");
 const BAKE_CACHE_DIR = path.resolve("rituals/_bake-cache");
+const RITUALS_DIR = path.resolve("rituals");
 
 /**
  * Refuse anything but loopback (T-03-01). Exported for tests.
- * Accepts: "127.0.0.1", "::1". Everything else throws.
- *
- * A non-loopback bind (0.0.0.0, a LAN IP, ::) would expose unreleased
- * ritual content (cached Opus files of private lodge ritual) to any
- * device on the LAN. This guard runs before server.listen() so no
- * bind attempt reaches the OS on a mis-configured host.
  */
 export function ensureLoopback(host: string): void {
   if (host !== "127.0.0.1" && host !== "::1") {
@@ -59,30 +57,78 @@ export function ensureLoopback(host: string): void {
   }
 }
 
-/**
- * T-03-03 layer 1 — regex gate. Exported so tests can monkey-patch or
- * sanity-assert the regex in the defense-in-depth containment test.
- * A cacheKey is exactly 64 lowercase hex chars (sha256 hex digest).
- */
+/** T-03-03 layer 1 — regex gate for /a/{cacheKey}.opus. */
 export const CACHE_KEY_REGEX = /^[0-9a-f]{64}$/;
 
+/** Slug regex — alphanumeric + hyphens, matches files like ea-opening. */
+export const RITUAL_SLUG_REGEX = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+/** Line ID regex — non-negative integer up to 10000 lines per ritual. */
+export const LINE_ID_REGEX = /^[0-9]{1,5}$/;
+
+// ============================================================
+// In-memory ritual cache (decrypt-on-demand, cache result)
+// ============================================================
+
+interface RitualCacheEntry {
+  doc: MRAMDocument;
+  decryptedAt: number;
+  fileSize: number;
+}
+
+const ritualCache = new Map<string, RitualCacheEntry>();
+
 /**
- * Handle GET /a/{cacheKey}.opus.
- *
- * - Returns 404 when URL doesn't match /^\/a\/([^/]+)\.opus$/
- *   (e.g. /a/foo/bar.opus has an embedded slash — defence against
- *   path-traversal URL shapes).
- * - Returns 400 on invalid cacheKey (regex-gate failure — T-03-03 layer 1).
- * - Returns 400 on resolved-path-outside-cacheDir (containment failure —
- *   T-03-03 layer 2, defense-in-depth in case the regex is ever relaxed
- *   OR a symlink inside the cache dir points outside).
- * - Returns 404 on missing file.
- * - Returns 206 Partial Content + Content-Range on Range header.
- * - Returns 200 full body + Accept-Ranges when no Range header.
- * - Returns 416 on malformed Range or out-of-bounds.
- *
- * MIME is `audio/ogg; codecs=opus` per RFC 7845 §9 — matches what Chromium
- * expects for <audio> playback of Opus-in-Ogg.
+ * Decrypt a .mram file and cache the result. Subsequent calls for the
+ * same slug return the cached document unless the file mtime/size
+ * changed since the cache was populated.
+ */
+export async function loadRitual(
+  slug: string,
+  passphrase: string,
+): Promise<MRAMDocument> {
+  if (!RITUAL_SLUG_REGEX.test(slug)) {
+    throw new Error(`Invalid ritual slug: ${slug}`);
+  }
+  const mramPath = path.join(RITUALS_DIR, `${slug}.mram`);
+  if (!fs.existsSync(mramPath)) {
+    throw new Error(`Ritual not found: ${slug}.mram`);
+  }
+  const stat = fs.statSync(mramPath);
+  const cached = ritualCache.get(slug);
+  if (cached && cached.fileSize === stat.size) {
+    return cached.doc;
+  }
+  const buf = fs.readFileSync(mramPath);
+  const doc = await decryptMRAM(
+    buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer,
+    passphrase,
+  );
+  ritualCache.set(slug, { doc, decryptedAt: Date.now(), fileSize: stat.size });
+  return doc;
+}
+
+/**
+ * List all .mram files in rituals/. Returns slugs (sans extension).
+ */
+export function listRituals(): string[] {
+  if (!fs.existsSync(RITUALS_DIR)) return [];
+  return fs
+    .readdirSync(RITUALS_DIR)
+    .filter((f) => f.endsWith(".mram") && !f.includes(".backup-"))
+    .map((f) => f.replace(/\.mram$/, ""))
+    .filter((slug) => RITUAL_SLUG_REGEX.test(slug))
+    .sort();
+}
+
+// ============================================================
+// /a/{cacheKey}.opus — backwards-compat hash-based playback
+// ============================================================
+
+/**
+ * Handle GET /a/{cacheKey}.opus — unchanged from prior versions.
+ * Three-layer T-03-03 containment: regex gate, path.resolve startsWith,
+ * fs.realpathSync containment.
  */
 export function handleOpusRequest(
   req: http.IncomingMessage,
@@ -90,8 +136,6 @@ export function handleOpusRequest(
   cacheDir: string,
 ): void {
   const url = new URL(req.url ?? "/", `http://${BIND_HOST}:${BIND_PORT}`);
-  // Extract cacheKey from path: /a/{64-hex}.opus. The [^/]+ disallows
-  // further slashes so /a/../secret.opus and /a/foo/bar.opus don't match.
   const match = /^\/a\/([^/]+)\.opus$/.exec(url.pathname);
   if (!match) {
     res.writeHead(404, { "Content-Type": "text/plain" });
@@ -99,58 +143,28 @@ export function handleOpusRequest(
     return;
   }
   const cacheKey = match[1]!;
-
-  // T-03-03 layer 1: regex gate — refuse any key with .., /, ., or
-  // non-hex, uppercase, short, long. Runs BEFORE path.join.
   if (!CACHE_KEY_REGEX.test(cacheKey)) {
     res.writeHead(400, { "Content-Type": "text/plain" });
     res.end("bad cache key (must be 64 lowercase hex chars)");
     return;
   }
-
   const opusPath = path.join(cacheDir, `${cacheKey}.opus`);
-
-  // T-03-03 layer 2: path-containment assertion — refuse any resolved
-  // path that escapes cacheDir. Defense-in-depth against (a) a future
-  // regex relaxation, or (b) a symlink planted inside the cache dir
-  // that resolves outside it.
-  //
-  // NOTE: `path.resolve` alone does NOT dereference symlinks — it only
-  // normalizes `..` and resolves to absolute form. To catch a symlink
-  // planted inside the cache dir that points outside, we must also
-  // check fs.realpathSync() on any existing file. Two sub-checks:
-  //   2a) path.resolve(opusPath) stays under rootAbs (catches `..`
-  //       traversal if the regex is ever relaxed).
-  //   2b) fs.realpathSync(opusPath) stays under rootAbs (catches
-  //       symlink-escape — the realpath follows links to the target).
   const resolved = path.resolve(opusPath);
   const rootAbs = path.resolve(cacheDir);
   if (!resolved.startsWith(rootAbs + path.sep)) {
-    console.warn(
-      `[PREVIEW-BAKE] rejected cacheKey (containment 2a): ${cacheKey.slice(0, 16)}...`,
-    );
     res.writeHead(400, { "Content-Type": "text/plain" });
     res.end("Bad Request");
     return;
   }
-
   if (!fs.existsSync(resolved)) {
     res.writeHead(404, { "Content-Type": "text/plain" });
     res.end("not found");
     return;
   }
-
-  // Layer 2b — realpath containment. Only runs when the file exists
-  // (realpathSync throws on missing files). Uses rootAbs (already
-  // computed) because the cache dir itself is expected to NOT be a
-  // symlink to somewhere weird; if operators care about that edge
-  // case they can also realpath the cacheDir once at startup.
   let realResolved: string;
   try {
     realResolved = fs.realpathSync(resolved);
   } catch {
-    // Race: file disappeared between existsSync and realpathSync.
-    // Treat as not found rather than 500 — the cache is transient.
     res.writeHead(404, { "Content-Type": "text/plain" });
     res.end("not found");
     return;
@@ -160,17 +174,10 @@ export function handleOpusRequest(
     realResolved !== realRoot &&
     !realResolved.startsWith(realRoot + path.sep)
   ) {
-    console.warn(
-      `[PREVIEW-BAKE] rejected cacheKey (containment 2b — symlink escape): ${cacheKey.slice(0, 16)}...`,
-    );
     res.writeHead(400, { "Content-Type": "text/plain" });
     res.end("Bad Request");
     return;
   }
-  // ME-02: wrap statSync in try/catch — a race between the realpath
-  // check above and this stat can see ENOENT if the file is evicted
-  // mid-request. The cache dir is explicitly transient per the header
-  // comment; returning 404 is the correct signal to the client, not 500.
   let stat: fs.Stats;
   try {
     stat = fs.statSync(resolved);
@@ -179,109 +186,507 @@ export function handleOpusRequest(
     res.end("not found");
     return;
   }
+  serveAudioFile(req, res, resolved, stat.size);
+}
+
+/**
+ * Stream an audio file with proper Range handling. Used by both the
+ * /a/{cacheKey}.opus route and the /api/ritual/.../line/N.opus route.
+ */
+function serveAudioFile(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  resolvedPath: string,
+  size: number,
+): void {
   const rangeHeader = req.headers.range;
   if (rangeHeader) {
     const rangeMatch = /^bytes=(\d+)-(\d*)$/.exec(rangeHeader);
     if (!rangeMatch) {
-      res.writeHead(416, {
-        "Content-Range": `bytes */${stat.size}`,
-        "Content-Type": "text/plain",
-      });
+      res.writeHead(416, { "Content-Range": `bytes */${size}` });
       res.end();
       return;
     }
     const start = Number(rangeMatch[1]);
-    const end = rangeMatch[2] ? Number(rangeMatch[2]) : stat.size - 1;
-    if (!Number.isFinite(start) || end >= stat.size || start > end) {
-      res.writeHead(416, { "Content-Range": `bytes */${stat.size}` });
+    const end = rangeMatch[2] ? Number(rangeMatch[2]) : size - 1;
+    if (!Number.isFinite(start) || end >= size || start > end) {
+      res.writeHead(416, { "Content-Range": `bytes */${size}` });
       res.end();
       return;
     }
     res.writeHead(206, {
       "Content-Type": "audio/ogg; codecs=opus",
-      "Content-Range": `bytes ${start}-${end}/${stat.size}`,
+      "Content-Range": `bytes ${start}-${end}/${size}`,
       "Accept-Ranges": "bytes",
       "Content-Length": end - start + 1,
     });
-    const stream = fs.createReadStream(resolved, { start, end });
-    // Attach error handler before pipe — a mid-stream ENOENT (file
-    // deleted after statSync, or cache eviction) must not crash the
-    // server. End the response quietly; the client sees a truncated
-    // read, which is the correct signal on a race.
-    stream.on("error", () => {
-      try {
-        res.end();
-      } catch {
-        // best-effort — response may already be closed
-      }
-    });
+    const stream = fs.createReadStream(resolvedPath, { start, end });
+    stream.on("error", () => { try { res.end(); } catch {} });
     stream.pipe(res);
   } else {
     res.writeHead(200, {
       "Content-Type": "audio/ogg; codecs=opus",
-      "Content-Length": stat.size,
+      "Content-Length": size,
       "Accept-Ranges": "bytes",
     });
-    const stream = fs.createReadStream(resolved);
-    stream.on("error", () => {
-      try {
-        res.end();
-      } catch {
-        // best-effort
-      }
-    });
+    const stream = fs.createReadStream(resolvedPath);
+    stream.on("error", () => { try { res.end(); } catch {} });
     stream.pipe(res);
   }
 }
 
 /**
- * Serve the browser UI — minimal no-framework HTML that fetches /api/index
- * and renders a ritual → lines → <audio> tree.
+ * Serve audio bytes from a Buffer (the line.audio embedded in .mram,
+ * after base64-decode). Mirror of serveAudioFile but for in-memory data.
  */
-export function handleIndexRequest(res: http.ServerResponse): void {
-  const html = `<!doctype html>
-<html><head><meta charset="utf-8"><title>Bake Cache Preview</title>
-<style>
-  body { font: 14px system-ui; margin: 2em; background: #0a0a0a; color: #d4d4d8; }
-  h1 { color: #f4f4f5; } h2 { color: #e4e4e7; margin-top: 2em; }
-  a { color: #facc15; text-decoration: none; } a:hover { text-decoration: underline; }
-  .ritual { margin: 1em 0; }
-  audio { width: 100%; max-width: 640px; display: block; margin: 0.5em 0; }
-  .line { padding: 0.5em; border-bottom: 1px solid #27272a; }
-  .meta { color: #71717a; font-size: 12px; font-family: ui-monospace; }
-</style></head><body>
-<h1>rituals/_bake-cache/</h1>
-<p class="meta">AUTHOR-08 preview — read-only. Dev-only (NODE_ENV=${JSON.stringify(process.env.NODE_ENV ?? "undefined")}).</p>
-<p><a href="/api/index">View index JSON</a></p>
-<div id="rituals">Loading…</div>
-<script>
-  fetch("/api/index").then(r => r.json()).then(data => {
-    const c = document.getElementById("rituals");
-    if (!data.rituals || data.rituals.length === 0) {
-      c.textContent = "No rituals in the cache yet. Run bake-all.ts first.";
+function serveAudioBytes(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  bytes: Buffer,
+): void {
+  const size = bytes.length;
+  const rangeHeader = req.headers.range;
+  if (rangeHeader) {
+    const rangeMatch = /^bytes=(\d+)-(\d*)$/.exec(rangeHeader);
+    if (!rangeMatch) {
+      res.writeHead(416, { "Content-Range": `bytes */${size}` });
+      res.end();
       return;
     }
-    c.innerHTML = data.rituals.map(r =>
-      '<div class="ritual"><h2>' + r.slug + ' <span class="meta">(' + r.lineCount + ' lines)</span></h2>' +
-      r.lines.map(l =>
-        '<div class="line"><div class="meta">line ' + l.lineId + ' / ' + l.model + ' / ' + l.durationMs + 'ms</div>' +
-        '<audio controls preload="none" src="/a/' + l.cacheKey + '.opus"></audio></div>'
-      ).join("") +
-      '</div>'
-    ).join("");
-  }).catch(err => { document.getElementById("rituals").textContent = "Error: " + err; });
+    const start = Number(rangeMatch[1]);
+    const end = rangeMatch[2] ? Number(rangeMatch[2]) : size - 1;
+    if (!Number.isFinite(start) || end >= size || start > end) {
+      res.writeHead(416, { "Content-Range": `bytes */${size}` });
+      res.end();
+      return;
+    }
+    res.writeHead(206, {
+      "Content-Type": "audio/ogg; codecs=opus",
+      "Content-Range": `bytes ${start}-${end}/${size}`,
+      "Accept-Ranges": "bytes",
+      "Content-Length": end - start + 1,
+    });
+    res.end(bytes.subarray(start, end + 1));
+  } else {
+    res.writeHead(200, {
+      "Content-Type": "audio/ogg; codecs=opus",
+      "Content-Length": size,
+      "Accept-Ranges": "bytes",
+    });
+    res.end(bytes);
+  }
+}
+
+// ============================================================
+// /api/rituals — list slugs + line counts
+// /api/ritual/{slug} — full structured doc (sections + lines + meta)
+// /api/ritual/{slug}/line/{id}.opus — single-line audio
+// ============================================================
+
+async function handleRitualsList(res: http.ServerResponse): Promise<void> {
+  const slugs = listRituals();
+  const passphrase = process.env.MRAM_PASSPHRASE;
+  const result: Array<{
+    slug: string;
+    fileSize: number;
+    lineCount?: number;
+    sectionCount?: number;
+    decrypted: boolean;
+    error?: string;
+  }> = [];
+  for (const slug of slugs) {
+    const mramPath = path.join(RITUALS_DIR, `${slug}.mram`);
+    const stat = fs.statSync(mramPath);
+    const entry: typeof result[0] = {
+      slug,
+      fileSize: stat.size,
+      decrypted: false,
+    };
+    if (passphrase) {
+      try {
+        const doc = await loadRitual(slug, passphrase);
+        entry.lineCount = doc.lines.filter((l) => !l.action).length;
+        entry.sectionCount = doc.sections.length;
+        entry.decrypted = true;
+      } catch (e) {
+        entry.error = (e as Error).message.slice(0, 100);
+      }
+    }
+    result.push(entry);
+  }
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({
+    rituals: result,
+    passphraseSet: Boolean(passphrase),
+  }, null, 2));
+}
+
+async function handleRitualDetail(
+  res: http.ServerResponse,
+  slug: string,
+): Promise<void> {
+  if (!RITUAL_SLUG_REGEX.test(slug)) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Invalid slug" }));
+    return;
+  }
+  const passphrase = process.env.MRAM_PASSPHRASE;
+  if (!passphrase) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      error: "MRAM_PASSPHRASE env var not set; restart preview-bake with the passphrase.",
+    }));
+    return;
+  }
+  try {
+    const doc = await loadRitual(slug, passphrase);
+    // Strip audio bytes from the JSON response — they're large, served
+    // separately via /api/ritual/{slug}/line/{id}.opus.
+    const linesLite = doc.lines.map((l) => ({
+      id: l.id,
+      section: l.section,
+      role: l.role,
+      gavels: l.gavels,
+      action: l.action,
+      cipher: l.cipher,
+      plain: l.plain,
+      style: l.style,
+      hasAudio: Boolean(l.audio),
+      audioBytes: l.audio ? Math.floor((l.audio.length * 3) / 4) : 0, // base64 → bytes estimate
+    }));
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      slug,
+      metadata: doc.metadata,
+      sections: doc.sections,
+      lines: linesLite,
+    }, null, 2));
+  } catch (e) {
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: (e as Error).message.slice(0, 200) }));
+  }
+}
+
+async function handleRitualLineAudio(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  slug: string,
+  lineIdStr: string,
+): Promise<void> {
+  if (!RITUAL_SLUG_REGEX.test(slug)) {
+    res.writeHead(400);
+    res.end("Invalid slug");
+    return;
+  }
+  if (!LINE_ID_REGEX.test(lineIdStr)) {
+    res.writeHead(400);
+    res.end("Invalid line id");
+    return;
+  }
+  const lineId = Number(lineIdStr);
+  const passphrase = process.env.MRAM_PASSPHRASE;
+  if (!passphrase) {
+    res.writeHead(400);
+    res.end("MRAM_PASSPHRASE env var not set");
+    return;
+  }
+  try {
+    const doc = await loadRitual(slug, passphrase);
+    const line = doc.lines.find((l) => l.id === lineId);
+    if (!line || !line.audio) {
+      res.writeHead(404);
+      res.end("Line has no audio");
+      return;
+    }
+    const bytes = Buffer.from(line.audio, "base64");
+    serveAudioBytes(req, res, bytes);
+  } catch (e) {
+    res.writeHead(500);
+    res.end("Decrypt failed");
+  }
+}
+
+// ============================================================
+// Browser UI — rebuilt with per-ritual structure + dialogue text
+// ============================================================
+
+export function handleIndexRequest(res: http.ServerResponse): void {
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Bake Preview — Masonic Ritual AI Mentor</title>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --bg-elevated: #1a1a1a;
+    --bg-hover: #232323;
+    --fg: #e4e4e7;
+    --fg-dim: #a1a1aa;
+    --fg-muted: #71717a;
+    --accent: #facc15;
+    --border: #2a2a2a;
+    --error: #f87171;
+    --good: #4ade80;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font: 15px/1.5 system-ui, -apple-system, sans-serif;
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--fg);
+  }
+  header {
+    position: sticky; top: 0; z-index: 10;
+    background: var(--bg-elevated);
+    border-bottom: 1px solid var(--border);
+    padding: 1em 1.5em;
+  }
+  header h1 {
+    margin: 0 0 0.25em 0; font-size: 1.2em;
+    color: var(--fg); font-weight: 600;
+  }
+  header .meta { color: var(--fg-muted); font-size: 0.85em; }
+  header .err { color: var(--error); font-weight: 500; }
+  .ritual-tabs {
+    display: flex; flex-wrap: wrap; gap: 0.5em;
+    margin-top: 0.75em;
+  }
+  .ritual-tabs button {
+    background: transparent; border: 1px solid var(--border);
+    color: var(--fg-dim); padding: 0.4em 0.9em; font-size: 0.9em;
+    border-radius: 4px; cursor: pointer; font-family: inherit;
+  }
+  .ritual-tabs button:hover { background: var(--bg-hover); color: var(--fg); }
+  .ritual-tabs button.active {
+    background: var(--accent); color: #18181b; border-color: var(--accent);
+    font-weight: 500;
+  }
+  .ritual-tabs button.disabled {
+    opacity: 0.4; cursor: not-allowed;
+  }
+  main { padding: 1.5em; max-width: 1100px; }
+  .empty {
+    color: var(--fg-muted); padding: 2em; text-align: center;
+    border: 1px dashed var(--border); border-radius: 4px;
+  }
+  section.ritual-section {
+    margin: 1.5em 0 0.5em;
+    padding-top: 1em; border-top: 1px solid var(--border);
+  }
+  section.ritual-section h2 {
+    margin: 0 0 0.75em 0; font-size: 1.05em;
+    color: var(--fg-dim); font-weight: 500;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .line {
+    display: grid;
+    grid-template-columns: 60px 70px 1fr;
+    gap: 1em; align-items: center;
+    padding: 0.75em 0.5em; border-bottom: 1px solid var(--border);
+    transition: background 80ms;
+  }
+  .line:hover { background: var(--bg-hover); }
+  .line.no-audio { opacity: 0.5; }
+  .line .id { color: var(--fg-muted); font-family: ui-monospace, monospace; font-size: 0.85em; text-align: right; }
+  .line .role {
+    font-family: ui-monospace, monospace; font-size: 0.85em;
+    color: var(--accent); font-weight: 500;
+  }
+  .line .body { display: grid; grid-template-rows: auto auto; gap: 0.4em; }
+  .line .text {
+    font: 15px/1.5 Georgia, serif; color: var(--fg);
+  }
+  .line .text .gavels {
+    color: var(--accent); font-weight: bold; margin-right: 0.4em;
+  }
+  .line.action .text {
+    font-style: italic; color: var(--fg-dim);
+  }
+  .line audio {
+    width: 100%; max-width: 540px; height: 32px;
+    filter: invert(0.85) hue-rotate(180deg);
+  }
+  .line .meta-row {
+    color: var(--fg-muted); font-size: 0.78em;
+    font-family: ui-monospace, monospace;
+  }
+  .line .no-audio-note {
+    color: var(--fg-muted); font-style: italic; font-size: 0.85em;
+  }
+  .ritual-meta {
+    color: var(--fg-muted); font-size: 0.85em;
+    padding: 0.5em 0;
+  }
+  .controls {
+    margin-bottom: 1em; display: flex; gap: 1em;
+    flex-wrap: wrap; align-items: center;
+  }
+  .controls label { font-size: 0.85em; color: var(--fg-dim); cursor: pointer; }
+  .controls input[type="checkbox"] { vertical-align: middle; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>rituals/ <span style="color: var(--fg-muted); font-weight: normal;">— bake preview</span></h1>
+  <div class="meta" id="header-meta">Loading…</div>
+  <div class="ritual-tabs" id="tabs"></div>
+</header>
+<main>
+  <div id="content" class="empty">Select a ritual above.</div>
+</main>
+<script>
+  const state = {
+    rituals: [],
+    activeSlug: null,
+    activeDoc: null,
+    showCipher: false,
+  };
+
+  async function init() {
+    try {
+      const res = await fetch("/api/rituals");
+      const data = await res.json();
+      state.rituals = data.rituals;
+      const meta = document.getElementById("header-meta");
+      if (!data.passphraseSet) {
+        meta.innerHTML = '<span class="err">MRAM_PASSPHRASE not set — restart with the env var to view ritual structure.</span>';
+      } else if (state.rituals.length === 0) {
+        meta.textContent = "No .mram files in rituals/. Run bake-all to create them.";
+      } else {
+        const total = state.rituals.reduce((n, r) => n + (r.lineCount || 0), 0);
+        meta.textContent = state.rituals.length + " ritual(s), " + total + " spoken line(s) total.";
+      }
+      renderTabs();
+      // Auto-select first ritual that decrypted successfully
+      const first = state.rituals.find(r => r.decrypted);
+      if (first) selectRitual(first.slug);
+    } catch (e) {
+      document.getElementById("header-meta").innerHTML = '<span class="err">Error: ' + e.message + '</span>';
+    }
+  }
+
+  function renderTabs() {
+    const tabs = document.getElementById("tabs");
+    tabs.innerHTML = state.rituals.map(r => {
+      const cls = (r.slug === state.activeSlug ? "active" : "") + (r.decrypted ? "" : " disabled");
+      const title = r.error ? "title=\\"" + r.error.replace(/"/g, '&quot;') + "\\"" : "";
+      const lineInfo = r.decrypted ? r.lineCount + " lines" : (r.error ? "decrypt failed" : "—");
+      return '<button class="' + cls + '" data-slug="' + r.slug + '" ' + title + '>' +
+        r.slug + ' <span style="opacity:0.6">(' + lineInfo + ')</span></button>';
+    }).join("");
+    tabs.querySelectorAll("button").forEach(btn => {
+      btn.addEventListener("click", () => {
+        if (btn.classList.contains("disabled")) return;
+        selectRitual(btn.dataset.slug);
+      });
+    });
+  }
+
+  async function selectRitual(slug) {
+    state.activeSlug = slug;
+    renderTabs();
+    document.getElementById("content").innerHTML = '<div class="empty">Decrypting ' + slug + '…</div>';
+    try {
+      const res = await fetch("/api/ritual/" + encodeURIComponent(slug));
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || res.statusText);
+      }
+      state.activeDoc = await res.json();
+      renderRitual();
+    } catch (e) {
+      document.getElementById("content").innerHTML = '<div class="empty err">Error: ' + e.message + '</div>';
+    }
+  }
+
+  function renderRitual() {
+    const doc = state.activeDoc;
+    if (!doc) return;
+    const linesBySection = new Map();
+    for (const l of doc.lines) {
+      if (!linesBySection.has(l.section)) linesBySection.set(l.section, []);
+      linesBySection.get(l.section).push(l);
+    }
+    const sectionOrder = doc.sections.map(s => s.id);
+    // Append any section IDs found in lines that aren't in the sections array
+    for (const id of linesBySection.keys()) {
+      if (!sectionOrder.includes(id)) sectionOrder.push(id);
+    }
+    const totalLines = doc.lines.length;
+    const linesWithAudio = doc.lines.filter(l => l.hasAudio).length;
+    const audioMb = (doc.lines.reduce((n, l) => n + (l.audioBytes || 0), 0) / (1024*1024)).toFixed(2);
+    let html = '<div class="ritual-meta">' +
+      totalLines + ' total nodes, ' + linesWithAudio + ' with audio (' + audioMb + ' MB) · ' +
+      'jurisdiction: ' + (doc.metadata.jurisdiction || '—') + ' · ' +
+      'degree: ' + (doc.metadata.degree || '—') +
+      '</div>';
+    html += '<div class="controls">' +
+      '<label><input type="checkbox" id="show-cipher"' + (state.showCipher ? ' checked' : '') + '> Show cipher text</label>' +
+      '<label><input type="checkbox" id="hide-action"> Hide stage actions</label>' +
+      '</div>';
+    for (const sid of sectionOrder) {
+      const lines = linesBySection.get(sid) || [];
+      if (lines.length === 0) continue;
+      const section = doc.sections.find(s => s.id === sid);
+      const title = section?.title || sid;
+      html += '<section class="ritual-section">';
+      html += '<h2>' + escapeHtml(title) + '</h2>';
+      for (const l of lines) {
+        html += renderLine(l, doc.slug);
+      }
+      html += '</section>';
+    }
+    document.getElementById("content").innerHTML = html;
+    document.getElementById("show-cipher").addEventListener("change", e => {
+      state.showCipher = e.target.checked;
+      renderRitual();
+    });
+    document.getElementById("hide-action").addEventListener("change", e => {
+      const hide = e.target.checked;
+      document.querySelectorAll(".line.action").forEach(el => {
+        el.style.display = hide ? "none" : "grid";
+      });
+    });
+  }
+
+  function renderLine(l, slug) {
+    const isAction = Boolean(l.action);
+    const cls = "line" + (isAction ? " action" : "") + (l.hasAudio ? "" : " no-audio");
+    const text = isAction ? l.action : (state.showCipher ? l.cipher : l.plain);
+    const gavels = l.gavels > 0 ? '<span class="gavels">' + '*'.repeat(l.gavels) + '</span>' : '';
+    const audio = l.hasAudio
+      ? '<audio controls preload="none" src="/api/ritual/' + encodeURIComponent(slug) + '/line/' + l.id + '.opus"></audio>'
+      : (isAction ? '<span class="no-audio-note">(stage action)</span>' : '<span class="no-audio-note">(no audio baked)</span>');
+    const meta = l.style ? '<span class="meta-row">style: ' + escapeHtml(l.style) + (l.audioBytes ? ' · ' + Math.round(l.audioBytes / 1024) + ' KB' : '') + '</span>' : (l.audioBytes ? '<span class="meta-row">' + Math.round(l.audioBytes / 1024) + ' KB</span>' : '');
+    return '<div class="' + cls + '">' +
+      '<div class="id">' + l.id + '</div>' +
+      '<div class="role">' + escapeHtml(l.role) + '</div>' +
+      '<div class="body">' +
+      '<div class="text">' + gavels + escapeHtml(text || '') + '</div>' +
+      audio +
+      meta +
+      '</div></div>';
+  }
+
+  function escapeHtml(s) {
+    return String(s || '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  init();
 </script>
-</body></html>`;
+</body>
+</html>`;
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html);
 }
 
-/**
- * Serve /api/index — reads rituals/_bake-cache/_INDEX.json if present
- * (D-03 shape: {cacheKey, model, ritualSlug, lineId, byteLen, durationMs,
- * createdAt}[]), else falls back to a directory listing of .opus files so
- * the preview still works when Plan 07's index-writer hasn't run yet.
- */
+// ============================================================
+// Legacy /api/index — kept for backwards compat (cache-keyed view)
+// ============================================================
+
 export function handleIndexJson(
   res: http.ServerResponse,
   cacheDir: string,
@@ -290,15 +695,10 @@ export function handleIndexJson(
   if (fs.existsSync(indexPath)) {
     try {
       const raw = JSON.parse(fs.readFileSync(indexPath, "utf8")) as Array<{
-        cacheKey: string;
-        model: string;
-        ritualSlug: string;
-        lineId: string | number;
-        byteLen: number;
-        durationMs: number;
+        cacheKey: string; model: string; ritualSlug: string;
+        lineId: string | number; byteLen: number; durationMs: number;
         createdAt: string;
       }>;
-      // Group by ritualSlug for the browser UI.
       const bySlug = new Map<string, typeof raw>();
       for (const e of raw) {
         const arr = bySlug.get(e.ritualSlug) ?? [];
@@ -306,96 +706,97 @@ export function handleIndexJson(
         bySlug.set(e.ritualSlug, arr);
       }
       const rituals = Array.from(bySlug.entries()).map(([slug, entries]) => ({
-        slug,
-        lineCount: entries.length,
-        lines: entries.sort((a, b) =>
-          String(a.lineId).localeCompare(String(b.lineId)),
-        ),
+        slug, lineCount: entries.length,
+        lines: entries.sort((a, b) => String(a.lineId).localeCompare(String(b.lineId))),
       }));
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ rituals }, null, 2));
       return;
-    } catch {
-      // Malformed _INDEX.json — fall through to directory listing.
-    }
+    } catch {}
   }
   if (!fs.existsSync(cacheDir)) {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ rituals: [] }));
     return;
   }
-  const opusFiles = fs
-    .readdirSync(cacheDir)
+  const opusFiles = fs.readdirSync(cacheDir)
     .filter((f) => f.endsWith(".opus"))
     .map((f) => {
       const cacheKey = f.replace(/\.opus$/, "");
       const stat = fs.statSync(path.join(cacheDir, f));
       return {
-        cacheKey,
-        model: "unknown",
-        ritualSlug: "uncategorized",
-        lineId: cacheKey.slice(0, 8),
-        byteLen: stat.size,
-        durationMs: 0,
-        createdAt: stat.mtime.toISOString(),
+        cacheKey, model: "unknown", ritualSlug: "uncategorized",
+        lineId: cacheKey.slice(0, 8), byteLen: stat.size,
+        durationMs: 0, createdAt: stat.mtime.toISOString(),
       };
     });
   res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(
-    JSON.stringify(
-      {
-        rituals: [
-          {
-            slug: "uncategorized (_INDEX.json not present)",
-            lineCount: opusFiles.length,
-            lines: opusFiles,
-          },
-        ],
-      },
-      null,
-      2,
-    ),
-  );
+  res.end(JSON.stringify({
+    rituals: [{ slug: "uncategorized (_INDEX.json not present)", lineCount: opusFiles.length, lines: opusFiles }],
+  }, null, 2));
 }
 
-// Server bootstrap — routes: / → index HTML, /api/index → index JSON,
-// /a/{cacheKey}.opus → Opus stream, everything else → 404.
-const server = http.createServer((req, res) => {
-  const url = new URL(req.url ?? "/", `http://${BIND_HOST}:${BIND_PORT}`);
-  if (url.pathname === "/" || url.pathname === "/index.html") {
-    handleIndexRequest(res);
-    return;
+// ============================================================
+// Server bootstrap
+// ============================================================
+
+const server = http.createServer(async (req, res) => {
+  try {
+    const url = new URL(req.url ?? "/", `http://${BIND_HOST}:${BIND_PORT}`);
+    if (url.pathname === "/" || url.pathname === "/index.html") {
+      handleIndexRequest(res);
+      return;
+    }
+    if (url.pathname === "/api/rituals") {
+      await handleRitualsList(res);
+      return;
+    }
+    // /api/ritual/{slug}/line/{id}.opus
+    const lineMatch = /^\/api\/ritual\/([^/]+)\/line\/([^/]+)\.opus$/.exec(url.pathname);
+    if (lineMatch) {
+      await handleRitualLineAudio(req, res, lineMatch[1]!, lineMatch[2]!);
+      return;
+    }
+    // /api/ritual/{slug}
+    const detailMatch = /^\/api\/ritual\/([^/]+)$/.exec(url.pathname);
+    if (detailMatch) {
+      await handleRitualDetail(res, detailMatch[1]!);
+      return;
+    }
+    if (url.pathname === "/api/index") {
+      handleIndexJson(res, BAKE_CACHE_DIR);
+      return;
+    }
+    if (url.pathname.startsWith("/a/")) {
+      handleOpusRequest(req, res, BAKE_CACHE_DIR);
+      return;
+    }
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end("not found");
+  } catch (e) {
+    console.error("[preview-bake] unhandled error:", e);
+    if (!res.headersSent) {
+      res.writeHead(500, { "Content-Type": "text/plain" });
+    }
+    try { res.end("Internal error"); } catch {}
   }
-  if (url.pathname === "/api/index") {
-    handleIndexJson(res, BAKE_CACHE_DIR);
-    return;
-  }
-  if (url.pathname.startsWith("/a/")) {
-    handleOpusRequest(req, res, BAKE_CACHE_DIR);
-    return;
-  }
-  res.writeHead(404, { "Content-Type": "text/plain" });
-  res.end("not found");
 });
 
-// Export the server for integration-style tests that might use it.
 export { server };
 
-// isDirectRun — only start listening when invoked as the main script.
-// Test imports of this module (via `import { handleOpusRequest } from ...`)
-// should NOT spawn the HTTP listener; the assertDevOnly() call at the top
-// still runs either way (which is fine — vitest defaults NODE_ENV=test).
 const isDirectRun = process.argv[1]?.endsWith("preview-bake.ts") ?? false;
 if (isDirectRun) {
   const overrideHost = process.env.PREVIEW_BAKE_HOST ?? BIND_HOST;
-  // ensureLoopback BEFORE listen — refuses at process level if somehow
-  // bind host was overridden (e.g. PREVIEW_BAKE_HOST=0.0.0.0).
   ensureLoopback(overrideHost);
   server.listen(BIND_PORT, overrideHost, () => {
     console.log(
       `[AUTHOR-08] Preview server: http://${overrideHost}:${BIND_PORT}`,
     );
-    console.log(`           Cache: ${BAKE_CACHE_DIR}`);
+    console.log(`           Rituals: ${RITUALS_DIR}`);
+    console.log(`           Cache:   ${BAKE_CACHE_DIR}`);
+    if (!process.env.MRAM_PASSPHRASE) {
+      console.log(`           ⚠ MRAM_PASSPHRASE not set — ritual structure won't decrypt.`);
+    }
     console.log(`           Dev-only; read-only; Ctrl-C to stop.`);
   });
 }
