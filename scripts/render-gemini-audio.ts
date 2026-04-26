@@ -224,16 +224,27 @@ export async function renderLineAudio(
       );
       const opus = await encodeWavToOpus(wav);
 
-      // Defensive Opus-duration check before caching. parseBuffer reads
-      // the Ogg container metadata — if the encoded Opus has 0ms (or
-      // <100ms) duration, the response is degraded even though the SSE
-      // layer accepted it. Retry up to MAX_EMPTY_RENDER_RETRIES times
-      // before giving up and caching, at which point downstream D-10
-      // will catch it as a content-level issue.
-      const opusMeta = await parseBuffer(opus, { mimeType: "audio/ogg" });
-      const opusDurationMs = Math.round(
-        (opusMeta.format.duration ?? 0) * 1000,
-      );
+      // Defensive Opus-duration check before caching. If duration is
+      // < 100ms AND byte count is also small (< 4KB ≈ 1s of 32kbps
+      // Opus), the response is degraded — retry up to
+      // MAX_EMPTY_RENDER_RETRIES times. If duration parses as 0 BUT
+      // byte count is substantial (>= 4KB), trust the bytes:
+      // music-metadata's Ogg-Opus parser fails on very long streams
+      // (>~12-15 seconds) and returns false-zero duration. The
+      // pcm-byte threshold inside consumeSseToWav already prevents
+      // truly empty stream from getting here.
+      let opusDurationMs: number;
+      try {
+        const opusMeta = await parseBuffer(opus, { mimeType: "audio/ogg" });
+        opusDurationMs = Math.round((opusMeta.format.duration ?? 0) * 1000);
+      } catch {
+        opusDurationMs = 0;
+      }
+      // Byte-based fallback: if parse said 0 but bytes are substantial,
+      // estimate from bytes (32kbps Opus ≈ 4000 bytes/sec → ms ≈ bytes/4).
+      if (opusDurationMs === 0 && opus.length > 4000) {
+        opusDurationMs = Math.round(opus.length / 4);
+      }
       if (opusDurationMs < 100 && emptyRenderAttempts < MAX_EMPTY_RENDER_RETRIES) {
         emptyRenderAttempts++;
         process.stderr.write("\r" + " ".repeat(80) + "\r");

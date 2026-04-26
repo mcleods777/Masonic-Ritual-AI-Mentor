@@ -201,9 +201,38 @@ async function googleTtsBakeCall(
   }
   const json = (await res.json()) as { audioContent: string };
   const opusBytes = Buffer.from(json.audioContent, "base64");
-  const meta = await parseBuffer(opusBytes, { mimeType: "audio/ogg" });
-  const durationMs = Math.round((meta.format.duration ?? 0) * 1000);
+  const durationMs = await readOpusDurationRobust(opusBytes);
   return { opusBytes, durationMs };
+}
+
+/**
+ * Read Opus audio duration with a byte-based fallback for very long
+ * streams. music-metadata's Ogg-Opus parser fails to read the granule
+ * position from streams above ~12-15 seconds, returning 0ms even when
+ * the audio is intact. Confirmed with Google TTS responses for line
+ * 94 of ea-closing (452-char JW passage producing ~22s of valid Opus,
+ * 99KB, parsed as 0ms by music-metadata).
+ *
+ * Strategy: trust music-metadata if it returns a positive duration.
+ * If it returns 0 AND the byte count is substantial (>4KB ≈ 1s of
+ * 32kbps Opus), estimate duration from bytes (~4000 bytes/sec for
+ * our 32kbps mono encode). If bytes are also small, treat as truly
+ * empty.
+ */
+async function readOpusDurationRobust(opusBytes: Buffer): Promise<number> {
+  try {
+    const meta = await parseBuffer(opusBytes, { mimeType: "audio/ogg" });
+    const parsedMs = Math.round((meta.format.duration ?? 0) * 1000);
+    if (parsedMs > 0) return parsedMs;
+  } catch {
+    // Fall through to byte-based estimate
+  }
+  // music-metadata returned 0 or threw. Use byte-based estimate for
+  // anything substantial. 32kbps Opus = 4000 bytes/sec; 4KB ≈ 1 sec.
+  if (opusBytes.length > 4000) {
+    return Math.round(opusBytes.length / 4); // ms ≈ bytes / 4 for 32kbps
+  }
+  return 0;
 }
 
 // ============================================================
@@ -1251,10 +1280,7 @@ async function bakeAudioIntoDoc(
       // calculation produces false positives. The user has taken
       // explicit responsibility for these lines via speakAs; rely on
       // preview-bake scrubbing for quality verification instead.
-      const geminiMeta = await parseBuffer(opus, { mimeType: "audio/ogg" });
-      const geminiDurationMs = Math.round(
-        (geminiMeta.format.duration ?? 0) * 1000,
-      );
+      const geminiDurationMs = await readOpusDurationRobust(opus);
       // D-10 anomaly check. For speakAs lines we skip the *ratio* check
       // (instructional-prompt char count doesn't match spoken-output
       // length, produces false positives), but we still hard-fail on
