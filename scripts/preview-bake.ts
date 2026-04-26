@@ -549,7 +549,10 @@ export function handleIndexRequest(res: http.ServerResponse): void {
   .ritual-tabs button.disabled {
     opacity: 0.4; cursor: not-allowed;
   }
-  main { padding: 1.5em; max-width: 1100px; }
+  main {
+    padding: 1.5em 2em;
+    max-width: 1400px; margin: 0 auto;
+  }
   .empty {
     color: var(--fg-muted); padding: 2em; text-align: center;
     border: 1px dashed var(--border); border-radius: 4px;
@@ -565,21 +568,29 @@ export function handleIndexRequest(res: http.ServerResponse): void {
   }
   .line {
     display: grid;
-    grid-template-columns: 60px 70px 1fr;
-    gap: 1em; align-items: center;
-    padding: 0.75em 0.5em; border-bottom: 1px solid var(--border);
+    grid-template-columns: 48px 80px minmax(0, 1fr);
+    gap: 1em; align-items: start;
+    padding: 0.85em 0.5em; border-bottom: 1px solid var(--border);
     transition: background 80ms;
   }
   .line:hover { background: var(--bg-hover); }
-  .line.no-audio { opacity: 0.5; }
-  .line .id { color: var(--fg-muted); font-family: ui-monospace, monospace; font-size: 0.85em; text-align: right; }
+  .line.no-audio { opacity: 0.65; }
+  .line .id {
+    color: var(--fg-muted); font-family: ui-monospace, monospace;
+    font-size: 0.85em; text-align: right;
+    padding-top: 0.15em;
+  }
   .line .role {
     font-family: ui-monospace, monospace; font-size: 0.85em;
     color: var(--accent); font-weight: 500;
+    padding-top: 0.15em;
   }
-  .line .body { display: grid; grid-template-rows: auto auto; gap: 0.4em; }
+  .line .body {
+    display: flex; flex-direction: column;
+    gap: 0.5em; min-width: 0;
+  }
   .line .text {
-    font: 15px/1.5 Georgia, serif; color: var(--fg);
+    font: 15px/1.55 Georgia, serif; color: var(--fg);
   }
   .line .text .gavels {
     color: var(--accent); font-weight: bold; margin-right: 0.4em;
@@ -587,9 +598,13 @@ export function handleIndexRequest(res: http.ServerResponse): void {
   .line.action .text {
     font-style: italic; color: var(--fg-dim);
   }
+  /* Native browser audio controls — readable on dark bg without filters.
+     The default Chrome rendering is light gray on transparent which works
+     fine here. Filters can hide the controls entirely on some Chromium
+     builds, so we leave them alone. */
   .line audio {
-    width: 100%; max-width: 540px; height: 32px;
-    filter: invert(0.85) hue-rotate(180deg);
+    width: 100%; max-width: 720px; height: 36px;
+    display: block;
   }
   .line .meta-row {
     color: var(--fg-muted); font-size: 0.78em;
@@ -638,21 +653,29 @@ export function handleIndexRequest(res: http.ServerResponse): void {
   .role-table td.voice { font-family: ui-monospace, monospace; color: var(--fg); }
   .role-table td.profile { color: var(--fg-dim); font-style: italic; }
 
-  /* Per-line details disclosure */
+  /* Per-line details disclosure — sits inside .body's flex column,
+     so it just needs to be a normal block element. NO grid-column. */
   .line-details {
-    grid-column: 3; margin-top: 0.3em;
+    margin-top: 0.2em;
   }
   .line-details summary {
     cursor: pointer; font-size: 0.78em;
     color: var(--fg-muted); user-select: none;
     padding: 0.2em 0;
+    list-style: none;
   }
+  .line-details summary::before {
+    content: "▸"; display: inline-block; width: 1em;
+    transition: transform 150ms;
+    color: var(--fg-muted);
+  }
+  .line-details[open] summary::before { transform: rotate(90deg); }
   .line-details summary:hover { color: var(--accent); }
   .line-details[open] summary { color: var(--fg-dim); }
   .line-details-body {
-    padding: 0.5em 0.6em; margin-top: 0.3em;
-    background: var(--bg); border-left: 2px solid var(--border);
-    font-size: 0.82em;
+    padding: 0.6em 0.8em; margin-top: 0.3em;
+    background: var(--bg); border-left: 2px solid var(--accent);
+    font-size: 0.85em; border-radius: 0 4px 4px 0;
   }
   .line-details-body dt {
     color: var(--fg-muted); font-family: ui-monospace, monospace;
@@ -888,7 +911,7 @@ export function handleIndexRequest(res: http.ServerResponse): void {
       }
       if (dl.length > 0) {
         details = '<details class="line-details">' +
-          '<summary>▸ Line context (voice, style, prompt)</summary>' +
+          '<summary>Line context (voice, style, prompt)</summary>' +
           '<dl class="line-details-body">' + dl.join('') + '</dl>' +
           '</details>';
       }
