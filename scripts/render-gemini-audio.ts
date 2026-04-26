@@ -15,6 +15,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import * as crypto from "node:crypto";
 import { spawn } from "node:child_process";
+import { parseBuffer } from "music-metadata";
 
 // ============================================================
 // Config
@@ -203,6 +204,14 @@ export async function renderLineAudio(
 
   // Retry loop: try each model, on all-models-429 wait for quota reset
   // and go around again. Callers can cap this with their own timeout.
+  // Also tracks empty-audio retries — sometimes Gemini returns
+  // substantial PCM that encodes to 0ms Opus (deterministic-empty
+  // pattern observed on long compound sentences). callGeminiWithFallback
+  // rotates keys on EmptyAudioStreamError raised inside consumeSseToWav,
+  // but that catch can't fire if the SSE stream looks fine and only
+  // the encoded Opus is degraded — so we add an outer retry here.
+  let emptyRenderAttempts = 0;
+  const MAX_EMPTY_RENDER_RETRIES = 3;
   while (true) {
     try {
       const { wav, model } = await callGeminiWithFallback(
@@ -214,6 +223,25 @@ export async function renderLineAudio(
         preamble,
       );
       const opus = await encodeWavToOpus(wav);
+
+      // Defensive Opus-duration check before caching. parseBuffer reads
+      // the Ogg container metadata — if the encoded Opus has 0ms (or
+      // <100ms) duration, the response is degraded even though the SSE
+      // layer accepted it. Retry up to MAX_EMPTY_RENDER_RETRIES times
+      // before giving up and caching, at which point downstream D-10
+      // will catch it as a content-level issue.
+      const opusMeta = await parseBuffer(opus, { mimeType: "audio/ogg" });
+      const opusDurationMs = Math.round(
+        (opusMeta.format.duration ?? 0) * 1000,
+      );
+      if (opusDurationMs < 100 && emptyRenderAttempts < MAX_EMPTY_RENDER_RETRIES) {
+        emptyRenderAttempts++;
+        process.stderr.write("\r" + " ".repeat(80) + "\r");
+        console.error(
+          `   ${model} produced ${opusDurationMs}ms Opus (attempt ${emptyRenderAttempts}/${MAX_EMPTY_RENDER_RETRIES} — retrying with fresh key rotation)...`,
+        );
+        continue; // retry the entire callGeminiWithFallback (rotates keys again)
+      }
 
       // Compute cache key under the model actually used (per D-02).
       const cacheKey = computeCacheKey(text, style, voice, model, preamble);
