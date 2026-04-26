@@ -177,6 +177,33 @@ function hashLineText(plain: string): string {
 }
 
 /**
+ * Detect which TTS engine produced an Opus audio blob by inspecting
+ * the OpusTags vendor string in the second Ogg page.
+ *
+ *   "Google Speech using libopus" → Google Cloud TTS (D-09 short-line
+ *      route + fallback path for deterministic-empty long lines)
+ *   "Lavf" / "Lavf60.16.100" / etc. → ffmpeg encoded the WAV that
+ *      Gemini Flash TTS streamed back. The Gemini SSE protocol returns
+ *      raw PCM samples, which the bake then runs through ffmpeg's
+ *      libopus encoder before caching/embedding.
+ *
+ * The vendor string lives within the first ~256 bytes of every Opus-
+ * in-Ogg file (Ogg page 1: OpusHead, page 2: OpusTags). Reading a
+ * fixed-size header avoids the cost of a full music-metadata parse.
+ *
+ * Returns "google-cloud-tts" | "gemini-flash-tts" | "unknown".
+ */
+type AudioEngine = "google-cloud-tts" | "gemini-flash-tts" | "unknown";
+function detectAudioEngine(opusBytes: Buffer | undefined | null): AudioEngine {
+  if (!opusBytes || opusBytes.length < 64) return "unknown";
+  // latin1 preserves every byte 1:1 so binary segments don't get UTF-8 mangled
+  const head = opusBytes.subarray(0, 256).toString("latin1");
+  if (head.includes("Google Speech")) return "google-cloud-tts";
+  if (head.includes("Lavf") || head.includes("lavf")) return "gemini-flash-tts";
+  return "unknown";
+}
+
+/**
  * List all .mram files in rituals/. Returns slugs (sans extension).
  */
 export function listRituals(): string[] {
@@ -416,10 +443,22 @@ async function handleRitualDetail(
     const voiceCast = loadVoiceCastSidecar(slug);
     // Strip audio bytes from the JSON response — they're large, served
     // separately via /api/ritual/{slug}/line/{id}.opus.
+    const engineCounts: Record<string, number> = {};
     const linesLite = doc.lines.map((l) => {
       const sidecar = l.plain
         ? stylesByHash.get(hashLineText(l.plain))
         : undefined;
+      // Detect engine by reading first 256 bytes of the embedded Opus —
+      // base64-decode just the header prefix, no need to decode the full
+      // multi-second audio for this. base64 ratio is 4 chars → 3 bytes,
+      // so 384 base64 chars ≈ 288 bytes of binary header.
+      let engine: AudioEngine = "unknown";
+      if (l.audio) {
+        const headerB64 = l.audio.slice(0, 384);
+        const headerBytes = Buffer.from(headerB64, "base64");
+        engine = detectAudioEngine(headerBytes);
+        engineCounts[engine] = (engineCounts[engine] ?? 0) + 1;
+      }
       return {
         id: l.id,
         section: l.section,
@@ -434,6 +473,7 @@ async function handleRitualDetail(
         voice: doc.metadata.voiceCast?.[l.role],
         hasAudio: Boolean(l.audio),
         audioBytes: l.audio ? Math.floor((l.audio.length * 3) / 4) : 0,
+        engine,
       };
     });
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -442,6 +482,8 @@ async function handleRitualDetail(
       metadata: doc.metadata,
       sections: doc.sections,
       lines: linesLite,
+      // Per-engine line counts so the UI can show a roll-up at the top
+      engineCounts,
       // Sidecar data — content-authoring context that's not in the .mram
       voiceCast: voiceCast?.roles ?? {},
       scene: voiceCast?.scene,
@@ -612,6 +654,30 @@ export function handleIndexRequest(res: http.ServerResponse): void {
   }
   .line .no-audio-note {
     color: var(--fg-muted); font-style: italic; font-size: 0.85em;
+  }
+  /* Engine badge — small pill showing which TTS rendered each line */
+  .engine-badge {
+    display: inline-block; padding: 0.1em 0.55em;
+    border-radius: 10px; font-size: 0.72em;
+    font-weight: 500; font-family: ui-monospace, monospace;
+    text-transform: lowercase;
+    border: 1px solid transparent;
+  }
+  .engine-gemini-flash-tts {
+    background: rgba(168, 85, 247, 0.15);
+    color: #c4b5fd; border-color: rgba(168, 85, 247, 0.3);
+  }
+  .engine-google-cloud-tts {
+    background: rgba(74, 222, 128, 0.15);
+    color: #86efac; border-color: rgba(74, 222, 128, 0.3);
+  }
+  .engine-unknown {
+    background: rgba(113, 113, 122, 0.15);
+    color: var(--fg-muted); border-color: rgba(113, 113, 122, 0.3);
+  }
+  .line.line-google-cloud-tts {
+    border-left: 2px solid rgba(74, 222, 128, 0.4);
+    margin-left: -0.5em; padding-left: 0.5em;
   }
   .ritual-meta {
     color: var(--fg-muted); font-size: 0.85em;
@@ -791,10 +857,21 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     const totalLines = doc.lines.length;
     const linesWithAudio = doc.lines.filter(l => l.hasAudio).length;
     const audioMb = (doc.lines.reduce((n, l) => n + (l.audioBytes || 0), 0) / (1024*1024)).toFixed(2);
+    // Engine breakdown — friendly labels
+    const engineLabels = {
+      "gemini-flash-tts": "Gemini Flash",
+      "google-cloud-tts": "Google Cloud",
+      "unknown": "unknown",
+    };
+    const engineParts = Object.entries(doc.engineCounts || {})
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, n]) => '<span class="engine-badge engine-' + k + '">' + (engineLabels[k] || k) + ' ' + n + '</span>')
+      .join(' ');
     let html = '<div class="ritual-meta">' +
       totalLines + ' total nodes, ' + linesWithAudio + ' with audio (' + audioMb + ' MB) · ' +
       'jurisdiction: ' + (doc.metadata.jurisdiction || '—') + ' · ' +
       'degree: ' + (doc.metadata.degree || '—') +
+      (engineParts ? '<div style="margin-top: 0.5em;">' + engineParts + '</div>' : '') +
       '</div>';
 
     // Scene panel — context for how the bake interpreted the whole ritual
@@ -836,6 +913,7 @@ export function handleIndexRequest(res: http.ServerResponse): void {
       '<label><input type="checkbox" id="show-cipher"' + (state.showCipher ? ' checked' : '') + '> Show cipher text</label>' +
       '<label><input type="checkbox" id="hide-action"> Hide stage actions</label>' +
       '<label><input type="checkbox" id="expand-all-details"> Expand all line details</label>' +
+      '<label><input type="checkbox" id="filter-google"> Only Google Cloud TTS lines</label>' +
       '</div>';
     for (const sid of sectionOrder) {
       const lines = linesBySection.get(sid) || [];
@@ -866,17 +944,34 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         el.open = open;
       });
     });
+    document.getElementById("filter-google").addEventListener("change", e => {
+      const onlyGoogle = e.target.checked;
+      document.querySelectorAll(".line").forEach(el => {
+        const isGoogle = el.classList.contains("line-google-cloud-tts");
+        el.style.display = onlyGoogle && !isGoogle ? "none" : "grid";
+      });
+    });
   }
 
   function renderLine(l, slug, voiceCastByRole) {
     const isAction = Boolean(l.action);
-    const cls = "line" + (isAction ? " action" : "") + (l.hasAudio ? "" : " no-audio");
+    const engineCls = l.engine ? " line-" + l.engine : "";
+    const cls = "line" + (isAction ? " action" : "") + (l.hasAudio ? "" : " no-audio") + engineCls;
     const text = isAction ? l.action : (state.showCipher ? l.cipher : l.plain);
     const gavels = l.gavels > 0 ? '<span class="gavels">' + '*'.repeat(l.gavels) + '</span>' : '';
     const audio = l.hasAudio
       ? '<audio controls preload="none" src="/api/ritual/' + encodeURIComponent(slug) + '/line/' + l.id + '.opus"></audio>'
       : (isAction ? '<span class="no-audio-note">(stage action)</span>' : '<span class="no-audio-note">(no audio baked)</span>');
+    const engineLabels = {
+      "gemini-flash-tts": "Gemini Flash",
+      "google-cloud-tts": "Google Cloud",
+      "unknown": "unknown engine",
+    };
+    const engineBadge = l.hasAudio && l.engine
+      ? '<span class="engine-badge engine-' + l.engine + '">' + (engineLabels[l.engine] || l.engine) + '</span>'
+      : '';
     const metaParts = [];
+    if (engineBadge) metaParts.push(engineBadge);
     if (l.style) metaParts.push('style: ' + escapeHtml(l.style));
     if (l.audioBytes) metaParts.push(Math.round(l.audioBytes / 1024) + ' KB');
     if (l.speakAs) metaParts.push('speakAs override');
@@ -887,7 +982,14 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     let details = '';
     if (!isAction && (l.speakAs || l.cipher || l.voice || voiceCastByRole[l.role])) {
       const dl = [];
-      if (l.voice) dl.push('<dt>Voice</dt><dd>' + escapeHtml(l.voice) + '</dd>');
+      if (l.engine && l.engine !== "unknown") {
+        const eLabel = engineLabels[l.engine] || l.engine;
+        const note = l.engine === "google-cloud-tts"
+          ? " (D-09 short-line route or fallback for deterministic-empty Gemini)"
+          : " (Gemini SSE stream → ffmpeg-encoded Opus)";
+        dl.push('<dt>Render engine</dt><dd>' + escapeHtml(eLabel) + escapeHtml(note) + '</dd>');
+      }
+      if (l.voice) dl.push('<dt>Voice (assigned to role)</dt><dd>' + escapeHtml(l.voice) + '</dd>');
       const sidecar = voiceCastByRole[l.role];
       if (sidecar) {
         if (sidecar.profile) dl.push('<dt>Role profile</dt><dd class="profile">' + escapeHtml(sidecar.profile) + '</dd>');
