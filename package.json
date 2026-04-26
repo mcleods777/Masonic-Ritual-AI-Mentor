@@ -9,9 +9,10 @@
     "lint": "eslint",
     "test": "vitest",
     "test:run": "vitest run",
-    "bake-all": "npx tsx scripts/bake-all.ts",
-    "preview-bake": "npx tsx scripts/preview-bake.ts",
-    "verify-content": "npx tsx scripts/verify-content.ts"
+    "bake-all": "npx tsx --env-file=.env.local scripts/bake-all.ts",
+    "preview-bake": "npx tsx --env-file=.env.local scripts/preview-bake.ts",
+    "verify-content": "npx tsx --env-file=.env.local scripts/verify-content.ts",
+    "rebake-flagged": "npx tsx --env-file=.env.local scripts/rebake-flagged.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.71",

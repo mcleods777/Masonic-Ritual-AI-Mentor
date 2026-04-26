@@ -35,6 +35,15 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { assertDevOnly } from "../src/lib/dev-guard";
 import { decryptMRAM, type MRAMDocument } from "../src/lib/mram-format";
+import {
+  renderLineAudio,
+  computeCacheKey,
+  deleteCacheEntry,
+  DEFAULT_MODELS,
+  CACHE_DIR as RENDER_CACHE_DIR,
+} from "./render-gemini-audio";
+import { encryptMRAMNode } from "./build-mram-from-dialogue";
+import { buildPreamble, type VoiceCastFile } from "../src/lib/voice-cast";
 
 // Module-load guard: fail fast in production (T-03-02).
 assertDevOnly();
@@ -453,11 +462,18 @@ async function handleRitualDetail(
       // multi-second audio for this. base64 ratio is 4 chars → 3 bytes,
       // so 384 base64 chars ≈ 288 bytes of binary header.
       let engine: AudioEngine = "unknown";
+      let audioHash: string | null = null;
       if (l.audio) {
         const headerB64 = l.audio.slice(0, 384);
         const headerBytes = Buffer.from(headerB64, "base64");
         engine = detectAudioEngine(headerBytes);
         engineCounts[engine] = (engineCounts[engine] ?? 0) + 1;
+        // Full-audio sha256 — used by the client to detect when audio
+        // has been re-baked since a previous "approved" review state was
+        // recorded. Cheap (~3-5ms total per ritual at 200 lines).
+        audioHash = crypto.createHash("sha256")
+          .update(Buffer.from(l.audio, "base64"))
+          .digest("hex");
       }
       return {
         id: l.id,
@@ -474,6 +490,7 @@ async function handleRitualDetail(
         hasAudio: Boolean(l.audio),
         audioBytes: l.audio ? Math.floor((l.audio.length * 3) / 4) : 0,
         engine,
+        audioHash,
       };
     });
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -530,6 +547,395 @@ async function handleRitualLineAudio(
   } catch (e) {
     res.writeHead(500);
     res.end("Decrypt failed");
+  }
+}
+
+// ============================================================
+// Review sidecar — STT-01 Step 2/3: per-line status + notes
+// ============================================================
+// Stored at rituals/{slug}-review.json (gitignored via rituals/*.json).
+// Single-user dev tool; no concurrency control beyond atomic write.
+
+const REVIEW_STATUSES = new Set([
+  "unmarked",
+  "flagged-review",
+  "flagged-regen",
+  "approved",
+]);
+
+interface ReviewEntry {
+  status: string;
+  note: string;
+  audioHash: string | null;
+  approvedAt: string | null;
+  flaggedAt: string | null;
+}
+
+interface ReviewSidecar {
+  version: number;
+  updatedAt: string | null;
+  lines: Record<string, ReviewEntry>;
+}
+
+function reviewSidecarPath(slug: string): string {
+  return path.join(RITUALS_DIR, `${slug}-review.json`);
+}
+
+function defaultReviewEntry(): ReviewEntry {
+  return {
+    status: "unmarked",
+    note: "",
+    audioHash: null,
+    approvedAt: null,
+    flaggedAt: null,
+  };
+}
+
+function readReviewSidecar(slug: string): ReviewSidecar {
+  const p = reviewSidecarPath(slug);
+  if (!fs.existsSync(p)) {
+    return { version: 1, updatedAt: null, lines: {} };
+  }
+  try {
+    const raw = fs.readFileSync(p, "utf8");
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return { version: 1, updatedAt: null, lines: {} };
+    }
+    const lines: Record<string, ReviewEntry> = {};
+    if (parsed.lines && typeof parsed.lines === "object") {
+      for (const [k, v] of Object.entries(parsed.lines)) {
+        if (!v || typeof v !== "object") continue;
+        const entry = v as Record<string, unknown>;
+        const status = typeof entry.status === "string" && REVIEW_STATUSES.has(entry.status)
+          ? entry.status
+          : "unmarked";
+        lines[k] = {
+          status,
+          note: typeof entry.note === "string" ? entry.note : "",
+          audioHash: typeof entry.audioHash === "string" ? entry.audioHash : null,
+          approvedAt: typeof entry.approvedAt === "string" ? entry.approvedAt : null,
+          flaggedAt: typeof entry.flaggedAt === "string" ? entry.flaggedAt : null,
+        };
+      }
+    }
+    return {
+      version: 1,
+      updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : null,
+      lines,
+    };
+  } catch {
+    return { version: 1, updatedAt: null, lines: {} };
+  }
+}
+
+function writeReviewSidecar(slug: string, data: ReviewSidecar): void {
+  const p = reviewSidecarPath(slug);
+  const tmp = `${p}.tmp.${process.pid}`;
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+  fs.renameSync(tmp, p);
+}
+
+function handleReviewGet(res: http.ServerResponse, slug: string): void {
+  if (!RITUAL_SLUG_REGEX.test(slug)) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Invalid slug" }));
+    return;
+  }
+  const sidecar = readReviewSidecar(slug);
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(sidecar));
+}
+
+async function handleReviewPut(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  slug: string,
+  lineIdStr: string,
+): Promise<void> {
+  if (!RITUAL_SLUG_REGEX.test(slug)) {
+    res.writeHead(400);
+    res.end("Invalid slug");
+    return;
+  }
+  if (!LINE_ID_REGEX.test(lineIdStr)) {
+    res.writeHead(400);
+    res.end("Invalid line id");
+    return;
+  }
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const c of req) {
+    const buf = c as Buffer;
+    total += buf.length;
+    if (total > 8192) {
+      res.writeHead(413);
+      res.end("Body too large");
+      return;
+    }
+    chunks.push(buf);
+  }
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    res.writeHead(400);
+    res.end("Invalid JSON");
+    return;
+  }
+  if (!parsed || typeof parsed !== "object") {
+    res.writeHead(400);
+    res.end("Invalid body");
+    return;
+  }
+  const sidecar = readReviewSidecar(slug);
+  const next: ReviewEntry = { ...(sidecar.lines[lineIdStr] ?? defaultReviewEntry()) };
+  const now = new Date().toISOString();
+  if ("status" in parsed) {
+    if (typeof parsed.status !== "string" || !REVIEW_STATUSES.has(parsed.status)) {
+      res.writeHead(400);
+      res.end("Invalid status");
+      return;
+    }
+    next.status = parsed.status;
+    if (parsed.status === "approved") next.approvedAt = now;
+    else if (parsed.status === "flagged-review" || parsed.status === "flagged-regen") next.flaggedAt = now;
+    else if (parsed.status === "unmarked") {
+      next.approvedAt = null;
+      next.flaggedAt = null;
+    }
+  }
+  if ("note" in parsed) {
+    if (typeof parsed.note !== "string") {
+      res.writeHead(400);
+      res.end("Invalid note");
+      return;
+    }
+    if (parsed.note.length > 4000) {
+      res.writeHead(400);
+      res.end("Note too long");
+      return;
+    }
+    next.note = parsed.note;
+  }
+  if ("audioHash" in parsed) {
+    if (parsed.audioHash !== null && (typeof parsed.audioHash !== "string" || !/^[0-9a-f]{64}$/.test(parsed.audioHash))) {
+      res.writeHead(400);
+      res.end("Invalid audioHash");
+      return;
+    }
+    next.audioHash = parsed.audioHash as string | null;
+  }
+  sidecar.lines[lineIdStr] = next;
+  sidecar.updatedAt = now;
+  writeReviewSidecar(slug, sidecar);
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(next));
+}
+
+// ============================================================
+// Rebake one line — STT-01 in-GUI regenerate
+// ============================================================
+// Decrypts the .mram, re-renders one line via Gemini using the same
+// param derivation as scripts/rebake-flagged.ts, atomically writes the
+// updated .mram, and updates the review sidecar (audioHash → null;
+// approved → unmarked since the audio bytes changed). Single in-process
+// lock per slug serializes concurrent rebakes against the same ritual.
+
+const rebakeLockBySlug = new Map<string, Promise<void>>();
+
+async function handleRebakeLine(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  slug: string,
+  lineIdStr: string,
+): Promise<void> {
+  if (!RITUAL_SLUG_REGEX.test(slug)) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Invalid slug" }));
+    return;
+  }
+  if (!LINE_ID_REGEX.test(lineIdStr)) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Invalid line id" }));
+    return;
+  }
+  const passphrase = process.env.MRAM_PASSPHRASE;
+  if (!passphrase) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "MRAM_PASSPHRASE not set" }));
+    return;
+  }
+  const apiKeysRaw =
+    process.env.GOOGLE_GEMINI_API_KEYS ?? process.env.GOOGLE_GEMINI_API_KEY;
+  if (!apiKeysRaw) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "GOOGLE_GEMINI_API_KEYS not set" }));
+    return;
+  }
+  const apiKeys = apiKeysRaw.split(",").map((s) => s.trim()).filter(Boolean);
+
+  // Parse small JSON body — { forcePreamble?: boolean }
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const c of req) {
+    const buf = c as Buffer;
+    total += buf.length;
+    if (total > 1024) {
+      res.writeHead(413);
+      res.end("Body too large");
+      return;
+    }
+    chunks.push(buf);
+  }
+  let body: { forcePreamble?: boolean } = {};
+  if (chunks.length > 0) {
+    try {
+      body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    } catch {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid JSON body" }));
+      return;
+    }
+  }
+  const forcePreamble = !!body.forcePreamble;
+
+  // Per-slug serialization
+  const prev = rebakeLockBySlug.get(slug);
+  let resolveLock!: () => void;
+  const lockPromise = new Promise<void>((r) => {
+    resolveLock = r;
+  });
+  rebakeLockBySlug.set(slug, lockPromise);
+  if (prev) await prev;
+
+  try {
+    const lineId = Number(lineIdStr);
+    const mramPath = path.join(RITUALS_DIR, `${slug}.mram`);
+    if (!fs.existsSync(mramPath)) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Ritual not found" }));
+      return;
+    }
+    const buf = fs.readFileSync(mramPath);
+    const ab = buf.buffer.slice(
+      buf.byteOffset,
+      buf.byteOffset + buf.byteLength,
+    ) as ArrayBuffer;
+    const doc = await decryptMRAM(ab, passphrase);
+
+    const line = doc.lines.find((l) => l.id === lineId);
+    if (!line || line.action || !line.plain) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Line not found or not spoken" }));
+      return;
+    }
+    const voice = doc.metadata.voiceCast?.[line.role];
+    if (!voice) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: `Role ${line.role} has no pinned voice` }));
+      return;
+    }
+
+    // Derive style + speakAs + preamble — same logic as rebake-flagged.ts
+    const stylesByHash = loadStylesSidecar(slug);
+    const sidecar = stylesByHash.get(hashLineText(line.plain));
+    const speakAs = sidecar?.speakAs;
+    const style = line.style ?? sidecar?.style;
+    const text = speakAs ?? line.plain;
+
+    const VOICE_CAST_MIN_LINE_CHARS = parseInt(
+      process.env.VOICE_CAST_MIN_LINE_CHARS ?? "40",
+      10,
+    );
+
+    let preamble = "";
+    if (!speakAs) {
+      const overThreshold = line.plain.length >= VOICE_CAST_MIN_LINE_CHARS;
+      if (forcePreamble || overThreshold) {
+        const voiceCastPath = path.join(
+          RITUALS_DIR,
+          `${slug}-voice-cast.json`,
+        );
+        if (fs.existsSync(voiceCastPath)) {
+          try {
+            const vcRaw = JSON.parse(
+              fs.readFileSync(voiceCastPath, "utf8"),
+            ) as Record<string, unknown>;
+            const vcFile: VoiceCastFile = {
+              version: 1,
+              scene: vcRaw.scene as string | undefined,
+              roles: ((vcRaw.roles ?? vcRaw.cast) ?? {}) as VoiceCastFile["roles"],
+            };
+            preamble = buildPreamble(vcFile, line.role) ?? "";
+          } catch {
+            /* parse fail → no preamble */
+          }
+        }
+      }
+    }
+
+    // Wipe cache entries for all default models so we get a fresh roll
+    for (const model of DEFAULT_MODELS) {
+      const key = computeCacheKey(text, style, voice, model, preamble);
+      deleteCacheEntry(key, RENDER_CACHE_DIR);
+    }
+
+    // Render
+    const audioBuf = await renderLineAudio(
+      text,
+      style,
+      voice,
+      { apiKeys, models: DEFAULT_MODELS, cacheDir: RENDER_CACHE_DIR },
+      preamble,
+    );
+    line.audio = audioBuf.toString("base64");
+
+    // Re-encrypt + atomic write
+    const reEncrypted = encryptMRAMNode(doc, passphrase);
+    const tmpPath = `${mramPath}.tmp.${process.pid}`;
+    fs.writeFileSync(tmpPath, reEncrypted);
+    fs.renameSync(tmpPath, mramPath);
+
+    // Update review sidecar — clear audio-related fields, demote approved
+    const reviewPath = path.join(RITUALS_DIR, `${slug}-review.json`);
+    if (fs.existsSync(reviewPath)) {
+      try {
+        const sc = readReviewSidecar(slug);
+        const entry = sc.lines[String(lineId)];
+        if (entry) {
+          entry.audioHash = null;
+          entry.approvedAt = null;
+          if (entry.status === "approved") {
+            entry.status = "unmarked";
+            entry.flaggedAt = null;
+          }
+          sc.updatedAt = new Date().toISOString();
+          writeReviewSidecar(slug, sc);
+        }
+      } catch {
+        /* swallow */
+      }
+    }
+
+    const newHash = crypto.createHash("sha256").update(audioBuf).digest("hex");
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        ok: true,
+        audioBytes: audioBuf.length,
+        audioHash: newHash,
+        preambleUsed: preamble.length > 0,
+      }),
+    );
+  } catch (e) {
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: (e as Error).message.slice(0, 300) }));
+  } finally {
+    resolveLock();
+    if (rebakeLockBySlug.get(slug) === lockPromise) {
+      rebakeLockBySlug.delete(slug);
+    }
   }
 }
 
@@ -743,7 +1149,9 @@ export function handleIndexRequest(res: http.ServerResponse): void {
   }
 
   /* Engine filter row — same card style as ritual-context */
-  .controls.engine-filters {
+  .controls.engine-filters,
+  .controls.role-filters,
+  .controls.status-filters {
     margin: 0.4em 0 1em;
     align-items: center;
     padding: 0.7em 1em;
@@ -751,10 +1159,66 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     border: 1px solid var(--zinc-800);
     border-radius: 12px;
   }
-  .controls.engine-filters .filter-label {
+  .controls.engine-filters .filter-label,
+  .controls.role-filters .filter-label,
+  .controls.status-filters .filter-label {
     color: var(--zinc-500); font-size: 0.82em;
     font-family: ui-monospace, monospace;
     text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  /* Role pill — analogous to engine pill but uses role-tone styling
+     (monospace amber matching the per-line .role color). */
+  .role-filter {
+    display: inline-flex; align-items: center; gap: 0.4em;
+    cursor: pointer; user-select: none;
+  }
+  .role-filter input[type="checkbox"] {
+    margin: 0; cursor: pointer;
+    accent-color: var(--amber-500);
+  }
+  .role-pill {
+    display: inline-block; padding: 0.15em 0.65em;
+    border-radius: 10px; font-size: 0.78em;
+    font-weight: 600; font-family: ui-monospace, monospace;
+    color: var(--amber-400);
+    background: rgba(245, 158, 11, 0.08);
+    border: 1px solid rgba(245, 158, 11, 0.2);
+    letter-spacing: 0.02em;
+    transition: filter 100ms;
+  }
+  .role-filter:hover .role-pill { filter: brightness(1.15); }
+  .role-pill .count {
+    color: var(--zinc-500); font-weight: 400; margin-left: 0.4em;
+  }
+  /* Status filter — uses the same status-pill style as the inline pills
+     but as a static (non-clickable) badge inside a checkbox label. */
+  .status-filter {
+    display: inline-flex; align-items: center; gap: 0.4em;
+    cursor: pointer; user-select: none;
+  }
+  .status-filter input[type="checkbox"] {
+    margin: 0; cursor: pointer;
+    accent-color: var(--amber-500);
+  }
+  .status-filter:hover .status-pill { filter: brightness(1.15); }
+  .status-pill .status-count {
+    margin-left: 0.5em;
+    font-weight: 400; opacity: 0.75;
+    font-size: 0.85em;
+  }
+  /* Bulk approve button has the same shape as filter-shortcut but a
+     subtle green tint so it reads as the action target. */
+  .filter-shortcut.bulk-approve {
+    border-color: rgba(74, 222, 128, 0.4);
+    color: var(--good);
+  }
+  .filter-shortcut.bulk-approve:hover {
+    background: rgba(74, 222, 128, 0.12);
+    border-color: rgba(74, 222, 128, 0.6);
+    color: var(--good);
+  }
+  .filter-shortcut:disabled {
+    opacity: 0.5; cursor: wait;
   }
   .engine-filter {
     display: inline-flex; align-items: center; gap: 0.4em;
@@ -894,6 +1358,175 @@ export function handleIndexRequest(res: http.ServerResponse): void {
   .line-details-body dd.profile {
     font-style: italic; color: var(--zinc-400);
   }
+
+  /* STT-01 Step 1: current-line indicator. Amber edge + subtle bg so the
+     line you're auditioning stands out without competing with engine
+     color-coding. The engine left-border is overridden when current. */
+  .line.is-current {
+    background: rgba(245, 158, 11, 0.07);
+    border-left: 3px solid var(--amber-500);
+    padding-left: calc(1.25em - 3px);
+  }
+  .line.is-current .id { color: var(--amber-400); }
+
+  /* STT-01 Step 2: status pills + note area.
+     Sized to look like real interactive controls — these are primary
+     action targets (click to cycle status, click to open note), so they
+     need to read as buttons, not as ambient metadata. */
+  .status-pill {
+    display: inline-flex; align-items: center;
+    padding: 0.5em 1.15em;
+    border-radius: 8px;
+    font-size: 0.95em; font-weight: 600;
+    font-family: 'Lato', sans-serif;
+    text-transform: lowercase;
+    border: 1.5px solid transparent;
+    letter-spacing: 0.03em;
+    cursor: pointer;
+    transition: filter 100ms, box-shadow 100ms, transform 80ms;
+    user-select: none;
+    line-height: 1;
+  }
+  .status-pill::before {
+    content: "●"; margin-right: 0.45em;
+    font-size: 0.85em; line-height: 1;
+  }
+  .status-pill:hover {
+    filter: brightness(1.2);
+    box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.12);
+  }
+  .status-pill:active { transform: scale(0.97); }
+  .status-pill.status-unmarked {
+    background: rgba(113, 113, 122, 0.18);
+    color: var(--zinc-300); border-color: rgba(113, 113, 122, 0.4);
+  }
+  .status-pill.status-unmarked::before { color: var(--zinc-500); }
+  .status-pill.status-flagged-review {
+    background: rgba(251, 191, 36, 0.18);
+    color: var(--amber-300); border-color: rgba(251, 191, 36, 0.5);
+  }
+  .status-pill.status-flagged-review::before { color: var(--amber-400); }
+  .status-pill.status-flagged-regen {
+    background: rgba(248, 113, 113, 0.18);
+    color: var(--error); border-color: rgba(248, 113, 113, 0.5);
+  }
+  .status-pill.status-flagged-regen::before { color: var(--error); }
+  .status-pill.status-approved {
+    background: rgba(74, 222, 128, 0.16);
+    color: var(--good); border-color: rgba(74, 222, 128, 0.5);
+  }
+  .status-pill.status-approved::before { content: "✓"; color: var(--good); }
+  .status-pill.status-approved.stale {
+    background: rgba(245, 158, 11, 0.16);
+    color: var(--amber-400); border-color: rgba(245, 158, 11, 0.5);
+  }
+  .status-pill.status-approved.stale::before {
+    content: "⚠"; color: var(--amber-400);
+  }
+  .status-pill.status-approved.stale::after {
+    content: " (stale)"; opacity: 0.85;
+  }
+  /* Note toggle — sized to match the status pill so they read as a pair. */
+  .note-toggle {
+    background: transparent; border: 1.5px solid var(--zinc-700);
+    color: var(--zinc-300);
+    padding: 0.5em 1.15em;
+    border-radius: 8px; cursor: pointer;
+    font-family: 'Lato', sans-serif;
+    font-size: 0.95em; font-weight: 600;
+    transition: all 120ms, transform 80ms;
+    line-height: 1;
+  }
+  .note-toggle:hover {
+    background: rgba(245, 158, 11, 0.1);
+    color: var(--amber-400);
+    border-color: rgba(245, 158, 11, 0.5);
+  }
+  .note-toggle:active { transform: scale(0.97); }
+  .note-toggle.has-note {
+    border-color: rgba(245, 158, 11, 0.5);
+    color: var(--amber-400);
+    background: rgba(245, 158, 11, 0.08);
+  }
+  /* Rebake button — same shape as note-toggle but with a refresh icon and
+     a subtle blue/teal accent so it reads as a regenerate action, not a
+     toggle. Disabled state during in-flight render. */
+  .rebake-btn {
+    background: transparent;
+    border: 1.5px solid var(--zinc-700);
+    color: var(--zinc-300);
+    padding: 0.5em 1em;
+    border-radius: 8px; cursor: pointer;
+    font-family: 'Lato', sans-serif;
+    font-size: 0.95em; font-weight: 600;
+    transition: all 120ms, transform 80ms;
+    line-height: 1;
+    display: inline-flex; align-items: center; gap: 0.4em;
+  }
+  .rebake-btn::before { content: "↻"; font-size: 1.1em; line-height: 1; }
+  .rebake-btn:hover:not(:disabled) {
+    background: rgba(45, 212, 191, 0.1);
+    color: #5eead4;
+    border-color: rgba(45, 212, 191, 0.5);
+  }
+  .rebake-btn:active:not(:disabled) { transform: scale(0.97); }
+  .rebake-btn:disabled {
+    opacity: 0.5; cursor: wait;
+    border-style: dashed;
+  }
+  .rebake-btn.rebaking::before {
+    animation: rebake-spin 1s linear infinite;
+    display: inline-block;
+  }
+  @keyframes rebake-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+  .note-area {
+    margin-top: 0.5em;
+    background: var(--zinc-950);
+    border: 1px solid var(--zinc-800);
+    border-radius: 8px;
+    padding: 0.6em 0.75em;
+    transition: border-color 100ms;
+  }
+  .note-area:focus-within {
+    border-color: rgba(245, 158, 11, 0.4);
+  }
+  .note-area textarea {
+    width: 100%; min-height: 3em; max-height: 14em;
+    background: transparent; border: none;
+    color: var(--zinc-200);
+    font: 14px/1.5 'Lato', system-ui, sans-serif;
+    resize: vertical; outline: none;
+    padding: 0;
+  }
+  .note-area textarea::placeholder {
+    color: var(--zinc-600); font-style: italic;
+  }
+  .note-saved-indicator {
+    font-size: 0.72em; color: var(--zinc-500);
+    font-family: ui-monospace, monospace;
+    margin-top: 0.4em; min-height: 1em;
+  }
+  .note-saved-indicator.saved { color: var(--good); }
+  .note-saved-indicator.error { color: var(--error); }
+  .kbd-hint {
+    color: var(--zinc-500);
+    font-size: 0.78em;
+    font-family: ui-monospace, monospace;
+    margin-left: 0.5em;
+  }
+  .kbd-hint kbd {
+    background: var(--zinc-900);
+    border: 1px solid var(--zinc-800);
+    border-radius: 3px;
+    padding: 0.1em 0.4em;
+    font-family: ui-monospace, monospace;
+    font-size: 0.85em;
+    color: var(--zinc-300);
+    margin: 0 0.1em;
+  }
 </style>
 </head>
 <body>
@@ -916,6 +1549,20 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     // Set of engine keys currently visible. null means "all visible"
     // (e.g. before any filter has been touched, or after Reset).
     engineFilter: null,
+    // STT-01 Step 1: autoplay sequence (space + arrows). Persisted to
+    // localStorage so it survives reloads. currentLineId is the line
+    // whose audio last started or was selected via keyboard.
+    autoplay: false,
+    currentLineId: null,
+    // Set of role names currently visible. Behaves like engineFilter:
+    // null = uninitialized; on ritual switch, new roles auto-add as visible.
+    roleFilter: null,
+    // STT-01 Step 2: review sidecar state. { lines: { [id]: { status, note,
+    // audioHash, approvedAt, flaggedAt } } }. Loaded from /api/ritual/{slug}/review.
+    review: { lines: {} },
+    // STT-01 Step 3: status filter — Set of statuses currently visible.
+    // null = uninitialized (default to all on first render).
+    statusFilter: null,
   };
 
   async function init() {
@@ -963,12 +1610,19 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     renderTabs();
     document.getElementById("content").innerHTML = '<div class="empty">Decrypting ' + slug + '…</div>';
     try {
-      const res = await fetch("/api/ritual/" + encodeURIComponent(slug));
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || res.statusText);
+      // Fetch ritual detail and review sidecar in parallel — sidecar is
+      // tiny so this never blocks render meaningfully.
+      const [docRes, reviewRes] = await Promise.all([
+        fetch("/api/ritual/" + encodeURIComponent(slug)),
+        fetch("/api/ritual/" + encodeURIComponent(slug) + "/review"),
+      ]);
+      if (!docRes.ok) {
+        const err = await docRes.json().catch(() => ({}));
+        throw new Error(err.error || docRes.statusText);
       }
-      state.activeDoc = await res.json();
+      state.activeDoc = await docRes.json();
+      state.review = reviewRes.ok ? await reviewRes.json() : { lines: {} };
+      if (!state.review.lines) state.review.lines = {};
       renderRitual();
     } catch (e) {
       document.getElementById("content").innerHTML = '<div class="empty err">Error: ' + e.message + '</div>';
@@ -1067,10 +1721,35 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         '</label>';
     }).join('');
 
+    // Build per-role filter group. Roles come from spoken lines only
+    // (stage actions don't have a role and aren't subject to this filter).
+    const roleCounts = {};
+    for (const l of doc.lines) {
+      if (l.action || !l.role) continue;
+      roleCounts[l.role] = (roleCounts[l.role] || 0) + 1;
+    }
+    const roleKeys = Object.keys(roleCounts).sort();
+    if (!state.roleFilter) {
+      state.roleFilter = new Set(roleKeys);
+    } else {
+      for (const r of roleKeys) {
+        if (!state.roleFilter.has(r)) state.roleFilter.add(r);
+      }
+    }
+    const rolePills = roleKeys.map(r => {
+      const checked = state.roleFilter.has(r) ? ' checked' : '';
+      return '<label class="role-filter">' +
+        '<input type="checkbox" data-role="' + escapeHtml(r) + '"' + checked + '> ' +
+        '<span class="role-pill">' + escapeHtml(r) + '<span class="count">' + roleCounts[r] + '</span></span>' +
+        '</label>';
+    }).join('');
+
     html += '<div class="controls">' +
       '<label><input type="checkbox" id="show-cipher"' + (state.showCipher ? ' checked' : '') + '> Show cipher text</label>' +
       '<label><input type="checkbox" id="hide-action"> Hide stage actions</label>' +
       '<label><input type="checkbox" id="expand-all-details"> Expand all line details</label>' +
+      '<label><input type="checkbox" id="autoplay-sequence"' + (state.autoplay ? ' checked' : '') + '> Autoplay sequence</label>' +
+      '<span class="kbd-hint"><kbd>Space</kbd> play/pause &middot; <kbd>&uarr;</kbd><kbd>&darr;</kbd> nav &middot; <kbd>a</kbd> approve &middot; <kbd>f</kbd> flag-review &middot; <kbd>r</kbd> flag-regen &middot; <kbd>n</kbd> note &middot; <kbd>shift</kbd>+click Rebake = with voice anchor</span>' +
       '</div>';
     if (filterPills) {
       html += '<div class="controls engine-filters">' +
@@ -1080,6 +1759,47 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         '<button type="button" id="filter-reset" class="filter-shortcut">Show all</button>' +
         '</div>';
     }
+    if (rolePills) {
+      html += '<div class="controls role-filters">' +
+        '<span class="filter-label">Role:</span>' + rolePills +
+        '<button type="button" id="role-filter-show-all" class="filter-shortcut">Show all</button>' +
+        '<button type="button" id="role-filter-hide-all" class="filter-shortcut">Hide all</button>' +
+        '</div>';
+    }
+
+    // Status filter — counts come from state.review.lines, defaulting
+    // any missing line to "unmarked". Only spoken/audio lines count.
+    const statusKeys = ["unmarked", "flagged-review", "flagged-regen", "approved"];
+    const statusCounts = { "unmarked": 0, "flagged-review": 0, "flagged-regen": 0, "approved": 0 };
+    let approvableCount = 0;
+    for (const l of doc.lines) {
+      if (l.action || !l.hasAudio) continue;
+      approvableCount++;
+      const entry = (state.review.lines || {})[String(l.id)];
+      const s = (entry && entry.status) || "unmarked";
+      if (statusCounts[s] !== undefined) statusCounts[s]++;
+    }
+    if (!state.statusFilter) state.statusFilter = new Set(statusKeys);
+    const statusLabels = {
+      "unmarked": "unmarked",
+      "flagged-review": "flag-review",
+      "flagged-regen": "flag-regen",
+      "approved": "approved",
+    };
+    const statusPillsHtml = statusKeys.map(s => {
+      const checked = state.statusFilter.has(s) ? ' checked' : '';
+      return '<label class="status-filter">' +
+        '<input type="checkbox" data-status="' + s + '"' + checked + '> ' +
+        '<span class="status-pill status-' + s + '" style="cursor:default">' + escapeHtml(statusLabels[s]) + '<span class="status-count">' + statusCounts[s] + '</span></span>' +
+        '</label>';
+    }).join('');
+    html += '<div class="controls status-filters">' +
+      '<span class="filter-label">Review:</span>' + statusPillsHtml +
+      '<button type="button" id="status-filter-flagged" class="filter-shortcut">Only flagged</button>' +
+      '<button type="button" id="status-filter-unmarked" class="filter-shortcut">Only unmarked</button>' +
+      '<button type="button" id="status-filter-show-all" class="filter-shortcut">Show all</button>' +
+      '<button type="button" id="bulk-approve-unmarked" class="filter-shortcut bulk-approve" title="Approve every unmarked line in this ritual">Approve all unmarked (' + statusCounts.unmarked + ')</button>' +
+      '</div>';
     for (const sid of sectionOrder) {
       const lines = linesBySection.get(sid) || [];
       if (lines.length === 0) continue;
@@ -1109,13 +1829,14 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         el.open = open;
       });
     });
-    function applyEngineFilter() {
-      // Each line has a "line-{engine}" class. Hide if its engine isn't
-      // in the current filter set. Lines without engine class (stage
-      // actions, no-audio rows) stay visible — the engine filter is a
-      // sound-source filter, not a content-type filter.
-      const visible = state.engineFilter;
+    function applyAllFilters() {
+      // Combined engine + role + status filter. A line is visible only
+      // if it passes all three. Stage-action / no-audio rows have no
+      // engine class, no data-role, and no status — they pass all three
+      // filters by default and are hidden only via the explicit "Hide
+      // stage actions" toggle.
       document.querySelectorAll(".line").forEach(el => {
+        // Engine check: derive from line-{engine} class.
         let lineEngine = null;
         for (const cls of el.classList) {
           if (cls.startsWith("line-") && cls !== "line-action" && cls !== "line-no-audio") {
@@ -1123,12 +1844,20 @@ export function handleIndexRequest(res: http.ServerResponse): void {
             break;
           }
         }
-        // Stage-action / no-audio rows have no engine class — never hide via this filter
-        if (!lineEngine) {
-          el.style.display = "grid";
-          return;
+        const engineOk = !lineEngine || (state.engineFilter && state.engineFilter.has(lineEngine));
+        // Role check: derive from data-role attribute.
+        const role = el.dataset.role || null;
+        const roleOk = !role || !state.roleFilter || state.roleFilter.has(role);
+        // Status check: spoken+audio lines have a status pill; lookup
+        // the line in state.review.lines.
+        const lineId = el.dataset.lineId;
+        let statusOk = true;
+        if (lineId && el.querySelector('.status-pill')) {
+          const entry = (state.review.lines || {})[String(lineId)];
+          const status = (entry && entry.status) || "unmarked";
+          statusOk = !state.statusFilter || state.statusFilter.has(status);
         }
-        el.style.display = visible.has(lineEngine) ? "grid" : "none";
+        el.style.display = (engineOk && roleOk && statusOk) ? "grid" : "none";
       });
     }
 
@@ -1138,25 +1867,449 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         const eng = e.target.dataset.engine;
         if (e.target.checked) state.engineFilter.add(eng);
         else state.engineFilter.delete(eng);
-        applyEngineFilter();
+        applyAllFilters();
       });
     });
     // Quick-action shortcuts: Only Google / Only Gemini / Show all
-    const setFilter = (engines) => {
+    const setEngineFilter = (engines) => {
       state.engineFilter = new Set(engines);
       // Sync the checkboxes
       document.querySelectorAll(".engine-filters input[data-engine]").forEach(cb => {
         cb.checked = state.engineFilter.has(cb.dataset.engine);
       });
-      applyEngineFilter();
+      applyAllFilters();
     };
     const onlyGoogleBtn = document.getElementById("filter-only-google");
-    if (onlyGoogleBtn) onlyGoogleBtn.addEventListener("click", () => setFilter(["google-cloud-tts"]));
+    if (onlyGoogleBtn) onlyGoogleBtn.addEventListener("click", () => setEngineFilter(["google-cloud-tts"]));
     const onlyGeminiBtn = document.getElementById("filter-only-gemini");
-    if (onlyGeminiBtn) onlyGeminiBtn.addEventListener("click", () => setFilter(["gemini-flash-tts"]));
+    if (onlyGeminiBtn) onlyGeminiBtn.addEventListener("click", () => setEngineFilter(["gemini-flash-tts"]));
     const resetBtn = document.getElementById("filter-reset");
-    if (resetBtn) resetBtn.addEventListener("click", () => setFilter(Object.keys(doc.engineCounts || {})));
+    if (resetBtn) resetBtn.addEventListener("click", () => setEngineFilter(Object.keys(doc.engineCounts || {})));
+
+    // Per-role checkbox toggles
+    document.querySelectorAll(".role-filters input[data-role]").forEach(cb => {
+      cb.addEventListener("change", e => {
+        const role = e.target.dataset.role;
+        if (e.target.checked) state.roleFilter.add(role);
+        else state.roleFilter.delete(role);
+        applyAllFilters();
+      });
+    });
+    const setRoleFilter = (roles) => {
+      state.roleFilter = new Set(roles);
+      document.querySelectorAll(".role-filters input[data-role]").forEach(cb => {
+        cb.checked = state.roleFilter.has(cb.dataset.role);
+      });
+      applyAllFilters();
+    };
+    const roleShowAllBtn = document.getElementById("role-filter-show-all");
+    if (roleShowAllBtn) roleShowAllBtn.addEventListener("click", () => setRoleFilter(roleKeys));
+    const roleHideAllBtn = document.getElementById("role-filter-hide-all");
+    if (roleHideAllBtn) roleHideAllBtn.addEventListener("click", () => setRoleFilter([]));
+
+    // Status filter — per-status checkbox toggles
+    document.querySelectorAll(".status-filters input[data-status]").forEach(cb => {
+      cb.addEventListener("change", e => {
+        const s = e.target.dataset.status;
+        if (e.target.checked) state.statusFilter.add(s);
+        else state.statusFilter.delete(s);
+        applyAllFilters();
+      });
+    });
+    const setStatusFilter = (statuses) => {
+      state.statusFilter = new Set(statuses);
+      document.querySelectorAll(".status-filters input[data-status]").forEach(cb => {
+        cb.checked = state.statusFilter.has(cb.dataset.status);
+      });
+      applyAllFilters();
+    };
+    const statusFlaggedBtn = document.getElementById("status-filter-flagged");
+    if (statusFlaggedBtn) statusFlaggedBtn.addEventListener("click", () => setStatusFilter(["flagged-review", "flagged-regen"]));
+    const statusUnmarkedBtn = document.getElementById("status-filter-unmarked");
+    if (statusUnmarkedBtn) statusUnmarkedBtn.addEventListener("click", () => setStatusFilter(["unmarked"]));
+    const statusShowAllBtn = document.getElementById("status-filter-show-all");
+    if (statusShowAllBtn) statusShowAllBtn.addEventListener("click", () => setStatusFilter(statusKeys));
+
+    // Bulk approve all unmarked
+    const bulkApproveBtn = document.getElementById("bulk-approve-unmarked");
+    if (bulkApproveBtn) {
+      bulkApproveBtn.addEventListener("click", async () => {
+        const unmarkedLines = doc.lines.filter(l => {
+          if (l.action || !l.hasAudio) return false;
+          const entry = (state.review.lines || {})[String(l.id)];
+          const s = (entry && entry.status) || "unmarked";
+          return s === "unmarked";
+        });
+        if (unmarkedLines.length === 0) {
+          alert("No unmarked lines to approve.");
+          return;
+        }
+        const ok = window.confirm("Approve all " + unmarkedLines.length + " unmarked line(s) in this ritual? Already-flagged or already-approved lines will not be touched.");
+        if (!ok) return;
+        bulkApproveBtn.disabled = true;
+        bulkApproveBtn.textContent = "Approving 0/" + unmarkedLines.length + "…";
+        let done = 0;
+        for (const l of unmarkedLines) {
+          try {
+            await updateLineReview(l.id, { status: "approved" });
+          } catch (err) {
+            console.error("approve line " + l.id + " failed:", err);
+          }
+          done++;
+          bulkApproveBtn.textContent = "Approving " + done + "/" + unmarkedLines.length + "…";
+        }
+        // Re-render so status filter counts and chip colors are correct
+        renderRitual();
+      });
+    }
+
+    // === STT-01 Step 1: autoplay + keyboard nav ===
+    const autoplayCheckbox = document.getElementById("autoplay-sequence");
+    if (autoplayCheckbox) {
+      autoplayCheckbox.addEventListener("change", e => {
+        state.autoplay = e.target.checked;
+        try { localStorage.setItem("preview-bake.autoplay", state.autoplay ? "1" : "0"); } catch (_) {}
+      });
+    }
+
+    // Wire each audio: pause-others on play, mark current line, advance on end.
+    // Two events for defense-in-depth on the pause-others side:
+    //  - "play" fires when .play() is called (queued, may have brief lag)
+    //  - "playing" fires when the audio actually begins producing sound
+    // Listening to both kills overlap windows when the user rapid-clicks
+    // multiple play buttons.
+    document.querySelectorAll(".line audio").forEach(audio => {
+      const lineEl = audio.closest(".line");
+      const onStart = () => {
+        pauseAllExcept(audio);
+        if (lineEl) setCurrentLine(lineEl.dataset.lineId);
+      };
+      audio.addEventListener("play", onStart);
+      audio.addEventListener("playing", onStart);
+      audio.addEventListener("ended", () => {
+        if (!state.autoplay) return;
+        if (!lineEl) return;
+        const visible = getVisibleLineElsWithAudio();
+        const idx = lineIndexById(visible, lineEl.dataset.lineId);
+        const next = idx >= 0 ? visible[idx + 1] : null;
+        if (next) playLineByEl(next);
+      });
+    });
+
+    // Restore current-line marker after re-render (e.g. cipher toggle).
+    if (state.currentLineId != null) {
+      const el = document.querySelector('.line[data-line-id="' + state.currentLineId + '"]');
+      if (el) el.classList.add("is-current");
+    }
+
+    // === STT-01 Step 2: status pill click + note toggle + note save ===
+    document.querySelectorAll(".status-pill[data-line-id]").forEach(pill => {
+      pill.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const lineId = pill.dataset.lineId;
+        const next = nextStatus(currentStatus(lineId));
+        await updateLineReview(lineId, { status: next });
+      });
+    });
+    document.querySelectorAll(".note-toggle[data-line-id]").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const lineId = btn.dataset.lineId;
+        const noteArea = document.querySelector('.note-area[data-line-id="' + lineId + '"]');
+        if (!noteArea) return;
+        const willOpen = noteArea.hasAttribute("hidden");
+        if (willOpen) {
+          noteArea.removeAttribute("hidden");
+          const ta = noteArea.querySelector("textarea");
+          if (ta) ta.focus();
+        } else {
+          noteArea.setAttribute("hidden", "");
+        }
+      });
+    });
+    // Rebake button — POST /api/ritual/{slug}/rebake/line/{id}, then refresh
+    // the audio src with a cache-busting query so the player reloads.
+    document.querySelectorAll(".rebake-btn[data-line-id]").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const lineId = btn.dataset.lineId;
+        // Shift-click → force preamble (helps on short lines that normally
+        // skip the voice-cast role card).
+        const forcePreamble = e.shiftKey;
+        const slug = state.activeSlug;
+        if (!slug || !lineId) return;
+        btn.disabled = true;
+        btn.classList.add("rebaking");
+        const originalText = btn.textContent;
+        btn.textContent = forcePreamble ? "Rebaking (anchored)…" : "Rebaking…";
+        try {
+          const res = await fetch("/api/ritual/" + encodeURIComponent(slug) + "/rebake/line/" + encodeURIComponent(lineId), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ forcePreamble }),
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || res.statusText);
+          }
+          const data = await res.json();
+          // Refresh the audio src to bust the browser cache. Append a query
+          // param tied to the new audioHash so the <audio> element reloads.
+          const lineEl = document.querySelector('.line[data-line-id="' + lineId + '"]');
+          if (lineEl) {
+            const audio = lineEl.querySelector("audio");
+            if (audio) {
+              const baseSrc = "/api/ritual/" + encodeURIComponent(slug) + "/line/" + encodeURIComponent(lineId) + ".opus";
+              audio.src = baseSrc + "?h=" + encodeURIComponent(data.audioHash || Date.now());
+              audio.load();
+            }
+          }
+          // Refetch review sidecar (server may have demoted approved → unmarked)
+          // Update local state's audioHash for this line so the stale-pill
+          // logic stays accurate.
+          if (state.activeDoc && state.activeDoc.lines) {
+            const docLine = state.activeDoc.lines.find(l => String(l.id) === String(lineId));
+            if (docLine) docLine.audioHash = data.audioHash;
+          }
+          try {
+            const sc = await fetch("/api/ritual/" + encodeURIComponent(slug) + "/review").then(r => r.json());
+            state.review = sc;
+            if (!state.review.lines) state.review.lines = {};
+          } catch { /* swallow — local state still mostly correct */ }
+          refreshLineReviewWidgets(lineId);
+          // Brief success flash
+          btn.textContent = data.preambleUsed ? "✓ rebaked (anchored)" : "✓ rebaked";
+          setTimeout(() => {
+            if (btn) {
+              btn.disabled = false;
+              btn.classList.remove("rebaking");
+              btn.textContent = originalText;
+            }
+          }, 1800);
+        } catch (err) {
+          btn.textContent = "✗ " + (err.message || "rebake failed");
+          btn.classList.remove("rebaking");
+          setTimeout(() => {
+            if (btn) {
+              btn.disabled = false;
+              btn.textContent = originalText;
+            }
+          }, 3000);
+        }
+      });
+    });
+    document.querySelectorAll(".note-area textarea").forEach(ta => {
+      const lineId = ta.closest(".note-area").dataset.lineId;
+      ta.addEventListener("blur", async () => {
+        const note = ta.value;
+        const indicator = document.querySelector('.note-saved-indicator[data-line-id="' + lineId + '"]');
+        if (indicator) { indicator.textContent = "saving…"; indicator.className = "note-saved-indicator"; }
+        try {
+          await updateLineReview(lineId, { note });
+          if (indicator) {
+            indicator.textContent = "saved";
+            indicator.className = "note-saved-indicator saved";
+            setTimeout(() => { if (indicator) indicator.textContent = ""; }, 1500);
+          }
+        } catch (err) {
+          if (indicator) {
+            indicator.textContent = "save failed: " + (err.message || "");
+            indicator.className = "note-saved-indicator error";
+          }
+        }
+      });
+    });
   }
+
+  // === STT-01 Step 1: helper functions hoisted to script scope so the
+  // global keydown handler can call them across re-renders. ===
+
+  function setCurrentLine(lineId) {
+    state.currentLineId = lineId;
+    document.querySelectorAll(".line.is-current").forEach(el => el.classList.remove("is-current"));
+    if (lineId == null) return;
+    const el = document.querySelector('.line[data-line-id="' + lineId + '"]');
+    if (el) {
+      el.classList.add("is-current");
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }
+
+  function pauseAllExcept(audio) {
+    document.querySelectorAll(".line audio").forEach(a => {
+      if (a !== audio && !a.paused) a.pause();
+    });
+  }
+
+  function getVisibleLineElsWithAudio() {
+    return Array.from(document.querySelectorAll(".line[data-line-id]"))
+      .filter(el => el.style.display !== "none" && el.querySelector("audio"));
+  }
+
+  function lineIndexById(visible, id) {
+    return visible.findIndex(el => String(el.dataset.lineId) === String(id));
+  }
+
+  function playLineByEl(el) {
+    if (!el) return;
+    const audio = el.querySelector("audio");
+    if (!audio) return;
+    // Synchronous pause-others BEFORE play() — kills the overlap window
+    // that can otherwise let two audios start audibly during the queued
+    // delay before the new audio's "play" event fires.
+    pauseAllExcept(audio);
+    setCurrentLine(el.dataset.lineId);
+    audio.play().catch(() => { /* autoplay-blocked or load error; ignore */ });
+  }
+
+  // === STT-01 Step 2: review state helpers ===
+  // Cycle order: unmarked → flagged-review → flagged-regen → approved → unmarked
+  const STATUS_ORDER = ["unmarked", "flagged-review", "flagged-regen", "approved"];
+
+  function currentStatus(lineId) {
+    const entry = (state.review.lines || {})[String(lineId)];
+    return (entry && entry.status) || "unmarked";
+  }
+
+  function nextStatus(s) {
+    const i = STATUS_ORDER.indexOf(s);
+    return STATUS_ORDER[(i + 1) % STATUS_ORDER.length];
+  }
+
+  function findLineById(id) {
+    return (state.activeDoc && state.activeDoc.lines || []).find(l => String(l.id) === String(id));
+  }
+
+  // Atomic update: PUT to server, on success update state and re-render
+  // just the affected line's meta/note widgets (full ritual re-render is
+  // overkill for a single status flip).
+  async function updateLineReview(lineId, patch) {
+    // When approving, attach the line's current audioHash so the server
+    // can record what audio was approved. On the next render, if the
+    // audio has been re-baked, the pill renders as "approved (stale)".
+    if (patch.status === "approved") {
+      const line = findLineById(lineId);
+      if (line && line.audioHash) patch.audioHash = line.audioHash;
+    }
+    const slug = state.activeSlug;
+    if (!slug) return;
+    const res = await fetch("/api/ritual/" + encodeURIComponent(slug) + "/review/line/" + encodeURIComponent(lineId), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      throw new Error(txt || ("HTTP " + res.status));
+    }
+    const updated = await res.json();
+    if (!state.review.lines) state.review.lines = {};
+    state.review.lines[String(lineId)] = updated;
+    // Targeted DOM update: pill + note-toggle label, no full re-render.
+    refreshLineReviewWidgets(lineId);
+  }
+
+  function refreshLineReviewWidgets(lineId) {
+    const entry = state.review.lines[String(lineId)] || { status: "unmarked", note: "", audioHash: null };
+    const line = findLineById(lineId);
+    const pill = document.querySelector('.status-pill[data-line-id="' + lineId + '"]');
+    if (pill) {
+      const stale = entry.status === "approved" && entry.audioHash && line && line.audioHash && entry.audioHash !== line.audioHash;
+      pill.className = "status-pill status-" + entry.status + (stale ? " stale" : "");
+      pill.textContent = entry.status;
+    }
+    const btn = document.querySelector('.note-toggle[data-line-id="' + lineId + '"]');
+    if (btn) {
+      const noteLen = (entry.note || "").length;
+      btn.classList.toggle("has-note", noteLen > 0);
+      btn.textContent = noteLen > 0 ? ("📝 " + noteLen + " char" + (noteLen === 1 ? "" : "s")) : "📝 note";
+    }
+  }
+
+  // Install global keyboard handler once. CAPTURE phase (third arg true)
+  // so my preventDefault runs BEFORE the native audio element's default
+  // space-to-toggle behavior. Otherwise clicking a play button focuses
+  // the audio, and pressing space then triggers BOTH my handler (toggle
+  // current line) AND the native audio control (toggle focused audio),
+  // which de-syncs them when current line and focused audio differ.
+  // The handler reads live DOM, so it remains correct across re-renders.
+  if (!window.__previewBakeKeyboardInstalled) {
+    window.__previewBakeKeyboardInstalled = true;
+    document.addEventListener("keydown", e => {
+      const tag = (e.target && e.target.tagName) || "";
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const visible = getVisibleLineElsWithAudio();
+      if (visible.length === 0) return;
+      const idx = state.currentLineId != null ? lineIndexById(visible, state.currentLineId) : -1;
+      if (e.key === " " || e.key === "Spacebar") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (idx < 0) {
+          playLineByEl(visible[0]);
+        } else {
+          const audio = visible[idx].querySelector("audio");
+          if (audio) {
+            if (audio.paused) {
+              pauseAllExcept(audio);
+              audio.play().catch(() => {});
+            } else {
+              audio.pause();
+            }
+          }
+        }
+      } else if (e.key === "ArrowDown" || e.key === "ArrowRight") {
+        e.preventDefault();
+        e.stopPropagation();
+        const next = idx < 0 ? visible[0] : visible[idx + 1];
+        if (next) playLineByEl(next);
+      } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
+        e.preventDefault();
+        e.stopPropagation();
+        const prev = idx <= 0 ? null : visible[idx - 1];
+        if (prev) playLineByEl(prev);
+      } else if (e.key === "a" || e.key === "A") {
+        // Approve current line. No preventDefault on bare letter keys
+        // unless we matched — let normal typing through.
+        if (idx >= 0) {
+          e.preventDefault();
+          e.stopPropagation();
+          updateLineReview(visible[idx].dataset.lineId, { status: "approved" }).catch(() => {});
+        }
+      } else if (e.key === "f" || e.key === "F") {
+        if (idx >= 0) {
+          e.preventDefault();
+          e.stopPropagation();
+          updateLineReview(visible[idx].dataset.lineId, { status: "flagged-review" }).catch(() => {});
+        }
+      } else if (e.key === "r" || e.key === "R") {
+        if (idx >= 0) {
+          e.preventDefault();
+          e.stopPropagation();
+          updateLineReview(visible[idx].dataset.lineId, { status: "flagged-regen" }).catch(() => {});
+        }
+      } else if (e.key === "n" || e.key === "N") {
+        // Open + focus the note textarea on the current line.
+        if (idx >= 0) {
+          e.preventDefault();
+          e.stopPropagation();
+          const lineId = visible[idx].dataset.lineId;
+          const noteArea = document.querySelector('.note-area[data-line-id="' + lineId + '"]');
+          if (noteArea) {
+            noteArea.removeAttribute("hidden");
+            const ta = noteArea.querySelector("textarea");
+            if (ta) ta.focus();
+          }
+        }
+      }
+    }, true);
+  }
+
+  // Restore autoplay preference from localStorage on first load.
+  try {
+    const saved = localStorage.getItem("preview-bake.autoplay");
+    if (saved === "1") state.autoplay = true;
+  } catch (_) { /* localStorage may be blocked */ }
 
   function renderLine(l, slug, voiceCastByRole) {
     const isAction = Boolean(l.action);
@@ -1177,10 +2330,40 @@ export function handleIndexRequest(res: http.ServerResponse): void {
       : '';
     const metaParts = [];
     if (engineBadge) metaParts.push(engineBadge);
+    // Status pill — only meaningful for spoken lines that have audio
+    // (stage actions can't be approved/flagged in the same sense).
+    if (!isAction && l.hasAudio) {
+      const review = (state.review.lines || {})[String(l.id)] || { status: "unmarked", note: "", audioHash: null };
+      const status = review.status || "unmarked";
+      // Stale check: an "approved" entry is stale if its stored audioHash
+      // no longer matches the current audio. The user re-baked the line
+      // and the prior approval should be re-confirmed.
+      const stale = status === "approved" && review.audioHash && l.audioHash && review.audioHash !== l.audioHash;
+      const staleClass = stale ? ' stale' : '';
+      metaParts.push('<span class="status-pill status-' + status + staleClass + '" data-line-id="' + l.id + '" title="Click to cycle status">' + escapeHtml(status) + '</span>');
+      const noteLen = (review.note || "").length;
+      const noteClass = noteLen > 0 ? ' has-note' : '';
+      const noteLabel = noteLen > 0 ? ('📝 ' + noteLen + ' char' + (noteLen === 1 ? '' : 's')) : '📝 note';
+      metaParts.push('<button type="button" class="note-toggle' + noteClass + '" data-line-id="' + l.id + '">' + noteLabel + '</button>');
+      // Rebake button — shift-click forces preamble even on short lines.
+      metaParts.push('<button type="button" class="rebake-btn" data-line-id="' + l.id + '" title="Re-render this line via Gemini. Shift-click to force voice-cast preamble (helps on short lines).">Rebake</button>');
+    }
     if (l.style) metaParts.push('style: ' + escapeHtml(l.style));
     if (l.audioBytes) metaParts.push(Math.round(l.audioBytes / 1024) + ' KB');
     if (l.speakAs) metaParts.push('speakAs override');
     const meta = metaParts.length > 0 ? '<span class="meta-row">' + metaParts.join(' · ') + '</span>' : '';
+
+    // Inline note area — collapsed by default (open if existing note).
+    let noteArea = '';
+    if (!isAction && l.hasAudio) {
+      const review = (state.review.lines || {})[String(l.id)] || { note: "" };
+      const noteText = review.note || "";
+      const hidden = noteText.length === 0 ? ' hidden' : '';
+      noteArea = '<div class="note-area" data-line-id="' + l.id + '"' + hidden + '>' +
+        '<textarea placeholder="Notes about this line — saved automatically when you click outside.">' + escapeHtml(noteText) + '</textarea>' +
+        '<div class="note-saved-indicator" data-line-id="' + l.id + '"></div>' +
+        '</div>';
+    }
 
     // Build the expandable details panel — only for spoken lines that
     // have something interesting beyond the basic display row
@@ -1224,13 +2407,15 @@ export function handleIndexRequest(res: http.ServerResponse): void {
       }
     }
 
-    return '<div class="' + cls + '">' +
+    const roleAttr = (!isAction && l.role) ? ' data-role="' + escapeHtml(l.role) + '"' : '';
+    return '<div class="' + cls + '" data-line-id="' + l.id + '"' + roleAttr + '>' +
       '<div class="id">' + l.id + '</div>' +
       '<div class="role">' + escapeHtml(l.role) + '</div>' +
       '<div class="body">' +
       '<div class="text">' + gavels + escapeHtml(text || '') + '</div>' +
       audio +
       meta +
+      noteArea +
       details +
       '</div></div>';
   }
@@ -1321,6 +2506,24 @@ const server = http.createServer(async (req, res) => {
     const lineMatch = /^\/api\/ritual\/([^/]+)\/line\/([^/]+)\.opus$/.exec(url.pathname);
     if (lineMatch) {
       await handleRitualLineAudio(req, res, lineMatch[1]!, lineMatch[2]!);
+      return;
+    }
+    // /api/ritual/{slug}/review/line/{id} — PUT to update one line's status/note
+    const reviewLineMatch = /^\/api\/ritual\/([^/]+)\/review\/line\/([^/]+)$/.exec(url.pathname);
+    if (reviewLineMatch && req.method === "PUT") {
+      await handleReviewPut(req, res, reviewLineMatch[1]!, reviewLineMatch[2]!);
+      return;
+    }
+    // /api/ritual/{slug}/rebake/line/{id} — POST to re-render one line via Gemini
+    const rebakeLineMatch = /^\/api\/ritual\/([^/]+)\/rebake\/line\/([^/]+)$/.exec(url.pathname);
+    if (rebakeLineMatch && req.method === "POST") {
+      await handleRebakeLine(req, res, rebakeLineMatch[1]!, rebakeLineMatch[2]!);
+      return;
+    }
+    // /api/ritual/{slug}/review — GET sidecar
+    const reviewMatch = /^\/api\/ritual\/([^/]+)\/review$/.exec(url.pathname);
+    if (reviewMatch && req.method === "GET") {
+      handleReviewGet(res, reviewMatch[1]!);
       return;
     }
     // /api/ritual/{slug}
