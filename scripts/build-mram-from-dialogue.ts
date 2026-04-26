@@ -44,6 +44,7 @@
  */
 
 import * as fs from "node:fs";
+import * as path from "node:path";
 import * as crypto from "node:crypto";
 import { parseBuffer } from "music-metadata";
 import { parseDialogue } from "../src/lib/dialogue-format";
@@ -1244,7 +1245,91 @@ async function bakeAudioIntoDoc(
       const geminiDurationMs = Math.round(
         (geminiMeta.format.duration ?? 0) * 1000,
       );
-      if (!hasSpeakAs(line.id)) {
+      // D-10 anomaly check. For speakAs lines we skip the *ratio* check
+      // (instructional-prompt char count doesn't match spoken-output
+      // length, produces false positives), but we still hard-fail on
+      // outright empty audio (durationMs === 0) — that's never correct,
+      // regardless of whether the line uses voice-cast preamble or
+      // speakAs. The retry loop in renderLineAudio is supposed to
+      // prevent 0ms from being cached, but if it gets through, this
+      // check is the last line of defense before silent quality loss.
+      const speakAs = hasSpeakAs(line.id);
+      const cleanedKey = thisLineCacheKey;
+      const failWithCleanup = (err: unknown): never => {
+        if (cleanedKey) {
+          const removed = deleteCacheEntry(cleanedKey);
+          if (removed) {
+            process.stderr.write("\r" + " ".repeat(80) + "\r");
+            console.error(
+              `   Auto-removed cached defect for line ${line.id} (${cleanedKey.slice(0, 12)}…) — resume will re-render.`,
+            );
+          }
+        }
+        throw err;
+      };
+      if (geminiDurationMs === 0) {
+        // Gemini returned 0ms audio after renderLineAudio's retry loop
+        // (3× key rotation) exhausted. This is the deterministic-empty
+        // failure mode observed on long compound sentences (e.g.
+        // ea-closing officer-duties enumerations). Rather than fail the
+        // whole bake or silently ship empty audio, fall back to Google
+        // Cloud TTS for this single line. Google TTS uses a different
+        // engine (no preamble bleed-through, deterministic output) and
+        // reliably produces non-empty audio for content Gemini chokes
+        // on. The voice will sound different from Gemini for this line,
+        // which Shannon should scrub via preview-bake before shipping.
+        process.stderr.write("\r" + " ".repeat(80) + "\r");
+        console.error(
+          `   ⚠ Line ${line.id} (role ${line.role}) returned 0ms from Gemini after retries. Falling back to Google Cloud TTS.`,
+        );
+        try {
+          const googleVoice = getGoogleVoiceForRole(line.role);
+          // For speakAs lines, send the original line.plain to Google TTS,
+          // not the instructional prompt — Google would speak "Speak this..."
+          // verbatim otherwise. For non-speakAs lines, cleanText IS line.plain.
+          const fallbackText = speakAs ? line.plain : cleanText;
+          const { opusBytes, durationMs: googleDurationMs } = await googleTtsBakeCall(
+            fallbackText,
+            googleVoice.name,
+          );
+          if (googleDurationMs === 0) {
+            // Google also failed — give up
+            failWithCleanup(
+              new Error(
+                `[AUTHOR-06] line ${line.id} (role ${line.role}) returned 0ms from BOTH Gemini and Google Cloud TTS. ` +
+                  `Manual intervention required: inspect dialogue text or split the line.`,
+              ),
+            );
+          }
+          // Replace the bad Gemini cache entry with Google's audio so
+          // subsequent --resume runs pick up the good bytes.
+          if (cleanedKey) {
+            const cachePath = path.join(
+              path.resolve("rituals/_bake-cache"),
+              `${cleanedKey}.opus`,
+            );
+            const tmpPath = `${cachePath}.tmp`;
+            fs.writeFileSync(tmpPath, opusBytes);
+            fs.renameSync(tmpPath, cachePath);
+          }
+          line.audio = opusBytes.toString("base64");
+          totalBytes += opusBytes.length;
+          modelTally["google-cloud-tts"] =
+            (modelTally["google-cloud-tts"] ?? 0) + 1;
+          console.error(
+            `   ✓ Line ${line.id} rendered via Google Cloud TTS (${googleDurationMs}ms, ${opusBytes.length} bytes).`,
+          );
+          // Skip the rest of the per-line Gemini-output processing since
+          // we replaced the audio. The for-loop continues to the next line.
+          rendered++;
+          markLineCompleted(lineIdStr);
+          continue;
+        } catch (googleErr) {
+          // Wrap so failWithCleanup can identify a downstream defect
+          failWithCleanup(googleErr);
+        }
+      }
+      if (!speakAs) {
         try {
           addAndCheckAnomaly(
             anomalyState,
@@ -1253,21 +1338,7 @@ async function bakeAudioIntoDoc(
             cleanText.length,
           );
         } catch (anomalyErr) {
-          // Cache cleanup on anomaly hard-fail. renderLineAudio writes
-          // the audio to cache before this check runs, so a D-10 fail
-          // leaves the bad bytes behind — `--resume` would cache-hit
-          // and infinite-loop on the same defect. Delete the entry
-          // here so the next attempt re-renders fresh against Gemini.
-          if (thisLineCacheKey) {
-            const removed = deleteCacheEntry(thisLineCacheKey);
-            if (removed) {
-              process.stderr.write("\r" + " ".repeat(80) + "\r");
-              console.error(
-                `   Auto-removed cached defect for line ${line.id} (${thisLineCacheKey.slice(0, 12)}…) — resume will re-render.`,
-              );
-            }
-          }
-          throw anomalyErr;
+          failWithCleanup(anomalyErr);
         }
       }
 
