@@ -50,6 +50,11 @@ rituals/*.json
 rituals/*.jsonl
 rituals/*.yaml
 rituals/*.yml
+# any local backup files in rituals/ (sanitization, hand-edits, recovery)
+rituals/*.backup
+rituals/*.backup-*
+rituals/*-backup
+rituals/*.pre-*-backup
 
 # credentials — never commit
 gitkey
@@ -72,3 +77,4 @@ files/
 # bake cache — AUTHOR-01 D-01 (content-addressed Opus cache)
 rituals/_bake-cache/*
 !rituals/_bake-cache/.gitignore
+rituals/*.scene-prose-backup
