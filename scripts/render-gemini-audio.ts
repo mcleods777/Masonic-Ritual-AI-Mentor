@@ -609,8 +609,23 @@ async function consumeSseToWav(resp: Response): Promise<Buffer> {
     throw new EmptyAudioStreamError();
   }
 
+  // Catch effectively-empty responses too: Gemini sometimes returns a
+  // tiny PCM payload (a few hundred bytes ≈ <100ms of audio) for inputs
+  // it can't render properly. The SSE stream isn't empty so the stricter
+  // length === 0 check above doesn't fire, but the resulting Opus has
+  // 0ms duration after parse and triggers D-10 hard-fail. Treat those
+  // the same as EmptyAudioStreamError so the surrounding retry loop
+  // rotates keys instead of caching the defect.
   const pcm = Buffer.concat(pcmChunks);
   const sampleRate = parseSampleRate(mimeType);
+  // 100ms threshold: 24kHz mono 16-bit = 24000 samples/sec × 0.1 × 2 bytes
+  // ≈ 4800 bytes. Even the shortest legitimate Masonic line ("So mote it
+  // be" ≈ 800ms) produces ≥ 38400 bytes, so the threshold has 8× headroom.
+  const minBytes = Math.floor(sampleRate * 0.1 * 2);
+  if (pcm.length < minBytes) {
+    throw new EmptyAudioStreamError();
+  }
+
   const header = buildWavHeader(sampleRate, 1, 16, pcm.length);
   return Buffer.concat([header, pcm]);
 }
