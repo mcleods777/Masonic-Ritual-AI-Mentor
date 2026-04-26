@@ -158,7 +158,7 @@ export function encryptMRAMNode(doc: MRAMDocument, passphrase: string): Buffer {
 async function googleTtsBakeCall(
   text: string,
   voiceName: string,
-  languageCode: string = "en-US",
+  languageCode?: string,
 ): Promise<{ opusBytes: Buffer; durationMs: number }> {
   const apiKey = process.env.GOOGLE_CLOUD_TTS_API_KEY;
   if (!apiKey) {
@@ -168,6 +168,16 @@ async function googleTtsBakeCall(
         "route (will re-introduce the pre-Phase-3 hard-skip behavior).",
     );
   }
+  // Derive languageCode from voiceName when not explicitly provided.
+  // Google voice names follow the pattern "<lang>-<region>-<variant>-<id>"
+  // (e.g. "en-US-Neural2-D", "en-GB-Neural2-B"). The first two hyphen-
+  // separated parts form the BCP-47 language tag the API requires;
+  // mismatches between voice and languageCode return a 400.
+  const derivedLanguageCode = (() => {
+    if (languageCode) return languageCode;
+    const m = /^([A-Za-z]{2}-[A-Za-z]{2})/.exec(voiceName);
+    return m ? m[1] : "en-US";
+  })();
   const res = await fetch(
     `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`,
     {
@@ -175,7 +185,7 @@ async function googleTtsBakeCall(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         input: { text }, // text only; NO preamble, NO style (Pitfall 4)
-        voice: { languageCode, name: voiceName },
+        voice: { languageCode: derivedLanguageCode, name: voiceName },
         audioConfig: { audioEncoding: "OGG_OPUS" },
       }),
     },
