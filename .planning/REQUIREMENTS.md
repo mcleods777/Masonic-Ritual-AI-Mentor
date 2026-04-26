@@ -33,22 +33,37 @@ Layered defenses against the three fears ranked equal in questioning: surprise A
 - [ ] **SAFETY-08**: `RITUAL_EMERGENCY_DISABLE_PAID=true` env var flips the whole app's paid surface to a static fallback message — rehearsed kill switch
 - [ ] **SAFETY-09**: Paid-route handlers verify the pilot session JWT directly (not relying solely on middleware) — defense in depth against middleware-skipping paths
 
-### Coach (LLM feedback quality)
+### STT Quality Pipeline
 
-The headline pilot complaint. Every requirement here is diff-grounded, hallucination-proof, and measurable.
+The 2026-04-26 CEO review reframed Phase 5: instead of building an LLM coach (the original direction was deleted in PR #69 / commit d660c98), invest in upstream STT quality so the existing diff-based scoring is trustworthy on its own. Strategic doc: `~/.gstack/projects/Masonic-Ritual-AI-Mentor/ceo-plans/2026-04-26-stt-quality-pipeline.md`.
 
-- [ ] **COACH-01**: Prompt assembly moved to `src/lib/feedback-prompt.ts` (client-side); `/api/rehearsal-feedback` receives `{variantId, prompt, promptHash}` instead of raw diff inputs
-- [ ] **COACH-02**: `/api/rehearsal-feedback/route.ts` rewritten using Vercel AI SDK v6 `generateObject({ schema })` behind Vercel AI Gateway (BYOK Groq + Mistral); structured Zod output replaces regex response parsing
-- [ ] **COACH-03**: Feedback schema (`{missed_words, substituted_words, inserted_words, suggested_drill, confidence}`) is the only shape the LLM can return — coach cannot free-form into ritual explanation
-- [ ] **COACH-04**: `mentor-v1` prompt variant is the production default; `roast-v1` / `terse-v1` / `coach-v1` exist only as A/B variants inside the dev-only eval UI — no user-facing persona toggle
-- [ ] **COACH-05**: Post-hoc hallucinated-noun filter: any capitalized word in the LLM response must appear in the reference line, the user's attempt, or a safe-coaching allowlist — otherwise fall back to a diff-derived static message
-- [ ] **COACH-06**: `feedbackTraces` IndexedDB store persists `{prompt, completion, rating, note}` encrypted-at-rest with the existing AES-GCM per-device key; never leaves the device
-- [ ] **COACH-07**: In-app "this feedback seems wrong" button on every feedback render; tap persists the rating + hashed trace id to the audit log and opens a prefilled mailto to Shannon
-- [ ] **COACH-08**: `/dev/feedback-eval` page (Shannon-only, `_guard.ts` gated) offers thumbs/notes UI for triaging feedback traces exported from IDB
-- [ ] **COACH-09**: `scripts/feedback-eval.ts` runs the current prompt variant against a local JSON gold set and prints pass/fail + diff against a baseline run
-- [ ] **COACH-10**: Shannon-rated gold eval set of ≥50 stumbles exists under `evals/feedback/` and must pass a defined rubric before v1 ships (release-blocking regression gate)
-- [ ] **COACH-11**: `RehearsalMode.tsx` split into setup / advance / STT-lifecycle submodules before the feedback rewrite — prerequisite, not polish
-- [ ] **COACH-12**: Voxtral / browser-TTS fallback is surfaced as a small banner when the user is on a non-default engine so silent degradation doesn't masquerade as the default experience
+- [ ] **STT-01**: Preview-bake REPL — `scripts/preview-bake.ts` extended with autoplay (spacebar play/pause, arrow keys for prev/next, optional auto-advance on audio end), per-line notes sidecar `rituals/{slug}-review.json`, and line-status state machine (`unmarked` | `flagged-review` | `flagged-regen` | `approved`) with keyboard shortcuts (`a` approve, `f` flag, `r` flag-regen, `n` open note) and filter modes (all / unmarked / flagged / approved). Audio sha256 stored at approval time so a re-bake auto-downgrades `approved` → `unmarked` (release gate hash invalidation).
+- [ ] **STT-02**: `verify-content --require-approval` flag refuses to release if any committed ritual has lines with `status !== "approved"`. Wires into Phase 4 release verification.
+- [ ] **STT-03**: Whisper STT calls send a `prompt` parameter assembled from a base Masonic vocabulary file plus a per-degree vocabulary stored in `rituals/{slug}-vocabulary.json`. Per-line vocabulary is rejected as too granular (would thrash decoder bias).
+- [ ] **STT-04**: Whisper STT calls request `verbose_json` and apply confidence filtering: drop segments where `no_speech_prob > 0.6` or `compression_ratio > 2.4`; flag (but don't drop) segments where `avg_logprob < -1.0`. Thresholds tunable via env config.
+- [ ] **STT-05**: Optional LLM post-correction pass (Llama 3.3 70B on Groq) with a strict "preserve stumbles" prompt. Release-blocking validation gate: a 20-recording set (5 fluent + 10 stumbles + 5 mistranscriptions) must show stumble-preservation rate ≥95% before this layer can be enabled in production.
+- [ ] **STT-06**: `/dev/whisper-eval` route (Shannon-only, dev-guard gated) runs both Groq Whisper variants (`large-v3` and `distil-large-v3-en`) on every practice utterance during a session, presents blind A/B labels with vote-later sidebar, and persists `{audio, reference, modelA-transcript, modelB-transcript, vote, category}` to JSONL with category breakdowns (proper nouns / archaic / scripture / common).
+
+#### Carried forward from deleted Coach scope
+
+- [ ] **STT-07** (was COACH-12): Voxtral / browser-TTS fallback is surfaced as a small banner when the user is on a non-default engine so silent degradation doesn't masquerade as the default experience
+
+### Coach (DEPRECATED — feature deleted in PR #69)
+
+~~The original Phase 5 direction. The coach feature was removed in PR #69 (commit d660c98). The 2026-04-26 CEO review locked in the STT Quality Pipeline as the replacement. These requirements are kept for historical record and traceability.~~
+
+- ~~**COACH-01**: Prompt assembly moved to `src/lib/feedback-prompt.ts` (client-side); `/api/rehearsal-feedback` receives `{variantId, prompt, promptHash}` instead of raw diff inputs~~ — Obsolete
+- ~~**COACH-02**: `/api/rehearsal-feedback/route.ts` rewritten using Vercel AI SDK v6 `generateObject({ schema })` behind Vercel AI Gateway (BYOK Groq + Mistral); structured Zod output replaces regex response parsing~~ — Obsolete
+- ~~**COACH-03**: Feedback schema (`{missed_words, substituted_words, inserted_words, suggested_drill, confidence}`) is the only shape the LLM can return — coach cannot free-form into ritual explanation~~ — Obsolete
+- ~~**COACH-04**: `mentor-v1` prompt variant is the production default; `roast-v1` / `terse-v1` / `coach-v1` exist only as A/B variants inside the dev-only eval UI — no user-facing persona toggle~~ — Obsolete
+- ~~**COACH-05**: Post-hoc hallucinated-noun filter: any capitalized word in the LLM response must appear in the reference line, the user's attempt, or a safe-coaching allowlist — otherwise fall back to a diff-derived static message~~ — Obsolete
+- ~~**COACH-06**: `feedbackTraces` IndexedDB store persists `{prompt, completion, rating, note}` encrypted-at-rest with the existing AES-GCM per-device key; never leaves the device~~ — Obsolete (idb-schema slot remains as future-use)
+- ~~**COACH-07**: In-app "this feedback seems wrong" button on every feedback render; tap persists the rating + hashed trace id to the audit log and opens a prefilled mailto to Shannon~~ — Obsolete
+- ~~**COACH-08**: `/dev/feedback-eval` page (Shannon-only, `_guard.ts` gated) offers thumbs/notes UI for triaging feedback traces exported from IDB~~ — Obsolete
+- ~~**COACH-09**: `scripts/feedback-eval.ts` runs the current prompt variant against a local JSON gold set and prints pass/fail + diff against a baseline run~~ — Obsolete
+- ~~**COACH-10**: Shannon-rated gold eval set of ≥50 stumbles exists under `evals/feedback/` and must pass a defined rubric before v1 ships (release-blocking regression gate)~~ — Obsolete (analog: STT-05 validation set, but smaller — 20 recordings, narrower scope)
+- ~~**COACH-11**: `RehearsalMode.tsx` split into setup / advance / STT-lifecycle submodules before the feedback rewrite — prerequisite, not polish~~ — Obsolete
+- ~~**COACH-12**: Voxtral / browser-TTS fallback is surfaced as a small banner when the user is on a non-default engine so silent degradation doesn't masquerade as the default experience~~ — **Carried forward as STT-07**
 
 ### Content (ritual coverage in Shannon's working)
 
@@ -174,18 +189,25 @@ Each v1 requirement maps to exactly one phase. Populated by `gsd-roadmapper` on 
 | SAFETY-07 | Phase 2 | Pending |
 | SAFETY-08 | Phase 2 | Pending |
 | SAFETY-09 | Phase 2 | Pending |
-| COACH-01 | Phase 5 | Pending |
-| COACH-02 | Phase 5 | Pending |
-| COACH-03 | Phase 5 | Pending |
-| COACH-04 | Phase 5 | Pending |
-| COACH-05 | Phase 5 | Pending |
-| COACH-06 | Phase 5 | Pending |
-| COACH-07 | Phase 5 | Pending |
-| COACH-08 | Phase 5 | Pending |
-| COACH-09 | Phase 5 | Pending |
-| COACH-10 | Phase 5 | Pending |
-| COACH-11 | Phase 5 | Pending |
-| COACH-12 | Phase 5 | Pending |
+| STT-01 | Phase 5 | Pending (REPL — user priority) |
+| STT-02 | Phase 5 | Pending (release gate `verify-content --require-approval`) |
+| STT-03 | Phase 5 | Pending (Whisper prompt biasing) |
+| STT-04 | Phase 5 | Pending (verbose_json confidence filter) |
+| STT-05 | Phase 5 | Pending (LLM post-correction with 20-recording validation gate) |
+| STT-06 | Phase 5 | Pending (A/B harness `/dev/whisper-eval`) |
+| STT-07 | Phase 5 | Pending (carried forward from COACH-12 — engine-fallback banner) |
+| ~~COACH-01~~ | ~~Phase 5~~ | Obsolete (PR #69 deleted feature; replaced by STT pipeline 2026-04-26) |
+| ~~COACH-02~~ | ~~Phase 5~~ | Obsolete |
+| ~~COACH-03~~ | ~~Phase 5~~ | Obsolete |
+| ~~COACH-04~~ | ~~Phase 5~~ | Obsolete |
+| ~~COACH-05~~ | ~~Phase 5~~ | Obsolete |
+| ~~COACH-06~~ | ~~Phase 5~~ | Obsolete |
+| ~~COACH-07~~ | ~~Phase 5~~ | Obsolete |
+| ~~COACH-08~~ | ~~Phase 5~~ | Obsolete |
+| ~~COACH-09~~ | ~~Phase 5~~ | Obsolete |
+| ~~COACH-10~~ | ~~Phase 5~~ | Obsolete |
+| ~~COACH-11~~ | ~~Phase 5~~ | Obsolete |
+| ~~COACH-12~~ | ~~Phase 5~~ | Carried forward as STT-07 |
 | CONTENT-01 | Phase 4 | Pending |
 | CONTENT-02 | Phase 4 | Pending |
 | CONTENT-03 | Phase 4 | Pending |
@@ -217,10 +239,10 @@ Each v1 requirement maps to exactly one phase. Populated by `gsd-roadmapper` on 
 | ONBOARD-05 | Phase 7 | Pending |
 
 **Coverage:**
-- v1 requirements: 57 total
-- Mapped to phases: 57 (100%)
+- v1 requirements: 52 total (was 57; COACH-01..12 retired, replaced by STT-01..07)
+- Mapped to phases: 52 (100%)
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-20*
-*Last updated: 2026-04-20 after roadmap creation — traceability filled in by gsd-roadmapper*
+*Last updated: 2026-04-26 — Phase 5 reframed Coach Quality Lift → STT Quality Pipeline. COACH-01..12 marked obsolete (feature deleted in PR #69). STT-01..07 added. See `~/.gstack/projects/Masonic-Ritual-AI-Mentor/ceo-plans/2026-04-26-stt-quality-pipeline.md`.*
