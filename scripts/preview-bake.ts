@@ -32,6 +32,7 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { assertDevOnly } from "../src/lib/dev-guard";
 import { decryptMRAM, type MRAMDocument } from "../src/lib/mram-format";
 
@@ -106,6 +107,73 @@ export async function loadRitual(
   );
   ritualCache.set(slug, { doc, decryptedAt: Date.now(), fileSize: stat.size });
   return doc;
+}
+
+/**
+ * Read styles.json (per-line style + speakAs overrides) for a ritual.
+ * Returns null if the file doesn't exist or can't be parsed — these
+ * sidecars are content-authoring artifacts, not required for display.
+ *
+ * Shape:
+ *   { version: 1, styles: [
+ *       { lineHash: "<sha256(plain)>", style: "warmly", speakAs?: "..." }
+ *   ] }
+ */
+interface StyleSidecarEntry {
+  lineHash: string;
+  style: string;
+  speakAs?: string;
+}
+function loadStylesSidecar(slug: string): Map<string, StyleSidecarEntry> {
+  const p = path.join(RITUALS_DIR, `${slug}-styles.json`);
+  if (!fs.existsSync(p)) return new Map();
+  try {
+    const raw = JSON.parse(fs.readFileSync(p, "utf8")) as {
+      styles?: StyleSidecarEntry[];
+    };
+    const out = new Map<string, StyleSidecarEntry>();
+    for (const e of raw.styles ?? []) {
+      if (e?.lineHash) out.set(e.lineHash, e);
+    }
+    return out;
+  } catch {
+    return new Map();
+  }
+}
+
+/**
+ * Read voice-cast.json (per-role voice profile + scene) for a ritual.
+ * Returns null on missing/invalid file. Shape varies — both top-level
+ * { roles: {...} } and direct { ROLE: {...} } forms are tolerated.
+ */
+interface VoiceCastSidecar {
+  scene?: string;
+  roles: Record<string, {
+    profile?: string;
+    style?: string;
+    pacing?: string;
+    accent?: string;
+    voice?: string;
+    [k: string]: unknown;
+  }>;
+}
+function loadVoiceCastSidecar(slug: string): VoiceCastSidecar | null {
+  const p = path.join(RITUALS_DIR, `${slug}-voice-cast.json`);
+  if (!fs.existsSync(p)) return null;
+  try {
+    const raw = JSON.parse(fs.readFileSync(p, "utf8")) as Record<string, unknown>;
+    const scene = typeof raw.scene === "string" ? raw.scene : undefined;
+    const roles = (raw.roles ?? raw.cast ?? {}) as VoiceCastSidecar["roles"];
+    if (!roles || typeof roles !== "object") return null;
+    return { scene, roles };
+  } catch {
+    return null;
+  }
+}
+
+/** sha256 of a string — matches src/lib/styles.ts hashLineText. */
+function hashLineText(plain: string): string {
+  return crypto.createHash("sha256").update(plain).digest("hex");
 }
 
 /**
@@ -340,26 +408,43 @@ async function handleRitualDetail(
   }
   try {
     const doc = await loadRitual(slug, passphrase);
+    // Read the local styles + voice-cast sidecars (gitignored, plaintext).
+    // These are content-authoring artifacts that the bake consumed but
+    // doesn't ship inside the .mram. Shannon needs them to scrub WHY
+    // each line sounds the way it does.
+    const stylesByHash = loadStylesSidecar(slug);
+    const voiceCast = loadVoiceCastSidecar(slug);
     // Strip audio bytes from the JSON response — they're large, served
     // separately via /api/ritual/{slug}/line/{id}.opus.
-    const linesLite = doc.lines.map((l) => ({
-      id: l.id,
-      section: l.section,
-      role: l.role,
-      gavels: l.gavels,
-      action: l.action,
-      cipher: l.cipher,
-      plain: l.plain,
-      style: l.style,
-      hasAudio: Boolean(l.audio),
-      audioBytes: l.audio ? Math.floor((l.audio.length * 3) / 4) : 0, // base64 → bytes estimate
-    }));
+    const linesLite = doc.lines.map((l) => {
+      const sidecar = l.plain
+        ? stylesByHash.get(hashLineText(l.plain))
+        : undefined;
+      return {
+        id: l.id,
+        section: l.section,
+        role: l.role,
+        gavels: l.gavels,
+        action: l.action,
+        cipher: l.cipher,
+        plain: l.plain,
+        style: l.style ?? sidecar?.style,
+        speakAs: sidecar?.speakAs,
+        // What voice was actually pinned in the .mram metadata for this role
+        voice: doc.metadata.voiceCast?.[l.role],
+        hasAudio: Boolean(l.audio),
+        audioBytes: l.audio ? Math.floor((l.audio.length * 3) / 4) : 0,
+      };
+    });
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({
       slug,
       metadata: doc.metadata,
       sections: doc.sections,
       lines: linesLite,
+      // Sidecar data — content-authoring context that's not in the .mram
+      voiceCast: voiceCast?.roles ?? {},
+      scene: voiceCast?.scene,
     }, null, 2));
   } catch (e) {
     res.writeHead(500, { "Content-Type": "application/json" });
@@ -524,6 +609,73 @@ export function handleIndexRequest(res: http.ServerResponse): void {
   .controls label { font-size: 0.85em; color: var(--fg-dim); cursor: pointer; }
   .controls input[type="checkbox"] { vertical-align: middle; }
   a { color: var(--accent); }
+
+  /* Scene + voice-cast roster panels */
+  .ritual-context {
+    background: var(--bg-elevated); border: 1px solid var(--border);
+    border-radius: 6px; padding: 0.9em 1.1em; margin: 1em 0;
+  }
+  .ritual-context summary {
+    cursor: pointer; font-weight: 500; color: var(--fg-dim);
+    font-size: 0.9em; user-select: none;
+  }
+  .ritual-context summary::marker { color: var(--accent); }
+  .ritual-context[open] summary { margin-bottom: 0.6em; color: var(--fg); }
+  .scene-text {
+    font: 14px/1.55 Georgia, serif; color: var(--fg-dim);
+    margin: 0.4em 0 0.8em; padding: 0 0.2em;
+  }
+  .role-table {
+    width: 100%; border-collapse: collapse;
+    font-size: 0.85em;
+  }
+  .role-table th, .role-table td {
+    text-align: left; padding: 0.35em 0.6em;
+    border-bottom: 1px solid var(--border); vertical-align: top;
+  }
+  .role-table th { color: var(--fg-muted); font-weight: 500; }
+  .role-table td.role { color: var(--accent); font-family: ui-monospace, monospace; }
+  .role-table td.voice { font-family: ui-monospace, monospace; color: var(--fg); }
+  .role-table td.profile { color: var(--fg-dim); font-style: italic; }
+
+  /* Per-line details disclosure */
+  .line-details {
+    grid-column: 3; margin-top: 0.3em;
+  }
+  .line-details summary {
+    cursor: pointer; font-size: 0.78em;
+    color: var(--fg-muted); user-select: none;
+    padding: 0.2em 0;
+  }
+  .line-details summary:hover { color: var(--accent); }
+  .line-details[open] summary { color: var(--fg-dim); }
+  .line-details-body {
+    padding: 0.5em 0.6em; margin-top: 0.3em;
+    background: var(--bg); border-left: 2px solid var(--border);
+    font-size: 0.82em;
+  }
+  .line-details-body dt {
+    color: var(--fg-muted); font-family: ui-monospace, monospace;
+    font-size: 0.85em; margin-top: 0.5em;
+  }
+  .line-details-body dt:first-child { margin-top: 0; }
+  .line-details-body dd {
+    margin: 0.15em 0 0; color: var(--fg);
+    word-break: break-word;
+  }
+  .line-details-body dd.speakAs {
+    font-family: ui-monospace, monospace; font-size: 0.85em;
+    background: var(--bg-elevated); padding: 0.4em 0.6em;
+    border-radius: 3px; line-height: 1.45;
+    white-space: pre-wrap;
+  }
+  .line-details-body dd.cipher {
+    font-family: Georgia, serif;
+    color: var(--fg-dim);
+  }
+  .line-details-body dd.profile {
+    font-style: italic; color: var(--fg-dim);
+  }
 </style>
 </head>
 <body>
@@ -621,9 +773,46 @@ export function handleIndexRequest(res: http.ServerResponse): void {
       'jurisdiction: ' + (doc.metadata.jurisdiction || '—') + ' · ' +
       'degree: ' + (doc.metadata.degree || '—') +
       '</div>';
+
+    // Scene panel — context for how the bake interpreted the whole ritual
+    if (doc.scene) {
+      html += '<details class="ritual-context">' +
+        '<summary>Scene description (sent to Gemini as voice-cast preamble context)</summary>' +
+        '<div class="scene-text">' + escapeHtml(doc.scene) + '</div>' +
+        '</details>';
+    }
+
+    // Voice cast roster — what voice was assigned to each role + the
+    // local sidecar's profile/style/pacing/accent prose
+    const castEntries = Object.keys(doc.voiceCast || {}).sort();
+    if (castEntries.length > 0 || (doc.metadata.voiceCast && Object.keys(doc.metadata.voiceCast).length > 0)) {
+      const allRoles = new Set([...castEntries, ...Object.keys(doc.metadata.voiceCast || {})]);
+      const sortedRoles = Array.from(allRoles).sort();
+      html += '<details class="ritual-context"' + (castEntries.length === 0 ? ' open' : '') + '>' +
+        '<summary>Voice cast (' + sortedRoles.length + ' role' + (sortedRoles.length === 1 ? '' : 's') + ')</summary>' +
+        '<table class="role-table"><thead><tr>' +
+        '<th>Role</th><th>Voice</th><th>Profile</th><th>Style / pacing / accent</th>' +
+        '</tr></thead><tbody>';
+      for (const role of sortedRoles) {
+        const voice = (doc.metadata.voiceCast || {})[role] || '—';
+        const sidecar = (doc.voiceCast || {})[role] || {};
+        const profile = sidecar.profile || '';
+        const styleLine = [sidecar.style, sidecar.pacing, sidecar.accent]
+          .filter(Boolean).join(' · ');
+        html += '<tr>' +
+          '<td class="role">' + escapeHtml(role) + '</td>' +
+          '<td class="voice">' + escapeHtml(voice) + '</td>' +
+          '<td class="profile">' + escapeHtml(profile) + '</td>' +
+          '<td class="profile">' + escapeHtml(styleLine) + '</td>' +
+          '</tr>';
+      }
+      html += '</tbody></table></details>';
+    }
+
     html += '<div class="controls">' +
       '<label><input type="checkbox" id="show-cipher"' + (state.showCipher ? ' checked' : '') + '> Show cipher text</label>' +
       '<label><input type="checkbox" id="hide-action"> Hide stage actions</label>' +
+      '<label><input type="checkbox" id="expand-all-details"> Expand all line details</label>' +
       '</div>';
     for (const sid of sectionOrder) {
       const lines = linesBySection.get(sid) || [];
@@ -633,7 +822,7 @@ export function handleIndexRequest(res: http.ServerResponse): void {
       html += '<section class="ritual-section">';
       html += '<h2>' + escapeHtml(title) + '</h2>';
       for (const l of lines) {
-        html += renderLine(l, doc.slug);
+        html += renderLine(l, doc.slug, doc.voiceCast || {});
       }
       html += '</section>';
     }
@@ -648,9 +837,15 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         el.style.display = hide ? "none" : "grid";
       });
     });
+    document.getElementById("expand-all-details").addEventListener("change", e => {
+      const open = e.target.checked;
+      document.querySelectorAll(".line-details").forEach(el => {
+        el.open = open;
+      });
+    });
   }
 
-  function renderLine(l, slug) {
+  function renderLine(l, slug, voiceCastByRole) {
     const isAction = Boolean(l.action);
     const cls = "line" + (isAction ? " action" : "") + (l.hasAudio ? "" : " no-audio");
     const text = isAction ? l.action : (state.showCipher ? l.cipher : l.plain);
@@ -658,7 +853,47 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     const audio = l.hasAudio
       ? '<audio controls preload="none" src="/api/ritual/' + encodeURIComponent(slug) + '/line/' + l.id + '.opus"></audio>'
       : (isAction ? '<span class="no-audio-note">(stage action)</span>' : '<span class="no-audio-note">(no audio baked)</span>');
-    const meta = l.style ? '<span class="meta-row">style: ' + escapeHtml(l.style) + (l.audioBytes ? ' · ' + Math.round(l.audioBytes / 1024) + ' KB' : '') + '</span>' : (l.audioBytes ? '<span class="meta-row">' + Math.round(l.audioBytes / 1024) + ' KB</span>' : '');
+    const metaParts = [];
+    if (l.style) metaParts.push('style: ' + escapeHtml(l.style));
+    if (l.audioBytes) metaParts.push(Math.round(l.audioBytes / 1024) + ' KB');
+    if (l.speakAs) metaParts.push('speakAs override');
+    const meta = metaParts.length > 0 ? '<span class="meta-row">' + metaParts.join(' · ') + '</span>' : '';
+
+    // Build the expandable details panel — only for spoken lines that
+    // have something interesting beyond the basic display row
+    let details = '';
+    if (!isAction && (l.speakAs || l.cipher || l.voice || voiceCastByRole[l.role])) {
+      const dl = [];
+      if (l.voice) dl.push('<dt>Voice</dt><dd>' + escapeHtml(l.voice) + '</dd>');
+      const sidecar = voiceCastByRole[l.role];
+      if (sidecar) {
+        if (sidecar.profile) dl.push('<dt>Role profile</dt><dd class="profile">' + escapeHtml(sidecar.profile) + '</dd>');
+        const styleParts = [];
+        if (sidecar.style) styleParts.push('style: ' + sidecar.style);
+        if (sidecar.pacing) styleParts.push('pacing: ' + sidecar.pacing);
+        if (sidecar.accent) styleParts.push('accent: ' + sidecar.accent);
+        if (styleParts.length) {
+          dl.push('<dt>Delivery</dt><dd class="profile">' + escapeHtml(styleParts.join(' · ')) + '</dd>');
+        }
+      }
+      if (l.style) {
+        dl.push('<dt>Style tag</dt><dd>' + escapeHtml(l.style) + '</dd>');
+      }
+      if (l.speakAs) {
+        dl.push('<dt>speakAs (instructional prompt sent to Gemini)</dt>' +
+          '<dd class="speakAs">' + escapeHtml(l.speakAs) + '</dd>');
+      }
+      if (l.cipher && l.cipher !== l.plain) {
+        dl.push('<dt>Cipher text</dt><dd class="cipher">' + escapeHtml(l.cipher) + '</dd>');
+      }
+      if (dl.length > 0) {
+        details = '<details class="line-details">' +
+          '<summary>▸ Line context (voice, style, prompt)</summary>' +
+          '<dl class="line-details-body">' + dl.join('') + '</dl>' +
+          '</details>';
+      }
+    }
+
     return '<div class="' + cls + '">' +
       '<div class="id">' + l.id + '</div>' +
       '<div class="role">' + escapeHtml(l.role) + '</div>' +
@@ -666,6 +901,7 @@ export function handleIndexRequest(res: http.ServerResponse): void {
       '<div class="text">' + gavels + escapeHtml(text || '') + '</div>' +
       audio +
       meta +
+      details +
       '</div></div>';
   }
 
