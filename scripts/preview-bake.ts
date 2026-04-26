@@ -679,6 +679,35 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     border-left: 2px solid rgba(74, 222, 128, 0.4);
     margin-left: -0.5em; padding-left: 0.5em;
   }
+
+  /* Engine filter row */
+  .controls.engine-filters {
+    margin-top: 0.4em;
+    align-items: center;
+    padding: 0.5em 0.7em;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  .controls.engine-filters .filter-label {
+    color: var(--fg-muted); font-size: 0.85em;
+    font-family: ui-monospace, monospace;
+  }
+  .engine-filter {
+    display: inline-flex; align-items: center; gap: 0.4em;
+    cursor: pointer; user-select: none;
+  }
+  .engine-filter input[type="checkbox"] {
+    margin: 0; cursor: pointer;
+  }
+  .engine-filter:hover .engine-badge { filter: brightness(1.2); }
+  .filter-shortcut {
+    background: transparent; border: 1px solid var(--border);
+    color: var(--fg-dim); padding: 0.2em 0.7em;
+    border-radius: 3px; cursor: pointer; font-family: inherit;
+    font-size: 0.78em;
+  }
+  .filter-shortcut:hover { background: var(--bg-hover); color: var(--fg); border-color: var(--accent); }
   .ritual-meta {
     color: var(--fg-muted); font-size: 0.85em;
     padding: 0.5em 0;
@@ -782,6 +811,9 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     activeSlug: null,
     activeDoc: null,
     showCipher: false,
+    // Set of engine keys currently visible. null means "all visible"
+    // (e.g. before any filter has been touched, or after Reset).
+    engineFilter: null,
   };
 
   async function init() {
@@ -909,12 +941,43 @@ export function handleIndexRequest(res: http.ServerResponse): void {
       html += '</tbody></table></details>';
     }
 
+    // Build per-engine filter group with live counts.
+    // engineFilter null = show all; otherwise it's a Set of engine keys
+    // currently visible. Reset state when switching rituals so a filter
+    // applied to ea-closing doesn't bleed into ea-opening.
+    const engineKeys = Object.keys(doc.engineCounts || {}).sort();
+    if (!state.engineFilter) {
+      state.engineFilter = new Set(engineKeys);
+    } else {
+      // Add any engines that exist in this ritual but weren't in the
+      // previous filter Set. New rituals' engines default to visible.
+      for (const k of engineKeys) {
+        if (!state.engineFilter.has(k)) state.engineFilter.add(k);
+      }
+    }
+    const filterPills = engineKeys.map(k => {
+      const checked = state.engineFilter.has(k) ? ' checked' : '';
+      const label = engineLabels[k] || k;
+      const count = doc.engineCounts[k];
+      return '<label class="engine-filter">' +
+        '<input type="checkbox" data-engine="' + k + '"' + checked + '> ' +
+        '<span class="engine-badge engine-' + k + '">' + label + ' ' + count + '</span>' +
+        '</label>';
+    }).join('');
+
     html += '<div class="controls">' +
       '<label><input type="checkbox" id="show-cipher"' + (state.showCipher ? ' checked' : '') + '> Show cipher text</label>' +
       '<label><input type="checkbox" id="hide-action"> Hide stage actions</label>' +
       '<label><input type="checkbox" id="expand-all-details"> Expand all line details</label>' +
-      '<label><input type="checkbox" id="filter-google"> Only Google Cloud TTS lines</label>' +
       '</div>';
+    if (filterPills) {
+      html += '<div class="controls engine-filters">' +
+        '<span class="filter-label">Engine:</span>' + filterPills +
+        '<button type="button" id="filter-only-google" class="filter-shortcut">Only Google</button>' +
+        '<button type="button" id="filter-only-gemini" class="filter-shortcut">Only Gemini</button>' +
+        '<button type="button" id="filter-reset" class="filter-shortcut">Show all</button>' +
+        '</div>';
+    }
     for (const sid of sectionOrder) {
       const lines = linesBySection.get(sid) || [];
       if (lines.length === 0) continue;
@@ -944,13 +1007,53 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         el.open = open;
       });
     });
-    document.getElementById("filter-google").addEventListener("change", e => {
-      const onlyGoogle = e.target.checked;
+    function applyEngineFilter() {
+      // Each line has a "line-{engine}" class. Hide if its engine isn't
+      // in the current filter set. Lines without engine class (stage
+      // actions, no-audio rows) stay visible — the engine filter is a
+      // sound-source filter, not a content-type filter.
+      const visible = state.engineFilter;
       document.querySelectorAll(".line").forEach(el => {
-        const isGoogle = el.classList.contains("line-google-cloud-tts");
-        el.style.display = onlyGoogle && !isGoogle ? "none" : "grid";
+        let lineEngine = null;
+        for (const cls of el.classList) {
+          if (cls.startsWith("line-") && cls !== "line-action" && cls !== "line-no-audio") {
+            lineEngine = cls.slice(5);
+            break;
+          }
+        }
+        // Stage-action / no-audio rows have no engine class — never hide via this filter
+        if (!lineEngine) {
+          el.style.display = "grid";
+          return;
+        }
+        el.style.display = visible.has(lineEngine) ? "grid" : "none";
+      });
+    }
+
+    // Per-engine checkbox toggles
+    document.querySelectorAll(".engine-filters input[data-engine]").forEach(cb => {
+      cb.addEventListener("change", e => {
+        const eng = e.target.dataset.engine;
+        if (e.target.checked) state.engineFilter.add(eng);
+        else state.engineFilter.delete(eng);
+        applyEngineFilter();
       });
     });
+    // Quick-action shortcuts: Only Google / Only Gemini / Show all
+    const setFilter = (engines) => {
+      state.engineFilter = new Set(engines);
+      // Sync the checkboxes
+      document.querySelectorAll(".engine-filters input[data-engine]").forEach(cb => {
+        cb.checked = state.engineFilter.has(cb.dataset.engine);
+      });
+      applyEngineFilter();
+    };
+    const onlyGoogleBtn = document.getElementById("filter-only-google");
+    if (onlyGoogleBtn) onlyGoogleBtn.addEventListener("click", () => setFilter(["google-cloud-tts"]));
+    const onlyGeminiBtn = document.getElementById("filter-only-gemini");
+    if (onlyGeminiBtn) onlyGeminiBtn.addEventListener("click", () => setFilter(["gemini-flash-tts"]));
+    const resetBtn = document.getElementById("filter-reset");
+    if (resetBtn) resetBtn.addEventListener("click", () => setFilter(Object.keys(doc.engineCounts || {})));
   }
 
   function renderLine(l, slug, voiceCastByRole) {
