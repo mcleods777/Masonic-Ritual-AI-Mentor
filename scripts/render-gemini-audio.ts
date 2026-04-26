@@ -557,6 +557,31 @@ async function callGeminiWithFallback(
             }
             continue; // try next key
           }
+          // Network-level timeouts and aborts — Gemini accepted the request
+          // (200 OK) but the SSE body stalled mid-stream. Common under
+          // heavy quota pressure when the server queues but doesn't process.
+          // Treat as transient: rotate to next key and retry.
+          const cause = (consumeErr as { cause?: { code?: string } })?.cause;
+          const code = cause?.code;
+          const msg = (consumeErr as Error)?.message ?? "";
+          const isNetworkTimeout =
+            code === "UND_ERR_BODY_TIMEOUT" ||
+            code === "UND_ERR_HEADERS_TIMEOUT" ||
+            code === "UND_ERR_SOCKET" ||
+            code === "ECONNRESET" ||
+            code === "ETIMEDOUT" ||
+            msg === "terminated" ||
+            msg.includes("fetch failed");
+          if (isNetworkTimeout) {
+            thisModelSawNonRegressionFailure = true;
+            if (apiKeys.length > 1) {
+              process.stderr.write("\r" + " ".repeat(80) + "\r");
+              console.error(
+                `  ${model}${keyLabel} network timeout (${code ?? msg}). Trying next key...`,
+              );
+            }
+            continue; // try next key
+          }
           // Malformed SSE or missing body — not retryable, rethrow.
           throw consumeErr;
         }
