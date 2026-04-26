@@ -545,14 +545,17 @@ export function handleIndexRequest(res: http.ServerResponse): void {
 <title>Bake Preview — Masonic Ritual AI Mentor</title>
 <style>
   :root {
-    --bg: #0a0a0a;
-    --bg-elevated: #1a1a1a;
-    --bg-hover: #232323;
+    --bg: #0a0a0e;
+    --bg-elevated: #1d1d26;
+    --bg-elevated-2: #25252f;
+    --bg-hover: #2a2a36;
     --fg: #e4e4e7;
-    --fg-dim: #a1a1aa;
-    --fg-muted: #71717a;
+    --fg-dim: #b4b4bd;
+    --fg-muted: #80808a;
     --accent: #facc15;
-    --border: #2a2a2a;
+    --accent-dim: #ca9c0e;
+    --border: #3a3a48;
+    --border-strong: #4d4d5e;
     --error: #f87171;
     --good: #4ade80;
   }
@@ -565,8 +568,9 @@ export function handleIndexRequest(res: http.ServerResponse): void {
   header {
     position: sticky; top: 0; z-index: 10;
     background: var(--bg-elevated);
-    border-bottom: 1px solid var(--border);
+    border-bottom: 2px solid var(--border-strong);
     padding: 1em 1.5em;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
   }
   header h1 {
     margin: 0 0 0.25em 0; font-size: 1.2em;
@@ -600,21 +604,31 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     border: 1px dashed var(--border); border-radius: 4px;
   }
   section.ritual-section {
-    margin: 1.5em 0 0.5em;
-    padding-top: 1em; border-top: 1px solid var(--border);
+    margin: 1.5em 0;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03), 0 2px 8px rgba(0, 0, 0, 0.4);
   }
   section.ritual-section h2 {
-    margin: 0 0 0.75em 0; font-size: 1.05em;
-    color: var(--fg-dim); font-weight: 500;
+    margin: 0; padding: 0.8em 1em;
+    font-size: 1.05em;
+    color: var(--accent); font-weight: 600;
     text-transform: uppercase; letter-spacing: 0.04em;
+    background: var(--bg-elevated-2);
+    border-bottom: 1px solid var(--border-strong);
   }
   .line {
     display: grid;
     grid-template-columns: 48px 80px minmax(0, 1fr);
     gap: 1em; align-items: start;
-    padding: 0.85em 0.5em; border-bottom: 1px solid var(--border);
+    padding: 0.95em 1em;
+    border-bottom: 1px solid var(--border);
     transition: background 80ms;
   }
+  .line:last-child { border-bottom: none; }
+  .line:nth-child(even of .line) { background: rgba(255, 255, 255, 0.015); }
   .line:hover { background: var(--bg-hover); }
   .line.no-audio { opacity: 0.65; }
   .line .id {
@@ -645,8 +659,10 @@ export function handleIndexRequest(res: http.ServerResponse): void {
      fine here. Filters can hide the controls entirely on some Chromium
      builds, so we leave them alone. */
   .line audio {
-    width: 100%; max-width: 720px; height: 36px;
+    width: 100%; max-width: 720px; height: 38px;
     display: block;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.3);
   }
   .line .meta-row {
     color: var(--fg-muted); font-size: 0.78em;
@@ -684,10 +700,11 @@ export function handleIndexRequest(res: http.ServerResponse): void {
   .controls.engine-filters {
     margin-top: 0.4em;
     align-items: center;
-    padding: 0.5em 0.7em;
+    padding: 0.6em 0.85em;
     background: var(--bg-elevated);
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-strong);
     border-radius: 6px;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03), 0 2px 6px rgba(0, 0, 0, 0.35);
   }
   .controls.engine-filters .filter-label {
     color: var(--fg-muted); font-size: 0.85em;
@@ -722,15 +739,23 @@ export function handleIndexRequest(res: http.ServerResponse): void {
 
   /* Scene + voice-cast roster panels */
   .ritual-context {
-    background: var(--bg-elevated); border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-strong);
     border-radius: 6px; padding: 0.9em 1.1em; margin: 1em 0;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03), 0 2px 8px rgba(0, 0, 0, 0.4);
   }
   .ritual-context summary {
-    cursor: pointer; font-weight: 500; color: var(--fg-dim);
+    cursor: pointer; font-weight: 500; color: var(--fg);
     font-size: 0.9em; user-select: none;
   }
   .ritual-context summary::marker { color: var(--accent); }
-  .ritual-context[open] summary { margin-bottom: 0.6em; color: var(--fg); }
+  .ritual-context[open] {
+    background: var(--bg-elevated-2);
+  }
+  .ritual-context[open] summary {
+    margin-bottom: 0.6em; color: var(--fg);
+    padding-bottom: 0.5em; border-bottom: 1px solid var(--border);
+  }
   .scene-text {
     font: 14px/1.55 Georgia, serif; color: var(--fg-dim);
     margin: 0.4em 0 0.8em; padding: 0 0.2em;
