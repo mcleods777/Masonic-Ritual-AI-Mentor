@@ -539,106 +539,146 @@ async function handleRitualLineAudio(
 
 export function handleIndexRequest(res: http.ServerResponse): void {
   const html = `<!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
 <meta charset="utf-8">
 <title>Bake Preview — Masonic Ritual AI Mentor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=Lato:wght@400;700&display=swap">
 <style>
   :root {
-    --bg: #0a0a0e;
-    --bg-elevated: #1d1d26;
-    --bg-elevated-2: #25252f;
-    --bg-hover: #2a2a36;
-    --fg: #e4e4e7;
-    --fg-dim: #b4b4bd;
-    --fg-muted: #80808a;
-    --accent: #facc15;
-    --accent-dim: #ca9c0e;
-    --border: #3a3a48;
-    --border-strong: #4d4d5e;
+    /* Match src/app/globals.css — Hermetic/Pythagorean theme */
+    --background: #0b0f19;
+    --foreground: #f4f4f5;
+    /* Zinc neutrals (Tailwind's) */
+    --zinc-950: #09090b;
+    --zinc-900: #18181b;
+    --zinc-850: #1f1f24;
+    --zinc-800: #27272a;
+    --zinc-700: #3f3f46;
+    --zinc-600: #52525b;
+    --zinc-500: #71717a;
+    --zinc-400: #a1a1aa;
+    --zinc-300: #d4d4d8;
+    --zinc-200: #e4e4e7;
+    --zinc-100: #f4f4f5;
+    /* Masonic Gold (amber) accents */
+    --amber-300: #fcd34d;
+    --amber-400: #fbbf24;
+    --amber-500: #f59e0b;
+    --amber-600: #d97706;
+    /* Status */
     --error: #f87171;
     --good: #4ade80;
   }
   * { box-sizing: border-box; }
   body {
-    font: 15px/1.5 system-ui, -apple-system, sans-serif;
+    font: 15px/1.5 'Lato', system-ui, -apple-system, sans-serif;
     margin: 0; padding: 0;
-    background: var(--bg); color: var(--fg);
+    background: var(--background); color: var(--foreground);
+    -webkit-font-smoothing: antialiased;
   }
+  /* Cinzel for all headings — Masonic feel matching the rest of the app */
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Cinzel', Georgia, serif;
+  }
+  /* Custom scrollbar matching app's theme */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #334155; }
   header {
     position: sticky; top: 0; z-index: 10;
-    background: var(--bg-elevated);
-    border-bottom: 2px solid var(--border-strong);
+    background: var(--zinc-950);
+    border-bottom: 1px solid var(--zinc-800);
     padding: 1em 1.5em;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  }
+  header .header-inner {
+    max-width: 64rem; margin: 0 auto;
   }
   header h1 {
-    margin: 0 0 0.25em 0; font-size: 1.2em;
-    color: var(--fg); font-weight: 600;
+    margin: 0 0 0.25em 0;
+    font-family: 'Cinzel', Georgia, serif;
+    font-size: 1.35em; font-weight: 600;
+    color: var(--amber-500); letter-spacing: 0.02em;
   }
-  header .meta { color: var(--fg-muted); font-size: 0.85em; }
+  header .meta { color: var(--zinc-500); font-size: 0.85em; font-family: 'Lato', sans-serif; }
   header .err { color: var(--error); font-weight: 500; }
   .ritual-tabs {
-    display: flex; flex-wrap: wrap; gap: 0.5em;
+    display: flex; flex-wrap: wrap; gap: 0.4em;
     margin-top: 0.75em;
   }
   .ritual-tabs button {
-    background: transparent; border: 1px solid var(--border);
-    color: var(--fg-dim); padding: 0.4em 0.9em; font-size: 0.9em;
-    border-radius: 4px; cursor: pointer; font-family: inherit;
+    background: transparent;
+    border: 1px solid var(--zinc-800);
+    color: var(--zinc-500);
+    padding: 0.45em 1em; font-size: 0.85em;
+    border-radius: 8px; cursor: pointer;
+    font-family: 'Lato', sans-serif; font-weight: 500;
+    transition: color 120ms, background 120ms, border-color 120ms;
   }
-  .ritual-tabs button:hover { background: var(--bg-hover); color: var(--fg); }
+  .ritual-tabs button:hover {
+    background: rgba(63, 63, 70, 0.5);
+    color: var(--zinc-300);
+    border-color: var(--zinc-700);
+  }
   .ritual-tabs button.active {
-    background: var(--accent); color: #18181b; border-color: var(--accent);
-    font-weight: 500;
+    background: rgba(245, 158, 11, 0.1);
+    color: var(--amber-400);
+    border-color: rgba(245, 158, 11, 0.3);
   }
   .ritual-tabs button.disabled {
-    opacity: 0.4; cursor: not-allowed;
+    opacity: 0.35; cursor: not-allowed;
   }
   main {
-    padding: 1.5em 2em;
-    max-width: 1400px; margin: 0 auto;
+    padding: 2em 2em 4em;
+    max-width: 64rem; margin: 0 auto;
   }
   .empty {
-    color: var(--fg-muted); padding: 2em; text-align: center;
-    border: 1px dashed var(--border); border-radius: 4px;
+    color: var(--zinc-500); padding: 2.5em; text-align: center;
+    background: var(--zinc-900);
+    border: 1px solid var(--zinc-800); border-radius: 12px;
   }
   section.ritual-section {
     margin: 1.5em 0;
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-strong);
-    border-radius: 6px;
+    background: var(--zinc-900);
+    border: 1px solid var(--zinc-800);
+    border-radius: 12px;
     overflow: hidden;
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03), 0 2px 8px rgba(0, 0, 0, 0.4);
+    transition: border-color 200ms;
+  }
+  section.ritual-section:hover {
+    border-color: rgba(245, 158, 11, 0.2);
   }
   section.ritual-section h2 {
-    margin: 0; padding: 0.8em 1em;
-    font-size: 1.05em;
-    color: var(--accent); font-weight: 600;
-    text-transform: uppercase; letter-spacing: 0.04em;
-    background: var(--bg-elevated-2);
-    border-bottom: 1px solid var(--border-strong);
+    margin: 0; padding: 1em 1.25em;
+    font-family: 'Cinzel', Georgia, serif;
+    font-size: 1em;
+    color: var(--amber-400); font-weight: 600;
+    letter-spacing: 0.06em;
+    background: var(--zinc-950);
+    border-bottom: 1px solid var(--zinc-800);
   }
   .line {
     display: grid;
     grid-template-columns: 48px 80px minmax(0, 1fr);
     gap: 1em; align-items: start;
-    padding: 0.95em 1em;
-    border-bottom: 1px solid var(--border);
-    transition: background 80ms;
+    padding: 1em 1.25em;
+    border-bottom: 1px solid var(--zinc-800);
+    transition: background 100ms;
   }
   .line:last-child { border-bottom: none; }
-  .line:nth-child(even of .line) { background: rgba(255, 255, 255, 0.015); }
-  .line:hover { background: var(--bg-hover); }
-  .line.no-audio { opacity: 0.65; }
+  .line:hover { background: rgba(63, 63, 70, 0.3); }
+  .line.no-audio { opacity: 0.55; }
   .line .id {
-    color: var(--fg-muted); font-family: ui-monospace, monospace;
+    color: var(--zinc-500); font-family: ui-monospace, monospace;
     font-size: 0.85em; text-align: right;
     padding-top: 0.15em;
   }
   .line .role {
     font-family: ui-monospace, monospace; font-size: 0.85em;
-    color: var(--accent); font-weight: 500;
+    color: var(--amber-400); font-weight: 600;
     padding-top: 0.15em;
   }
   .line .body {
@@ -646,69 +686,75 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     gap: 0.5em; min-width: 0;
   }
   .line .text {
-    font: 15px/1.55 Georgia, serif; color: var(--fg);
+    font: 15px/1.6 'Lato', sans-serif; color: var(--zinc-200);
   }
   .line .text .gavels {
-    color: var(--accent); font-weight: bold; margin-right: 0.4em;
+    color: var(--amber-500); font-weight: bold; margin-right: 0.4em;
   }
   .line.action .text {
-    font-style: italic; color: var(--fg-dim);
+    font-style: italic; color: var(--zinc-500);
+    font-family: 'Lato', sans-serif;
   }
-  /* Native browser audio controls — readable on dark bg without filters.
-     The default Chrome rendering is light gray on transparent which works
-     fine here. Filters can hide the controls entirely on some Chromium
-     builds, so we leave them alone. */
+  /* Native browser audio controls. Subtle dark bg helps anchor them
+     visually within the row while keeping the player legible. */
   .line audio {
     width: 100%; max-width: 720px; height: 38px;
     display: block;
-    border-radius: 4px;
-    background: rgba(0, 0, 0, 0.3);
+    border-radius: 6px;
+    background: rgba(9, 9, 11, 0.6);
   }
   .line .meta-row {
-    color: var(--fg-muted); font-size: 0.78em;
+    color: var(--zinc-500); font-size: 0.78em;
     font-family: ui-monospace, monospace;
+    display: inline-flex; flex-wrap: wrap; gap: 0.5em;
+    align-items: center;
   }
   .line .no-audio-note {
-    color: var(--fg-muted); font-style: italic; font-size: 0.85em;
+    color: var(--zinc-600); font-style: italic; font-size: 0.85em;
   }
   /* Engine badge — small pill showing which TTS rendered each line */
   .engine-badge {
-    display: inline-block; padding: 0.1em 0.55em;
+    display: inline-block; padding: 0.15em 0.65em;
     border-radius: 10px; font-size: 0.72em;
-    font-weight: 500; font-family: ui-monospace, monospace;
+    font-weight: 600; font-family: ui-monospace, monospace;
     text-transform: lowercase;
     border: 1px solid transparent;
+    letter-spacing: 0.02em;
   }
+  /* Gemini = amber gold (matches app accent) */
   .engine-gemini-flash-tts {
-    background: rgba(168, 85, 247, 0.15);
-    color: #c4b5fd; border-color: rgba(168, 85, 247, 0.3);
+    background: rgba(245, 158, 11, 0.12);
+    color: var(--amber-300);
+    border-color: rgba(245, 158, 11, 0.3);
   }
+  /* Google = teal (separate enough to spot, not competing with gold) */
   .engine-google-cloud-tts {
-    background: rgba(74, 222, 128, 0.15);
-    color: #86efac; border-color: rgba(74, 222, 128, 0.3);
+    background: rgba(45, 212, 191, 0.12);
+    color: #5eead4;
+    border-color: rgba(45, 212, 191, 0.3);
   }
   .engine-unknown {
     background: rgba(113, 113, 122, 0.15);
-    color: var(--fg-muted); border-color: rgba(113, 113, 122, 0.3);
+    color: var(--zinc-400); border-color: rgba(113, 113, 122, 0.3);
   }
   .line.line-google-cloud-tts {
-    border-left: 2px solid rgba(74, 222, 128, 0.4);
-    margin-left: -0.5em; padding-left: 0.5em;
+    border-left: 3px solid rgba(45, 212, 191, 0.4);
+    padding-left: calc(1.25em - 3px);
   }
 
-  /* Engine filter row */
+  /* Engine filter row — same card style as ritual-context */
   .controls.engine-filters {
-    margin-top: 0.4em;
+    margin: 0.4em 0 1em;
     align-items: center;
-    padding: 0.6em 0.85em;
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-strong);
-    border-radius: 6px;
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03), 0 2px 6px rgba(0, 0, 0, 0.35);
+    padding: 0.7em 1em;
+    background: var(--zinc-900);
+    border: 1px solid var(--zinc-800);
+    border-radius: 12px;
   }
   .controls.engine-filters .filter-label {
-    color: var(--fg-muted); font-size: 0.85em;
+    color: var(--zinc-500); font-size: 0.82em;
     font-family: ui-monospace, monospace;
+    text-transform: uppercase; letter-spacing: 0.05em;
   }
   .engine-filter {
     display: inline-flex; align-items: center; gap: 0.4em;
@@ -716,62 +762,84 @@ export function handleIndexRequest(res: http.ServerResponse): void {
   }
   .engine-filter input[type="checkbox"] {
     margin: 0; cursor: pointer;
+    accent-color: var(--amber-500);
   }
-  .engine-filter:hover .engine-badge { filter: brightness(1.2); }
+  .engine-filter:hover .engine-badge { filter: brightness(1.15); }
   .filter-shortcut {
-    background: transparent; border: 1px solid var(--border);
-    color: var(--fg-dim); padding: 0.2em 0.7em;
-    border-radius: 3px; cursor: pointer; font-family: inherit;
-    font-size: 0.78em;
+    background: transparent; border: 1px solid var(--zinc-800);
+    color: var(--zinc-400); padding: 0.3em 0.85em;
+    border-radius: 6px; cursor: pointer;
+    font-family: 'Lato', sans-serif;
+    font-size: 0.8em; font-weight: 500;
+    transition: all 120ms;
   }
-  .filter-shortcut:hover { background: var(--bg-hover); color: var(--fg); border-color: var(--accent); }
+  .filter-shortcut:hover {
+    background: rgba(245, 158, 11, 0.08);
+    color: var(--amber-400);
+    border-color: rgba(245, 158, 11, 0.3);
+  }
   .ritual-meta {
-    color: var(--fg-muted); font-size: 0.85em;
-    padding: 0.5em 0;
+    color: var(--zinc-500); font-size: 0.875em;
+    padding: 0.5em 0 1em;
   }
   .controls {
-    margin-bottom: 1em; display: flex; gap: 1em;
+    margin-bottom: 1em; display: flex; gap: 1.25em;
     flex-wrap: wrap; align-items: center;
   }
-  .controls label { font-size: 0.85em; color: var(--fg-dim); cursor: pointer; }
-  .controls input[type="checkbox"] { vertical-align: middle; }
-  a { color: var(--accent); }
+  .controls label {
+    font-size: 0.85em; color: var(--zinc-400);
+    cursor: pointer; user-select: none;
+  }
+  .controls label:hover { color: var(--zinc-200); }
+  .controls input[type="checkbox"] {
+    vertical-align: middle; margin-right: 0.3em;
+    accent-color: var(--amber-500);
+  }
+  a { color: var(--amber-400); text-decoration: none; }
+  a:hover { color: var(--amber-300); text-decoration: underline; }
 
-  /* Scene + voice-cast roster panels */
+  /* Scene + voice-cast roster panels — match app card style */
   .ritual-context {
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-strong);
-    border-radius: 6px; padding: 0.9em 1.1em; margin: 1em 0;
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03), 0 2px 8px rgba(0, 0, 0, 0.4);
+    background: var(--zinc-900);
+    border: 1px solid var(--zinc-800);
+    border-radius: 12px; padding: 0.9em 1.25em;
+    margin: 1em 0;
+    transition: border-color 200ms;
+  }
+  .ritual-context:hover {
+    border-color: rgba(245, 158, 11, 0.25);
   }
   .ritual-context summary {
-    cursor: pointer; font-weight: 500; color: var(--fg);
-    font-size: 0.9em; user-select: none;
+    cursor: pointer;
+    font-family: 'Cinzel', Georgia, serif;
+    font-size: 0.95em; font-weight: 500;
+    color: var(--zinc-300); user-select: none;
+    letter-spacing: 0.02em;
   }
-  .ritual-context summary::marker { color: var(--accent); }
-  .ritual-context[open] {
-    background: var(--bg-elevated-2);
-  }
+  .ritual-context summary::marker { color: var(--amber-500); }
   .ritual-context[open] summary {
-    margin-bottom: 0.6em; color: var(--fg);
-    padding-bottom: 0.5em; border-bottom: 1px solid var(--border);
+    margin-bottom: 0.75em; color: var(--amber-400);
+    padding-bottom: 0.6em; border-bottom: 1px solid var(--zinc-800);
   }
   .scene-text {
-    font: 14px/1.55 Georgia, serif; color: var(--fg-dim);
-    margin: 0.4em 0 0.8em; padding: 0 0.2em;
+    font: 14px/1.65 Georgia, serif; color: var(--zinc-300);
+    margin: 0.4em 0 0.4em; padding: 0 0.2em;
   }
   .role-table {
     width: 100%; border-collapse: collapse;
-    font-size: 0.85em;
+    font-size: 0.85em; font-family: 'Lato', sans-serif;
   }
   .role-table th, .role-table td {
-    text-align: left; padding: 0.35em 0.6em;
-    border-bottom: 1px solid var(--border); vertical-align: top;
+    text-align: left; padding: 0.5em 0.6em;
+    border-bottom: 1px solid var(--zinc-800); vertical-align: top;
   }
-  .role-table th { color: var(--fg-muted); font-weight: 500; }
-  .role-table td.role { color: var(--accent); font-family: ui-monospace, monospace; }
-  .role-table td.voice { font-family: ui-monospace, monospace; color: var(--fg); }
-  .role-table td.profile { color: var(--fg-dim); font-style: italic; }
+  .role-table tr:last-child th, .role-table tr:last-child td {
+    border-bottom: none;
+  }
+  .role-table th { color: var(--zinc-500); font-weight: 500; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.05em; }
+  .role-table td.role { color: var(--amber-400); font-family: ui-monospace, monospace; font-weight: 600; }
+  .role-table td.voice { font-family: ui-monospace, monospace; color: var(--zinc-200); }
+  .role-table td.profile { color: var(--zinc-400); font-style: italic; }
 
   /* Per-line details disclosure — sits inside .body's flex column,
      so it just needs to be a normal block element. NO grid-column. */
@@ -780,52 +848,61 @@ export function handleIndexRequest(res: http.ServerResponse): void {
   }
   .line-details summary {
     cursor: pointer; font-size: 0.78em;
-    color: var(--fg-muted); user-select: none;
+    color: var(--zinc-500); user-select: none;
     padding: 0.2em 0;
     list-style: none;
+    font-family: 'Lato', sans-serif;
   }
   .line-details summary::before {
     content: "▸"; display: inline-block; width: 1em;
     transition: transform 150ms;
-    color: var(--fg-muted);
+    color: var(--zinc-500);
   }
-  .line-details[open] summary::before { transform: rotate(90deg); }
-  .line-details summary:hover { color: var(--accent); }
-  .line-details[open] summary { color: var(--fg-dim); }
+  .line-details[open] summary::before {
+    transform: rotate(90deg);
+    color: var(--amber-500);
+  }
+  .line-details summary:hover { color: var(--amber-400); }
+  .line-details[open] summary { color: var(--amber-400); }
   .line-details-body {
-    padding: 0.6em 0.8em; margin-top: 0.3em;
-    background: var(--bg); border-left: 2px solid var(--accent);
-    font-size: 0.85em; border-radius: 0 4px 4px 0;
+    padding: 0.7em 0.9em; margin-top: 0.4em;
+    background: var(--zinc-950);
+    border-left: 2px solid var(--amber-500);
+    font-size: 0.85em; border-radius: 0 6px 6px 0;
   }
   .line-details-body dt {
-    color: var(--fg-muted); font-family: ui-monospace, monospace;
-    font-size: 0.85em; margin-top: 0.5em;
+    color: var(--zinc-500); font-family: ui-monospace, monospace;
+    font-size: 0.82em; margin-top: 0.6em;
+    text-transform: uppercase; letter-spacing: 0.05em;
   }
   .line-details-body dt:first-child { margin-top: 0; }
   .line-details-body dd {
-    margin: 0.15em 0 0; color: var(--fg);
+    margin: 0.2em 0 0; color: var(--zinc-200);
     word-break: break-word;
   }
   .line-details-body dd.speakAs {
     font-family: ui-monospace, monospace; font-size: 0.85em;
-    background: var(--bg-elevated); padding: 0.4em 0.6em;
-    border-radius: 3px; line-height: 1.45;
+    background: var(--zinc-900); padding: 0.5em 0.7em;
+    border-radius: 4px; line-height: 1.5;
     white-space: pre-wrap;
+    border: 1px solid var(--zinc-800);
   }
   .line-details-body dd.cipher {
     font-family: Georgia, serif;
-    color: var(--fg-dim);
+    color: var(--zinc-400);
   }
   .line-details-body dd.profile {
-    font-style: italic; color: var(--fg-dim);
+    font-style: italic; color: var(--zinc-400);
   }
 </style>
 </head>
 <body>
 <header>
-  <h1>rituals/ <span style="color: var(--fg-muted); font-weight: normal;">— bake preview</span></h1>
-  <div class="meta" id="header-meta">Loading…</div>
-  <div class="ritual-tabs" id="tabs"></div>
+  <div class="header-inner">
+    <h1>Bake Preview <span style="color: var(--zinc-500); font-weight: 400; font-family: 'Lato', sans-serif; font-size: 0.65em; letter-spacing: 0; margin-left: 0.5em;">rituals/</span></h1>
+    <div class="meta" id="header-meta">Loading…</div>
+    <div class="ritual-tabs" id="tabs"></div>
+  </div>
 </header>
 <main>
   <div id="content" class="empty">Select a ritual above.</div>
