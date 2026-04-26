@@ -299,9 +299,11 @@ if (fs.existsSync(voiceCastPath)) {
   }
   console.log(`  → invalidated ${invalidated} cache entries`);
 
-  // Render
+  // Render. Don't pass `models` — renderLineAudio reads GEMINI_TTS_MODELS
+  // from env when options.models is undefined, so .env.local can pin the
+  // chain (e.g. skip gemini-3.1-flash-tts-preview while it's degraded).
   console.log(`\nRendering ${plans.length} line(s) via Gemini…`);
-  const opts = { apiKeys, models: DEFAULT_MODELS, cacheDir: CACHE_DIR };
+  const opts = { apiKeys, cacheDir: CACHE_DIR };
 
   let rendered = 0;
   for (const p of plans) {

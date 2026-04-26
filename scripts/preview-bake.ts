@@ -788,7 +788,13 @@ async function handleRebakeLine(
     }
     chunks.push(buf);
   }
-  let body: { forcePreamble?: boolean } = {};
+  let body: {
+    forcePreamble?: boolean;
+    voiceOverride?: string;
+    styleOverride?: string;
+    paceOverride?: string;
+    accentOverride?: string;
+  } = {};
   if (chunks.length > 0) {
     try {
       body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
@@ -799,6 +805,14 @@ async function handleRebakeLine(
     }
   }
   const forcePreamble = !!body.forcePreamble;
+  // Validate overrides — each is optional; reject obviously-malformed input
+  // so we never proxy untrusted strings into the Gemini prompt.
+  const isSafeIdent = (s: unknown): s is string =>
+    typeof s === "string" && s.length > 0 && s.length <= 64 && /^[A-Za-z][A-Za-z0-9 _\-/]*$/.test(s);
+  const voiceOverride = isSafeIdent(body.voiceOverride) ? body.voiceOverride : undefined;
+  const styleOverride = isSafeIdent(body.styleOverride) ? body.styleOverride : undefined;
+  const paceOverride = isSafeIdent(body.paceOverride) ? body.paceOverride : undefined;
+  const accentOverride = isSafeIdent(body.accentOverride) ? body.accentOverride : undefined;
 
   // Per-slug serialization
   const prev = rebakeLockBySlug.get(slug);
@@ -830,10 +844,12 @@ async function handleRebakeLine(
       res.end(JSON.stringify({ error: "Line not found or not spoken" }));
       return;
     }
-    const voice = doc.metadata.voiceCast?.[line.role];
+    // Voice: override beats role-pinned voice from .mram metadata.
+    const pinnedVoice = doc.metadata.voiceCast?.[line.role];
+    const voice = voiceOverride ?? pinnedVoice;
     if (!voice) {
       res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: `Role ${line.role} has no pinned voice` }));
+      res.end(JSON.stringify({ error: `Role ${line.role} has no pinned voice and no voiceOverride` }));
       return;
     }
 
@@ -841,7 +857,17 @@ async function handleRebakeLine(
     const stylesByHash = loadStylesSidecar(slug);
     const sidecar = stylesByHash.get(hashLineText(line.plain));
     const speakAs = sidecar?.speakAs;
-    const style = line.style ?? sidecar?.style;
+    const baseStyle = line.style ?? sidecar?.style;
+    // Composite style: combine baseStyle with override style/pace/accent.
+    // The render code formats this as "[<style>] " before the line text,
+    // so we pack our director's-note traits into a comma-separated list.
+    // Order matters for readability: style first, then pace, then accent.
+    const styleParts: string[] = [];
+    if (styleOverride) styleParts.push(styleOverride);
+    else if (baseStyle) styleParts.push(baseStyle);
+    if (paceOverride) styleParts.push(`${paceOverride} pace`);
+    if (accentOverride) styleParts.push(`${accentOverride} accent`);
+    const style = styleParts.length > 0 ? styleParts.join(", ") : undefined;
     const text = speakAs ?? line.plain;
 
     const VOICE_CAST_MIN_LINE_CHARS = parseInt(
@@ -881,15 +907,46 @@ async function handleRebakeLine(
       deleteCacheEntry(key, RENDER_CACHE_DIR);
     }
 
-    // Render
+    // Render. Don't pass `models` — let renderLineAudio fall through to its
+    // internal readModelsFromEnv() so GEMINI_TTS_MODELS in .env.local takes
+    // effect (e.g. for skipping a broken preview model).
     const audioBuf = await renderLineAudio(
       text,
       style,
       voice,
-      { apiKeys, models: DEFAULT_MODELS, cacheDir: RENDER_CACHE_DIR },
+      { apiKeys, cacheDir: RENDER_CACHE_DIR },
       preamble,
     );
     line.audio = audioBuf.toString("base64");
+
+    // Backup the .mram BEFORE atomic write so the prior audio is
+    // recoverable if the user wants to revert. Matches the CLI rebake's
+    // backup behavior. Keeps the last 3 GUI-rebake backups per ritual,
+    // prunes older ones — frequent experimentation otherwise produces
+    // a lot of disk noise. Backups are gitignored via rituals/*.backup-*.
+    try {
+      const ts = new Date().toISOString().replace(/[:.]/g, "-");
+      const backupPath = `${mramPath}.backup-rebake-${ts}`;
+      fs.copyFileSync(mramPath, backupPath);
+      // Prune older rebake backups — keep last 3 (chronological by ISO ts)
+      const BACKUP_KEEP = 3;
+      const dir = path.dirname(mramPath);
+      const base = path.basename(mramPath);
+      const prefix = `${base}.backup-rebake-`;
+      const backups = fs.readdirSync(dir)
+        .filter((f) => f.startsWith(prefix))
+        .sort();
+      while (backups.length > BACKUP_KEEP) {
+        const oldest = backups.shift();
+        if (oldest) {
+          try { fs.unlinkSync(path.join(dir, oldest)); } catch { /* swallow */ }
+        }
+      }
+    } catch (e) {
+      console.warn(
+        `[rebake] backup failed (continuing): ${(e as Error).message}`,
+      );
+    }
 
     // Re-encrypt + atomic write
     const reEncrypted = encryptMRAMNode(doc, passphrase);
@@ -926,6 +983,8 @@ async function handleRebakeLine(
         audioBytes: audioBuf.length,
         audioHash: newHash,
         preambleUsed: preamble.length > 0,
+        voiceUsed: voice,
+        styleUsed: style,
       }),
     );
   } catch (e) {
@@ -1482,6 +1541,129 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
   }
+
+  /* Director's note panel — per-line voice + style + pace + accent
+     overrides for experimental rebakes. Mirrors Google AI Studio's voice
+     playground UX. Settings persist in localStorage per (slug, lineId). */
+  .director-note {
+    margin-top: 0.5em;
+    background: var(--zinc-950);
+    border: 1px solid var(--zinc-800);
+    border-radius: 8px;
+    padding: 0; overflow: hidden;
+    transition: border-color 100ms;
+  }
+  .director-note[open] {
+    border-color: rgba(245, 158, 11, 0.35);
+  }
+  .director-note summary {
+    cursor: pointer; padding: 0.55em 0.85em;
+    color: var(--zinc-400); font-family: ui-monospace, monospace;
+    font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.05em;
+    user-select: none; list-style: none;
+    display: flex; align-items: center; gap: 0.5em;
+  }
+  .director-note summary::before {
+    content: "▸"; color: var(--zinc-500);
+    transition: transform 150ms;
+  }
+  .director-note[open] summary::before {
+    transform: rotate(90deg); color: var(--amber-500);
+  }
+  .director-note summary:hover { color: var(--amber-400); }
+  .director-note[open] summary {
+    color: var(--amber-400); border-bottom: 1px solid var(--zinc-800);
+  }
+  .director-note .summary-tag {
+    margin-left: auto; font-size: 0.95em;
+    color: var(--zinc-500); text-transform: none; letter-spacing: 0;
+  }
+  .director-note[open] .summary-tag {
+    color: var(--amber-300);
+  }
+  .director-note-body {
+    padding: 0.85em 0.95em;
+    display: grid; grid-template-columns: 1fr 1fr 1fr 1fr;
+    gap: 0.75em 1em;
+    align-items: end;
+  }
+  @media (max-width: 720px) {
+    .director-note-body { grid-template-columns: 1fr 1fr; }
+  }
+  .director-note-field { display: flex; flex-direction: column; gap: 0.25em; min-width: 0; }
+  .director-note-field label {
+    color: var(--zinc-500); font-size: 0.72em;
+    font-family: ui-monospace, monospace;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .director-note-field select {
+    background: var(--zinc-900);
+    color: var(--zinc-200);
+    border: 1px solid var(--zinc-700);
+    border-radius: 6px;
+    padding: 0.4em 0.5em;
+    font-family: 'Lato', sans-serif;
+    font-size: 0.85em;
+    cursor: pointer;
+    width: 100%;
+    transition: border-color 100ms;
+  }
+  .director-note-field select:hover, .director-note-field select:focus {
+    border-color: var(--amber-500); outline: none;
+  }
+  .director-note-actions {
+    grid-column: 1 / -1;
+    display: flex; gap: 0.6em; flex-wrap: wrap;
+    justify-content: flex-end; align-items: center;
+    padding-top: 0.4em;
+    border-top: 1px dashed var(--zinc-800);
+  }
+  .director-note-info {
+    color: var(--zinc-500); font-size: 0.78em;
+    font-family: ui-monospace, monospace;
+    margin-right: auto;
+  }
+  .try-overrides-btn {
+    background: rgba(245, 158, 11, 0.12);
+    border: 1.5px solid rgba(245, 158, 11, 0.5);
+    color: var(--amber-400);
+    padding: 0.5em 1.15em;
+    border-radius: 8px; cursor: pointer;
+    font-family: 'Lato', sans-serif;
+    font-size: 0.9em; font-weight: 600;
+    transition: all 120ms, transform 80ms;
+    display: inline-flex; align-items: center; gap: 0.4em;
+    line-height: 1;
+  }
+  .try-overrides-btn::before { content: "↻"; font-size: 1.1em; line-height: 1; }
+  .try-overrides-btn:hover:not(:disabled) {
+    background: rgba(245, 158, 11, 0.18);
+    border-color: rgba(245, 158, 11, 0.7);
+    filter: brightness(1.1);
+  }
+  .try-overrides-btn:active:not(:disabled) { transform: scale(0.97); }
+  .try-overrides-btn:disabled {
+    opacity: 0.5; cursor: not-allowed;
+    border-style: dashed;
+  }
+  .try-overrides-btn.rebaking::before {
+    animation: rebake-spin 1s linear infinite;
+    display: inline-block;
+  }
+  .reset-overrides-btn {
+    background: transparent;
+    border: 1px solid var(--zinc-700);
+    color: var(--zinc-400);
+    padding: 0.5em 0.9em;
+    border-radius: 8px; cursor: pointer;
+    font-family: 'Lato', sans-serif;
+    font-size: 0.85em;
+    transition: all 120ms;
+  }
+  .reset-overrides-btn:hover {
+    color: var(--zinc-200);
+    border-color: var(--zinc-600);
+  }
   .note-area {
     margin-top: 0.5em;
     background: var(--zinc-950);
@@ -1541,6 +1723,79 @@ export function handleIndexRequest(res: http.ServerResponse): void {
   <div id="content" class="empty">Select a ritual above.</div>
 </main>
 <script>
+  // === STT-01 Tier 1: Director's note voice catalog ===
+  // Gemini TTS voices grouped by gender-leaning. Within each group, ordered
+  // roughly by descriptor (firm/lower → soft/higher). The "Used" group up
+  // top shows voices already pinned to roles in this project so Shannon
+  // can compare deviations against the existing cast at a glance.
+  const VOICE_CATALOG = {
+    "Male-leaning (used in this project)": [
+      { name: "Alnilam", desc: "Firm, lower-mid pitch (WM)" },
+      { name: "Charon", desc: "Informative, lower pitch (SW)" },
+      { name: "Enceladus", desc: "Deep, weighted (JW / Narrator)" },
+      { name: "Algenib", desc: "Gravelly, lower pitch (SD)" },
+      { name: "Orus", desc: "Firm, decisive (JD)" },
+      { name: "Iapetus", desc: "Clear, articulate (Sec)" },
+      { name: "Schedar", desc: "Even, steady (Trs)" },
+      { name: "Achird", desc: "Friendly, lower-mid (Ch / Q)" },
+      { name: "Fenrir", desc: "Excitable (Marshal)" },
+      { name: "Rasalgethi", desc: "Distinctive male (Steward)" },
+      { name: "Zubenelgenubi", desc: "Casual, distinctive male (Candidate / A)" },
+    ],
+    "Male-leaning (untried)": [
+      { name: "Puck", desc: "Upbeat" },
+      { name: "Algieba", desc: "Smooth, lower pitch" },
+      { name: "Umbriel", desc: "Easy-going" },
+      { name: "Sadaltager", desc: "Knowledgeable" },
+      { name: "Gacrux", desc: "Mature" },
+    ],
+    "Female-leaning (for diagnostic A/B only)": [
+      { name: "Aoede", desc: "Breezy, mid pitch" },
+      { name: "Kore", desc: "Firm" },
+      { name: "Leda", desc: "Youthful" },
+      { name: "Autonoe", desc: "Bright, mid pitch" },
+      { name: "Callirrhoe", desc: "Easy-going, mid" },
+      { name: "Despina", desc: "Smooth" },
+      { name: "Erinome", desc: "Clear" },
+      { name: "Pulcherrima", desc: "Forward" },
+      { name: "Vindemiatrix", desc: "Gentle" },
+      { name: "Sadachbia", desc: "Lively" },
+      { name: "Sulafat", desc: "Warm" },
+      { name: "Zephyr", desc: "Bright" },
+      { name: "Achernar", desc: "Soft, higher pitch" },
+      { name: "Laomedeia", desc: "Upbeat" },
+    ],
+  };
+  // Style / Pace / Accent options match the Google AI Studio voice playground.
+  const STYLE_OPTIONS = [
+    { value: "", label: "(default)" },
+    { value: "Vocal Smile", label: "Vocal Smile — bright, sunny, inviting" },
+    { value: "Newscaster", label: "Newscaster — professional, broadcast cadence" },
+    { value: "Whisper", label: "Whisper — intimate, breathy" },
+    { value: "Empathetic", label: "Empathetic — warm, soft, gentle inflections" },
+    { value: "Promo/Hype", label: "Promo/Hype — high energy, punchy" },
+    { value: "Deadpan", label: "Deadpan — flat, dry delivery" },
+    { value: "Ceremonial", label: "Ceremonial — measured, formal, weighted" },
+    { value: "Authoritative", label: "Authoritative — firm, commanding" },
+  ];
+  const PACE_OPTIONS = [
+    { value: "", label: "(default)" },
+    { value: "Natural", label: "Natural — conversational" },
+    { value: "Rapid Fire", label: "Rapid Fire — fast, energetic" },
+    { value: "The Drift", label: "The Drift — slow, long pauses" },
+    { value: "Staccato", label: "Staccato — short, clipped" },
+    { value: "Measured", label: "Measured — deliberate, ceremonial" },
+  ];
+  const ACCENT_OPTIONS = [
+    { value: "", label: "(default)" },
+    { value: "American", label: "American" },
+    { value: "British", label: "British" },
+    { value: "Scottish", label: "Scottish" },
+    { value: "Irish", label: "Irish" },
+    { value: "Australian", label: "Australian" },
+    { value: "Mid-Atlantic", label: "Mid-Atlantic" },
+  ];
+
   const state = {
     rituals: [],
     activeSlug: null,
@@ -2098,6 +2353,116 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         }
       });
     });
+    // === STT-01 Tier 1: Director's note dropdowns + Try/Clear buttons ===
+    document.querySelectorAll(".director-note select[data-field]").forEach(sel => {
+      sel.addEventListener("change", () => {
+        const lineId = sel.dataset.lineId;
+        const stored = readDirectorNote(state.activeSlug, lineId);
+        stored[sel.dataset.field] = sel.value || undefined;
+        writeDirectorNote(state.activeSlug, lineId, stored);
+        // Update the summary tag inline (no full re-render).
+        const det = document.querySelector('.director-note[data-line-id="' + lineId + '"]');
+        if (det) {
+          const tag = det.querySelector('.summary-tag');
+          if (tag) {
+            const desc = describeOverrides(readDirectorNote(state.activeSlug, lineId));
+            tag.textContent = desc || 'experiment with voice + style';
+          }
+        }
+      });
+    });
+    document.querySelectorAll(".reset-overrides-btn[data-line-id]").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const lineId = btn.dataset.lineId;
+        writeDirectorNote(state.activeSlug, lineId, {});
+        const det = document.querySelector('.director-note[data-line-id="' + lineId + '"]');
+        if (det) {
+          det.querySelectorAll('select[data-field]').forEach(s => { s.value = ""; });
+          const tag = det.querySelector('.summary-tag');
+          if (tag) tag.textContent = 'experiment with voice + style';
+        }
+        const info = document.querySelector('.director-note-info[data-line-id="' + lineId + '"]');
+        if (info) info.textContent = 'cleared — using role defaults';
+        setTimeout(() => { if (info) info.textContent = ''; }, 1800);
+      });
+    });
+    document.querySelectorAll(".try-overrides-btn[data-line-id]").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const lineId = btn.dataset.lineId;
+        const slug = state.activeSlug;
+        if (!slug || !lineId) return;
+        const stored = readDirectorNote(slug, lineId);
+        const info = document.querySelector('.director-note-info[data-line-id="' + lineId + '"]');
+        // Force preamble when overriding voice — short lines especially
+        // benefit from the role-card context, and overrides are
+        // experimental anyway.
+        const payload = { forcePreamble: true, ...stored };
+        btn.disabled = true;
+        btn.classList.add("rebaking");
+        const original = btn.textContent;
+        btn.textContent = "Rebaking…";
+        if (info) info.textContent = 'rendering with overrides…';
+        try {
+          const res = await fetch("/api/ritual/" + encodeURIComponent(slug) + "/rebake/line/" + encodeURIComponent(lineId), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || res.statusText);
+          }
+          const data = await res.json();
+          // Refresh audio + state same as the regular Rebake button
+          const lineEl = document.querySelector('.line[data-line-id="' + lineId + '"]');
+          if (lineEl) {
+            const audio = lineEl.querySelector("audio");
+            if (audio) {
+              const baseSrc = "/api/ritual/" + encodeURIComponent(slug) + "/line/" + encodeURIComponent(lineId) + ".opus";
+              audio.src = baseSrc + "?h=" + encodeURIComponent(data.audioHash || Date.now());
+              audio.load();
+            }
+          }
+          if (state.activeDoc && state.activeDoc.lines) {
+            const docLine = state.activeDoc.lines.find(l => String(l.id) === String(lineId));
+            if (docLine) docLine.audioHash = data.audioHash;
+          }
+          try {
+            const sc = await fetch("/api/ritual/" + encodeURIComponent(slug) + "/review").then(r => r.json());
+            state.review = sc;
+            if (!state.review.lines) state.review.lines = {};
+          } catch { /* swallow */ }
+          refreshLineReviewWidgets(lineId);
+          btn.textContent = "✓ rebaked";
+          if (info) {
+            const usedParts = [];
+            if (data.voiceUsed) usedParts.push("voice: " + data.voiceUsed);
+            if (data.styleUsed) usedParts.push("style: " + data.styleUsed);
+            info.textContent = "✓ rendered (" + usedParts.join(", ") + ")";
+          }
+          setTimeout(() => {
+            if (btn) {
+              btn.disabled = false;
+              btn.classList.remove("rebaking");
+              btn.textContent = original;
+            }
+          }, 1800);
+        } catch (err) {
+          btn.textContent = "✗ failed";
+          btn.classList.remove("rebaking");
+          if (info) info.textContent = "✗ " + (err.message || "rebake failed");
+          setTimeout(() => {
+            if (btn) {
+              btn.disabled = false;
+              btn.textContent = original;
+            }
+          }, 3000);
+        }
+      });
+    });
+
     document.querySelectorAll(".note-area textarea").forEach(ta => {
       const lineId = ta.closest(".note-area").dataset.lineId;
       ta.addEventListener("blur", async () => {
@@ -2160,6 +2525,41 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     pauseAllExcept(audio);
     setCurrentLine(el.dataset.lineId);
     audio.play().catch(() => { /* autoplay-blocked or load error; ignore */ });
+  }
+
+  // === STT-01 Tier 1: Director's note storage (localStorage per slug+lineId) ===
+  function dnKey(slug, lineId) {
+    return "preview-bake.director-note." + slug + "." + lineId;
+  }
+  function readDirectorNote(slug, lineId) {
+    try {
+      const raw = localStorage.getItem(dnKey(slug, lineId));
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") return {};
+      return parsed;
+    } catch { return {}; }
+  }
+  function writeDirectorNote(slug, lineId, obj) {
+    try {
+      const cleaned = {};
+      for (const k of ["voiceOverride", "styleOverride", "paceOverride", "accentOverride"]) {
+        if (obj[k]) cleaned[k] = obj[k];
+      }
+      if (Object.keys(cleaned).length === 0) {
+        localStorage.removeItem(dnKey(slug, lineId));
+      } else {
+        localStorage.setItem(dnKey(slug, lineId), JSON.stringify(cleaned));
+      }
+    } catch { /* localStorage may be blocked or full */ }
+  }
+  function describeOverrides(stored) {
+    const parts = [];
+    if (stored.voiceOverride) parts.push(stored.voiceOverride);
+    if (stored.styleOverride) parts.push(stored.styleOverride);
+    if (stored.paceOverride) parts.push(stored.paceOverride + " pace");
+    if (stored.accentOverride) parts.push(stored.accentOverride);
+    return parts.join(" · ");
   }
 
   // === STT-01 Step 2: review state helpers ===
@@ -2365,6 +2765,58 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         '</div>';
     }
 
+    // Director's note panel — Tier 1 voice/style/pace/accent overrides.
+    // Stored per (slug, lineId) in localStorage. "Try these settings"
+    // sends the overrides to the rebake endpoint.
+    let directorNote = '';
+    if (!isAction && l.hasAudio) {
+      const stored = readDirectorNote(slug, l.id);
+      const summaryTag = describeOverrides(stored);
+      const isOpen = summaryTag.length > 0 ? ' open' : '';
+      const buildVoiceOpts = () => {
+        const groups = Object.entries(VOICE_CATALOG).map(([groupName, voices]) => {
+          const opts = voices.map(v => {
+            const sel = stored.voiceOverride === v.name ? ' selected' : '';
+            return '<option value="' + escapeHtml(v.name) + '"' + sel + '>' + escapeHtml(v.name) + ' — ' + escapeHtml(v.desc) + '</option>';
+          }).join('');
+          return '<optgroup label="' + escapeHtml(groupName) + '">' + opts + '</optgroup>';
+        }).join('');
+        const defaultSel = !stored.voiceOverride ? ' selected' : '';
+        const pinnedNote = l.voice ? ' (pinned: ' + escapeHtml(l.voice) + ')' : '';
+        return '<option value=""' + defaultSel + '>(use role default' + pinnedNote + ')</option>' + groups;
+      };
+      const buildOpts = (options, current) => options.map(o => {
+        const sel = current === o.value ? ' selected' : '';
+        return '<option value="' + escapeHtml(o.value) + '"' + sel + '>' + escapeHtml(o.label) + '</option>';
+      }).join('');
+      directorNote = '<details class="director-note" data-line-id="' + l.id + '"' + isOpen + '>' +
+        '<summary>Director&rsquo;s note <span class="summary-tag">' + escapeHtml(summaryTag || 'experiment with voice + style') + '</span></summary>' +
+        '<div class="director-note-body">' +
+        '<div class="director-note-field">' +
+        '<label>Voice</label>' +
+        '<select data-field="voiceOverride" data-line-id="' + l.id + '">' + buildVoiceOpts() + '</select>' +
+        '</div>' +
+        '<div class="director-note-field">' +
+        '<label>Style</label>' +
+        '<select data-field="styleOverride" data-line-id="' + l.id + '">' + buildOpts(STYLE_OPTIONS, stored.styleOverride || "") + '</select>' +
+        '</div>' +
+        '<div class="director-note-field">' +
+        '<label>Pace</label>' +
+        '<select data-field="paceOverride" data-line-id="' + l.id + '">' + buildOpts(PACE_OPTIONS, stored.paceOverride || "") + '</select>' +
+        '</div>' +
+        '<div class="director-note-field">' +
+        '<label>Accent</label>' +
+        '<select data-field="accentOverride" data-line-id="' + l.id + '">' + buildOpts(ACCENT_OPTIONS, stored.accentOverride || "") + '</select>' +
+        '</div>' +
+        '<div class="director-note-actions">' +
+        '<span class="director-note-info" data-line-id="' + l.id + '"></span>' +
+        '<button type="button" class="reset-overrides-btn" data-line-id="' + l.id + '">Clear overrides</button>' +
+        '<button type="button" class="try-overrides-btn" data-line-id="' + l.id + '">Try these settings</button>' +
+        '</div>' +
+        '</div>' +
+        '</details>';
+    }
+
     // Build the expandable details panel — only for spoken lines that
     // have something interesting beyond the basic display row
     let details = '';
@@ -2416,6 +2868,7 @@ export function handleIndexRequest(res: http.ServerResponse): void {
       audio +
       meta +
       noteArea +
+      directorNote +
       details +
       '</div></div>';
   }
