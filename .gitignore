@@ -77,4 +77,8 @@ files/
 # bake cache — AUTHOR-01 D-01 (content-addressed Opus cache)
 rituals/_bake-cache/*
 !rituals/_bake-cache/.gitignore
+# Preview-bake parallel-bake sessions — per-developer experimental .mram
+# copies. Cache is shared across sessions; the dirs themselves are
+# entirely user-personal state.
+rituals/_sessions/
 rituals/*.scene-prose-backup

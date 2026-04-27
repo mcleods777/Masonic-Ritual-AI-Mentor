@@ -143,6 +143,15 @@ export interface RenderOptions {
   onProgress?: (event: RenderProgress) => void;
   /** Quota-exhaustion handler. Default: sleep until midnight PT. */
   onAllModelsExhausted?: () => Promise<void>;
+  /**
+   * Optional generationConfig.temperature passed to Gemini. Range 0.0-2.0
+   * with API default ~1.0. Lower = more deterministic, higher = more
+   * varied across rolls. Including this in the cache key (when set) so
+   * different temps don't collide on the same (text, style, voice, model)
+   * tuple. Leaving it undefined preserves cache compatibility with prior
+   * un-templeratured renders.
+   */
+  temperature?: number;
 }
 
 export interface RenderProgress {
@@ -188,12 +197,13 @@ export async function renderLineAudio(
   // loop writes under the actually-used model's key.
   const models = options.models ?? readModelsFromEnv() ?? DEFAULT_MODELS;
   const waitHandler = options.onAllModelsExhausted ?? sleepUntilMidnightPT;
+  const temperature = options.temperature;
 
   // Run legacy-cache migration once on the first cache read (AUTHOR-01 D-01).
   await migrateLegacyCacheIfNeeded(cacheDir);
 
   for (const probeModel of models) {
-    const probeKey = computeCacheKey(text, style, voice, probeModel, preamble);
+    const probeKey = computeCacheKey(text, style, voice, probeModel, preamble, temperature);
     const probePath = path.join(cacheDir, `${probeKey}.opus`);
     if (fs.existsSync(probePath)) {
       options.onProgress?.({ status: "cache-hit", cacheKey: probeKey });
@@ -221,6 +231,7 @@ export async function renderLineAudio(
         models,
         options.apiKeys,
         preamble,
+        temperature,
       );
       const opus = await encodeWavToOpus(wav);
 
@@ -255,7 +266,7 @@ export async function renderLineAudio(
       }
 
       // Compute cache key under the model actually used (per D-02).
-      const cacheKey = computeCacheKey(text, style, voice, model, preamble);
+      const cacheKey = computeCacheKey(text, style, voice, model, preamble, temperature);
       const cachePath = path.join(cacheDir, `${cacheKey}.opus`);
 
       // Atomic write: stage to .tmp then rename. Prevents corrupt cache
@@ -278,7 +289,7 @@ export async function renderLineAudio(
         // — report the key under the preferred (first-chain) model for
         // progress observability. The final rendered key is emitted on
         // success above.
-        const pendingKey = computeCacheKey(text, style, voice, models[0], preamble);
+        const pendingKey = computeCacheKey(text, style, voice, models[0], preamble, temperature);
         options.onProgress?.({
           status: "waiting-for-quota-reset",
           cacheKey: pendingKey,
@@ -450,22 +461,27 @@ async function callGeminiWithFallback(
   models: string[],
   apiKeys: string[],
   preamble: string = "",
+  temperature?: number,
 ): Promise<{ wav: Buffer; model: string }> {
   if (apiKeys.length === 0) {
     throw new Error("callGeminiWithFallback: apiKeys is empty");
   }
   const inlineStyle = style ? `[${style}] ` : "";
   const prompt = `${preamble}${inlineStyle}${text}`;
-  const body = JSON.stringify({
-    contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: {
-      responseModalities: ["AUDIO"],
-      speechConfig: {
-        voiceConfig: {
-          prebuiltVoiceConfig: { voiceName: voice },
-        },
+  const generationConfig: Record<string, unknown> = {
+    responseModalities: ["AUDIO"],
+    speechConfig: {
+      voiceConfig: {
+        prebuiltVoiceConfig: { voiceName: voice },
       },
     },
+  };
+  if (temperature !== undefined) {
+    generationConfig.temperature = temperature;
+  }
+  const body = JSON.stringify({
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig,
   });
 
   const attempted: string[] = [];
@@ -768,12 +784,19 @@ export function computeCacheKey(
   voice: string,
   modelId: string, // NEW (AUTHOR-01 D-02)
   preamble: string = "",
+  temperature?: number, // NEW (Tier 4 Director's Note temperature override)
 ): string {
-  // Key material order: version | text | style | voice | modelId | preamble.
+  // Key material order: version | text | style | voice | modelId | preamble [\x00 T<temp>]
   // modelId is between voice and preamble so voice+style+text equivalence alone
   // doesn't produce equal keys across different Gemini model revs.
-  const material =
+  // Temperature is appended ONLY when explicitly set, so unset temp produces
+  // the same key material as before — preserving cache hits for prior bakes
+  // that didn't pass a temperature override.
+  const baseMaterial =
     `${CACHE_KEY_VERSION}\x00${text}\x00${style ?? ""}\x00${voice}\x00${modelId}\x00${preamble}`;
+  const material = temperature !== undefined
+    ? `${baseMaterial}\x00T${temperature}`
+    : baseMaterial;
   return crypto.createHash("sha256").update(material).digest("hex");
 }
 

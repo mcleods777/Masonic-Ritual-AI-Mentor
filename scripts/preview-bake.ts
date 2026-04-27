@@ -52,6 +52,58 @@ const BIND_HOST = "127.0.0.1";
 const BIND_PORT = Number(process.env.PREVIEW_BAKE_PORT ?? "8883");
 const BAKE_CACHE_DIR = path.resolve("rituals/_bake-cache");
 const RITUALS_DIR = path.resolve("rituals");
+const SESSIONS_ROOT = path.resolve("rituals/_sessions");
+
+// Session name: same shape as ritual slug — lowercase alpha-num + dash/underscore,
+// 1-64 chars, must start with alphanumeric. Reserved names blocked below.
+const SESSION_NAME_REGEX = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const RESERVED_SESSION_NAMES = new Set([
+  "canonical",
+  "_sessions",
+  "_bake-cache",
+  ".",
+  "..",
+]);
+
+/**
+ * Resolve the rituals directory for the given session. Empty/undefined
+ * session means canonical (the rituals/ directory). Anything else routes
+ * to rituals/_sessions/{name}/ after regex + reserved-name + path-traversal
+ * validation. Returns null on any validation failure (caller responds 400).
+ */
+function resolveSessionDir(session: string | undefined | null): string | null {
+  if (!session) return RITUALS_DIR;
+  if (!SESSION_NAME_REGEX.test(session)) return null;
+  if (RESERVED_SESSION_NAMES.has(session)) return null;
+  const resolved = path.resolve(SESSIONS_ROOT, session);
+  // Defense in depth: ensure we're inside SESSIONS_ROOT after resolve
+  // (regex should already prevent this, but belt-and-suspenders).
+  if (!resolved.startsWith(SESSIONS_ROOT + path.sep)) return null;
+  return resolved;
+}
+
+function listSessions(): Array<{ name: string; createdAt: string; branchedFrom: string }> {
+  if (!fs.existsSync(SESSIONS_ROOT)) return [];
+  const result: Array<{ name: string; createdAt: string; branchedFrom: string }> = [];
+  for (const entry of fs.readdirSync(SESSIONS_ROOT, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    if (!SESSION_NAME_REGEX.test(entry.name)) continue;
+    if (RESERVED_SESSION_NAMES.has(entry.name)) continue;
+    const metaPath = path.join(SESSIONS_ROOT, entry.name, "_meta.json");
+    let createdAt = "";
+    let branchedFrom = "canonical";
+    if (fs.existsSync(metaPath)) {
+      try {
+        const m = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+        if (typeof m.createdAt === "string") createdAt = m.createdAt;
+        if (typeof m.branchedFrom === "string") branchedFrom = m.branchedFrom;
+      } catch { /* missing meta is OK */ }
+    }
+    result.push({ name: entry.name, createdAt, branchedFrom });
+  }
+  result.sort((a, b) => a.name.localeCompare(b.name));
+  return result;
+}
 
 /**
  * Refuse anything but loopback (T-03-01). Exported for tests.
@@ -96,11 +148,14 @@ const ritualCache = new Map<string, RitualCacheEntry>();
 export async function loadRitual(
   slug: string,
   passphrase: string,
+  session?: string,
 ): Promise<MRAMDocument> {
   if (!RITUAL_SLUG_REGEX.test(slug)) {
     throw new Error(`Invalid ritual slug: ${slug}`);
   }
-  const mramPath = path.join(RITUALS_DIR, `${slug}.mram`);
+  const dir = resolveSessionDir(session);
+  if (!dir) throw new Error(`Invalid session: ${session}`);
+  const mramPath = path.join(dir, `${slug}.mram`);
   if (!fs.existsSync(mramPath)) {
     throw new Error(`Ritual not found: ${slug}.mram`);
   }
@@ -133,8 +188,15 @@ interface StyleSidecarEntry {
   style: string;
   speakAs?: string;
 }
-function loadStylesSidecar(slug: string): Map<string, StyleSidecarEntry> {
-  const p = path.join(RITUALS_DIR, `${slug}-styles.json`);
+function loadStylesSidecar(slug: string, session?: string): Map<string, StyleSidecarEntry> {
+  const dir = resolveSessionDir(session);
+  if (!dir) return new Map();
+  // Styles sidecar: prefer session-local, fall back to canonical (styles
+  // rarely change per-session — they're authoring artifacts).
+  let p = path.join(dir, `${slug}-styles.json`);
+  if (!fs.existsSync(p) && dir !== RITUALS_DIR) {
+    p = path.join(RITUALS_DIR, `${slug}-styles.json`);
+  }
   if (!fs.existsSync(p)) return new Map();
   try {
     const raw = JSON.parse(fs.readFileSync(p, "utf8")) as {
@@ -166,8 +228,14 @@ interface VoiceCastSidecar {
     [k: string]: unknown;
   }>;
 }
-function loadVoiceCastSidecar(slug: string): VoiceCastSidecar | null {
-  const p = path.join(RITUALS_DIR, `${slug}-voice-cast.json`);
+function loadVoiceCastSidecar(slug: string, session?: string): VoiceCastSidecar | null {
+  const dir = resolveSessionDir(session);
+  if (!dir) return null;
+  // Voice-cast sidecar: prefer session-local, fall back to canonical.
+  let p = path.join(dir, `${slug}-voice-cast.json`);
+  if (!fs.existsSync(p) && dir !== RITUALS_DIR) {
+    p = path.join(RITUALS_DIR, `${slug}-voice-cast.json`);
+  }
   if (!fs.existsSync(p)) return null;
   try {
     const raw = JSON.parse(fs.readFileSync(p, "utf8")) as Record<string, unknown>;
@@ -213,12 +281,14 @@ function detectAudioEngine(opusBytes: Buffer | undefined | null): AudioEngine {
 }
 
 /**
- * List all .mram files in rituals/. Returns slugs (sans extension).
+ * List all .mram files in the active session directory. Returns slugs
+ * (sans extension). Session = empty/undefined means canonical.
  */
-export function listRituals(): string[] {
-  if (!fs.existsSync(RITUALS_DIR)) return [];
+export function listRituals(session?: string): string[] {
+  const dir = resolveSessionDir(session);
+  if (!dir || !fs.existsSync(dir)) return [];
   return fs
-    .readdirSync(RITUALS_DIR)
+    .readdirSync(dir)
     .filter((f) => f.endsWith(".mram") && !f.includes(".backup-"))
     .map((f) => f.replace(/\.mram$/, ""))
     .filter((slug) => RITUAL_SLUG_REGEX.test(slug))
@@ -387,8 +457,17 @@ function serveAudioBytes(
 // /api/ritual/{slug}/line/{id}.opus — single-line audio
 // ============================================================
 
-async function handleRitualsList(res: http.ServerResponse): Promise<void> {
-  const slugs = listRituals();
+async function handleRitualsList(
+  res: http.ServerResponse,
+  session?: string,
+): Promise<void> {
+  if (session !== undefined && !resolveSessionDir(session)) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Invalid session" }));
+    return;
+  }
+  const dir = resolveSessionDir(session) ?? RITUALS_DIR;
+  const slugs = listRituals(session);
   const passphrase = process.env.MRAM_PASSPHRASE;
   const result: Array<{
     slug: string;
@@ -399,7 +478,7 @@ async function handleRitualsList(res: http.ServerResponse): Promise<void> {
     error?: string;
   }> = [];
   for (const slug of slugs) {
-    const mramPath = path.join(RITUALS_DIR, `${slug}.mram`);
+    const mramPath = path.join(dir, `${slug}.mram`);
     const stat = fs.statSync(mramPath);
     const entry: typeof result[0] = {
       slug,
@@ -408,7 +487,7 @@ async function handleRitualsList(res: http.ServerResponse): Promise<void> {
     };
     if (passphrase) {
       try {
-        const doc = await loadRitual(slug, passphrase);
+        const doc = await loadRitual(slug, passphrase, session);
         entry.lineCount = doc.lines.filter((l) => !l.action).length;
         entry.sectionCount = doc.sections.length;
         entry.decrypted = true;
@@ -422,16 +501,23 @@ async function handleRitualsList(res: http.ServerResponse): Promise<void> {
   res.end(JSON.stringify({
     rituals: result,
     passphraseSet: Boolean(passphrase),
+    activeSession: session || "",
   }, null, 2));
 }
 
 async function handleRitualDetail(
   res: http.ServerResponse,
   slug: string,
+  session?: string,
 ): Promise<void> {
   if (!RITUAL_SLUG_REGEX.test(slug)) {
     res.writeHead(400, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Invalid slug" }));
+    return;
+  }
+  if (session !== undefined && !resolveSessionDir(session)) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Invalid session" }));
     return;
   }
   const passphrase = process.env.MRAM_PASSPHRASE;
@@ -443,13 +529,13 @@ async function handleRitualDetail(
     return;
   }
   try {
-    const doc = await loadRitual(slug, passphrase);
+    const doc = await loadRitual(slug, passphrase, session);
     // Read the local styles + voice-cast sidecars (gitignored, plaintext).
     // These are content-authoring artifacts that the bake consumed but
     // doesn't ship inside the .mram. Shannon needs them to scrub WHY
     // each line sounds the way it does.
-    const stylesByHash = loadStylesSidecar(slug);
-    const voiceCast = loadVoiceCastSidecar(slug);
+    const stylesByHash = loadStylesSidecar(slug, session);
+    const voiceCast = loadVoiceCastSidecar(slug, session);
     // Strip audio bytes from the JSON response — they're large, served
     // separately via /api/ritual/{slug}/line/{id}.opus.
     const engineCounts: Record<string, number> = {};
@@ -516,6 +602,7 @@ async function handleRitualLineAudio(
   res: http.ServerResponse,
   slug: string,
   lineIdStr: string,
+  session?: string,
 ): Promise<void> {
   if (!RITUAL_SLUG_REGEX.test(slug)) {
     res.writeHead(400);
@@ -527,6 +614,11 @@ async function handleRitualLineAudio(
     res.end("Invalid line id");
     return;
   }
+  if (session !== undefined && !resolveSessionDir(session)) {
+    res.writeHead(400);
+    res.end("Invalid session");
+    return;
+  }
   const lineId = Number(lineIdStr);
   const passphrase = process.env.MRAM_PASSPHRASE;
   if (!passphrase) {
@@ -535,7 +627,7 @@ async function handleRitualLineAudio(
     return;
   }
   try {
-    const doc = await loadRitual(slug, passphrase);
+    const doc = await loadRitual(slug, passphrase, session);
     const line = doc.lines.find((l) => l.id === lineId);
     if (!line || !line.audio) {
       res.writeHead(404);
@@ -577,8 +669,9 @@ interface ReviewSidecar {
   lines: Record<string, ReviewEntry>;
 }
 
-function reviewSidecarPath(slug: string): string {
-  return path.join(RITUALS_DIR, `${slug}-review.json`);
+function reviewSidecarPath(slug: string, session?: string): string {
+  const dir = resolveSessionDir(session) ?? RITUALS_DIR;
+  return path.join(dir, `${slug}-review.json`);
 }
 
 function defaultReviewEntry(): ReviewEntry {
@@ -591,8 +684,8 @@ function defaultReviewEntry(): ReviewEntry {
   };
 }
 
-function readReviewSidecar(slug: string): ReviewSidecar {
-  const p = reviewSidecarPath(slug);
+function readReviewSidecar(slug: string, session?: string): ReviewSidecar {
+  const p = reviewSidecarPath(slug, session);
   if (!fs.existsSync(p)) {
     return { version: 1, updatedAt: null, lines: {} };
   }
@@ -629,20 +722,28 @@ function readReviewSidecar(slug: string): ReviewSidecar {
   }
 }
 
-function writeReviewSidecar(slug: string, data: ReviewSidecar): void {
-  const p = reviewSidecarPath(slug);
+function writeReviewSidecar(slug: string, data: ReviewSidecar, session?: string): void {
+  const p = reviewSidecarPath(slug, session);
+  // Ensure parent dir exists (session dirs may not be created yet for
+  // first review write — though the session-create flow always mkdirs).
+  fs.mkdirSync(path.dirname(p), { recursive: true });
   const tmp = `${p}.tmp.${process.pid}`;
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
   fs.renameSync(tmp, p);
 }
 
-function handleReviewGet(res: http.ServerResponse, slug: string): void {
+function handleReviewGet(res: http.ServerResponse, slug: string, session?: string): void {
   if (!RITUAL_SLUG_REGEX.test(slug)) {
     res.writeHead(400, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Invalid slug" }));
     return;
   }
-  const sidecar = readReviewSidecar(slug);
+  if (session !== undefined && !resolveSessionDir(session)) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Invalid session" }));
+    return;
+  }
+  const sidecar = readReviewSidecar(slug, session);
   res.writeHead(200, { "Content-Type": "application/json" });
   res.end(JSON.stringify(sidecar));
 }
@@ -652,6 +753,7 @@ async function handleReviewPut(
   res: http.ServerResponse,
   slug: string,
   lineIdStr: string,
+  session?: string,
 ): Promise<void> {
   if (!RITUAL_SLUG_REGEX.test(slug)) {
     res.writeHead(400);
@@ -661,6 +763,11 @@ async function handleReviewPut(
   if (!LINE_ID_REGEX.test(lineIdStr)) {
     res.writeHead(400);
     res.end("Invalid line id");
+    return;
+  }
+  if (session !== undefined && !resolveSessionDir(session)) {
+    res.writeHead(400);
+    res.end("Invalid session");
     return;
   }
   const chunks: Buffer[] = [];
@@ -688,7 +795,7 @@ async function handleReviewPut(
     res.end("Invalid body");
     return;
   }
-  const sidecar = readReviewSidecar(slug);
+  const sidecar = readReviewSidecar(slug, session);
   const next: ReviewEntry = { ...(sidecar.lines[lineIdStr] ?? defaultReviewEntry()) };
   const now = new Date().toISOString();
   if ("status" in parsed) {
@@ -728,9 +835,195 @@ async function handleReviewPut(
   }
   sidecar.lines[lineIdStr] = next;
   sidecar.updatedAt = now;
-  writeReviewSidecar(slug, sidecar);
+  writeReviewSidecar(slug, sidecar, session);
   res.writeHead(200, { "Content-Type": "application/json" });
   res.end(JSON.stringify(next));
+}
+
+// ============================================================
+// Sessions — STT-01 Tier 2b: parallel-bake feature
+// ============================================================
+// A session is a parallel directory of ritual files (.mram + sidecars)
+// that lives under rituals/_sessions/{name}/. The bake-cache is shared
+// across all sessions (content-addressed by text+style+voice+model+preamble).
+// Creation copies all .mram + review/styles/voice-cast files from the source
+// (canonical or another session). Promotion copies session files back to
+// canonical (with auto-backup of canonical first). Deletion removes the
+// session dir entirely. Sessions are gitignored via the rituals/_sessions/
+// prefix in .gitignore (added when this feature ships).
+
+const SESSION_FILE_GLOB = (slug: string) => [
+  `${slug}.mram`,
+  `${slug}-review.json`,
+  `${slug}-styles.json`,
+  `${slug}-voice-cast.json`,
+];
+
+function copySessionFiles(srcDir: string, destDir: string): number {
+  let copied = 0;
+  if (!fs.existsSync(srcDir)) return 0;
+  fs.mkdirSync(destDir, { recursive: true });
+  // Get the slug list from the SOURCE — we copy whatever rituals exist there.
+  const slugs = fs
+    .readdirSync(srcDir)
+    .filter((f) => f.endsWith(".mram") && !f.includes(".backup-"))
+    .map((f) => f.replace(/\.mram$/, ""))
+    .filter((slug) => RITUAL_SLUG_REGEX.test(slug));
+  for (const slug of slugs) {
+    for (const filename of SESSION_FILE_GLOB(slug)) {
+      const src = path.join(srcDir, filename);
+      if (!fs.existsSync(src)) continue;
+      const dest = path.join(destDir, filename);
+      fs.copyFileSync(src, dest);
+      copied++;
+    }
+  }
+  return copied;
+}
+
+function handleSessionsList(res: http.ServerResponse): void {
+  const sessions = listSessions();
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({
+    sessions,
+    canonical: { name: "", createdAt: null, branchedFrom: null },
+  }));
+}
+
+async function handleSessionCreate(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  name: string,
+): Promise<void> {
+  if (!SESSION_NAME_REGEX.test(name) || RESERVED_SESSION_NAMES.has(name)) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Invalid session name" }));
+    return;
+  }
+  const destDir = resolveSessionDir(name);
+  if (!destDir) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Invalid session" }));
+    return;
+  }
+  if (fs.existsSync(destDir)) {
+    res.writeHead(409, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Session already exists" }));
+    return;
+  }
+  // Parse body — { branchFrom?: string } where empty/undefined = canonical
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const c of req) {
+    const buf = c as Buffer;
+    total += buf.length;
+    if (total > 1024) { res.writeHead(413); res.end("Body too large"); return; }
+    chunks.push(buf);
+  }
+  let body: { branchFrom?: string } = {};
+  if (chunks.length > 0) {
+    try { body = JSON.parse(Buffer.concat(chunks).toString("utf8")); }
+    catch {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid JSON body" }));
+      return;
+    }
+  }
+  const branchFrom = (body.branchFrom || "").trim();
+  const sourceDir = resolveSessionDir(branchFrom);
+  if (!sourceDir) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Invalid branchFrom session" }));
+    return;
+  }
+  try {
+    const copied = copySessionFiles(sourceDir, destDir);
+    const meta = {
+      version: 1,
+      name,
+      createdAt: new Date().toISOString(),
+      branchedFrom: branchFrom || "canonical",
+      branchedAt: new Date().toISOString(),
+    };
+    fs.writeFileSync(path.join(destDir, "_meta.json"), JSON.stringify(meta, null, 2));
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, name, filesCopied: copied, branchedFrom: meta.branchedFrom }));
+  } catch (e) {
+    // Best-effort cleanup if copy failed mid-flight
+    try { fs.rmSync(destDir, { recursive: true, force: true }); } catch { /* */ }
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: (e as Error).message.slice(0, 200) }));
+  }
+}
+
+function handleSessionPromote(
+  res: http.ServerResponse,
+  name: string,
+): void {
+  if (!SESSION_NAME_REGEX.test(name) || RESERVED_SESSION_NAMES.has(name)) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Invalid session name" }));
+    return;
+  }
+  const sourceDir = resolveSessionDir(name);
+  if (!sourceDir || !fs.existsSync(sourceDir)) {
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Session not found" }));
+    return;
+  }
+  // Auto-backup canonical first to a special pre-promote session so the
+  // user can roll back the promotion if they regret it.
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupDir = path.resolve(SESSIONS_ROOT, `_pre-promote-${ts}`);
+  try {
+    fs.mkdirSync(backupDir, { recursive: true });
+    copySessionFiles(RITUALS_DIR, backupDir);
+    fs.writeFileSync(path.join(backupDir, "_meta.json"), JSON.stringify({
+      version: 1,
+      name: path.basename(backupDir),
+      createdAt: new Date().toISOString(),
+      branchedFrom: "canonical",
+      branchedAt: new Date().toISOString(),
+      note: `Auto-backup before promoting "${name}" to canonical`,
+    }, null, 2));
+    // Promote: copy session files into canonical (overwrites)
+    const copied = copySessionFiles(sourceDir, RITUALS_DIR);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      ok: true,
+      promoted: name,
+      filesCopied: copied,
+      backupDir: path.basename(backupDir),
+    }));
+  } catch (e) {
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: (e as Error).message.slice(0, 200) }));
+  }
+}
+
+function handleSessionDelete(
+  res: http.ServerResponse,
+  name: string,
+): void {
+  if (!SESSION_NAME_REGEX.test(name) || RESERVED_SESSION_NAMES.has(name)) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Invalid session name" }));
+    return;
+  }
+  const dir = resolveSessionDir(name);
+  if (!dir || !fs.existsSync(dir)) {
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Session not found" }));
+    return;
+  }
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, deleted: name }));
+  } catch (e) {
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: (e as Error).message.slice(0, 200) }));
+  }
 }
 
 // ============================================================
@@ -749,6 +1042,7 @@ async function handleRebakeLine(
   res: http.ServerResponse,
   slug: string,
   lineIdStr: string,
+  session?: string,
 ): Promise<void> {
   if (!RITUAL_SLUG_REGEX.test(slug)) {
     res.writeHead(400, { "Content-Type": "application/json" });
@@ -758,6 +1052,11 @@ async function handleRebakeLine(
   if (!LINE_ID_REGEX.test(lineIdStr)) {
     res.writeHead(400, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Invalid line id" }));
+    return;
+  }
+  if (session !== undefined && !resolveSessionDir(session)) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Invalid session" }));
     return;
   }
   const passphrase = process.env.MRAM_PASSPHRASE;
@@ -794,6 +1093,9 @@ async function handleRebakeLine(
     styleOverride?: string;
     paceOverride?: string;
     accentOverride?: string;
+    profileOverride?: string;
+    temperature?: number;
+    modelOverride?: string;
   } = {};
   if (chunks.length > 0) {
     try {
@@ -805,27 +1107,47 @@ async function handleRebakeLine(
     }
   }
   const forcePreamble = !!body.forcePreamble;
-  // Validate overrides — each is optional; reject obviously-malformed input
-  // so we never proxy untrusted strings into the Gemini prompt.
+  // Validate overrides — each is optional; reject malformed input so we
+  // never proxy raw control chars into the Gemini prompt. Voice override
+  // stays restricted to the API's voice-name shape; prose overrides allow
+  // free-text but cap length and forbid control chars.
   const isSafeIdent = (s: unknown): s is string =>
     typeof s === "string" && s.length > 0 && s.length <= 64 && /^[A-Za-z][A-Za-z0-9 _\-/]*$/.test(s);
+  const isSafeProse = (s: unknown, maxLen: number): s is string =>
+    typeof s === "string"
+    && s.length > 0
+    && s.length <= maxLen
+    && !/[\x00-\x08\x0b-\x0c\x0e-\x1f\x7f]/.test(s);
   const voiceOverride = isSafeIdent(body.voiceOverride) ? body.voiceOverride : undefined;
-  const styleOverride = isSafeIdent(body.styleOverride) ? body.styleOverride : undefined;
-  const paceOverride = isSafeIdent(body.paceOverride) ? body.paceOverride : undefined;
-  const accentOverride = isSafeIdent(body.accentOverride) ? body.accentOverride : undefined;
+  const styleOverride = isSafeProse(body.styleOverride, 500) ? body.styleOverride : undefined;
+  const paceOverride = isSafeProse(body.paceOverride, 500) ? body.paceOverride : undefined;
+  const accentOverride = isSafeProse(body.accentOverride, 500) ? body.accentOverride : undefined;
+  const profileOverride = isSafeProse(body.profileOverride, 1000) ? body.profileOverride : undefined;
+  // Temperature: numeric, range 0.0-2.0, undefined = use Gemini default
+  const temperatureRaw = body.temperature;
+  const temperature = (typeof temperatureRaw === "number" && Number.isFinite(temperatureRaw) && temperatureRaw >= 0 && temperatureRaw <= 2)
+    ? temperatureRaw
+    : undefined;
+  // Model override: must look like a Gemini model identifier (alphanumeric + dashes/dots, no spaces)
+  const modelOverride = (typeof body.modelOverride === "string" && /^[a-z0-9][a-z0-9.\-_]{0,127}$/i.test(body.modelOverride))
+    ? body.modelOverride
+    : undefined;
 
-  // Per-slug serialization
-  const prev = rebakeLockBySlug.get(slug);
+  // Per-(session, slug) serialization — different sessions on the same
+  // slug write to different files, so they don't conflict.
+  const lockKey = (session || "") + "::" + slug;
+  const prev = rebakeLockBySlug.get(lockKey);
   let resolveLock!: () => void;
   const lockPromise = new Promise<void>((r) => {
     resolveLock = r;
   });
-  rebakeLockBySlug.set(slug, lockPromise);
+  rebakeLockBySlug.set(lockKey, lockPromise);
   if (prev) await prev;
 
   try {
     const lineId = Number(lineIdStr);
-    const mramPath = path.join(RITUALS_DIR, `${slug}.mram`);
+    const sessionDir = resolveSessionDir(session) ?? RITUALS_DIR;
+    const mramPath = path.join(sessionDir, `${slug}.mram`);
     if (!fs.existsSync(mramPath)) {
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Ritual not found" }));
@@ -853,21 +1175,21 @@ async function handleRebakeLine(
       return;
     }
 
-    // Derive style + speakAs + preamble — same logic as rebake-flagged.ts
-    const stylesByHash = loadStylesSidecar(slug);
+    // Derive style + speakAs — same logic as rebake-flagged.ts.
+    // IMPORTANT: style/pace/accent overrides do NOT get packed into the
+    // inline "[<style>] " bracket prefix anymore. Doing that on top of a
+    // voice-cast preamble that already describes pacing/style/accent at
+    // length produced two competing directive sets — the model would
+    // follow the rich preamble and quietly ignore the terse bracket
+    // (Shannon observed this empirically: changing pace did nothing).
+    // Instead, overrides are LAYERED into a synthetic role-card BEFORE
+    // the preamble is built. The preamble then carries one coherent set
+    // of directives.
+    const stylesByHash = loadStylesSidecar(slug, session);
     const sidecar = stylesByHash.get(hashLineText(line.plain));
     const speakAs = sidecar?.speakAs;
     const baseStyle = line.style ?? sidecar?.style;
-    // Composite style: combine baseStyle with override style/pace/accent.
-    // The render code formats this as "[<style>] " before the line text,
-    // so we pack our director's-note traits into a comma-separated list.
-    // Order matters for readability: style first, then pace, then accent.
-    const styleParts: string[] = [];
-    if (styleOverride) styleParts.push(styleOverride);
-    else if (baseStyle) styleParts.push(baseStyle);
-    if (paceOverride) styleParts.push(`${paceOverride} pace`);
-    if (accentOverride) styleParts.push(`${accentOverride} accent`);
-    const style = styleParts.length > 0 ? styleParts.join(", ") : undefined;
+    const style = baseStyle; // pass only the base style; overrides → preamble
     const text = speakAs ?? line.plain;
 
     const VOICE_CAST_MIN_LINE_CHARS = parseInt(
@@ -875,23 +1197,43 @@ async function handleRebakeLine(
       10,
     );
 
+    const hasAnyOverride = !!(styleOverride || paceOverride || accentOverride || profileOverride);
+
     let preamble = "";
     if (!speakAs) {
       const overThreshold = line.plain.length >= VOICE_CAST_MIN_LINE_CHARS;
-      if (forcePreamble || overThreshold) {
-        const voiceCastPath = path.join(
-          RITUALS_DIR,
-          `${slug}-voice-cast.json`,
-        );
+      // Always inject preamble when style/pace/accent overrides are set —
+      // they have nowhere else to go.
+      if (forcePreamble || hasAnyOverride || overThreshold) {
+        // Voice-cast: prefer session-local, fall back to canonical.
+        let voiceCastPath = path.join(sessionDir, `${slug}-voice-cast.json`);
+        if (!fs.existsSync(voiceCastPath) && sessionDir !== RITUALS_DIR) {
+          voiceCastPath = path.join(RITUALS_DIR, `${slug}-voice-cast.json`);
+        }
         if (fs.existsSync(voiceCastPath)) {
           try {
             const vcRaw = JSON.parse(
               fs.readFileSync(voiceCastPath, "utf8"),
             ) as Record<string, unknown>;
+            const baseRoles = ((vcRaw.roles ?? vcRaw.cast) ?? {}) as Record<string, Record<string, unknown>>;
+            const baseRole = baseRoles[line.role] ?? {};
+            // Layer overrides on top — replacing the role-card field rather
+            // than appending. style → role.style, pace → role.pacing,
+            // accent → role.accent, profile → role.profile. Voice override
+            // is handled separately (passed directly to the API as voiceName).
+            const syntheticRole: Record<string, unknown> = { ...baseRole };
+            if (styleOverride) syntheticRole.style = styleOverride;
+            if (paceOverride) syntheticRole.pacing = paceOverride;
+            if (accentOverride) syntheticRole.accent = accentOverride;
+            if (profileOverride) syntheticRole.profile = profileOverride;
+            const syntheticRoles = {
+              ...baseRoles,
+              [line.role]: syntheticRole,
+            };
             const vcFile: VoiceCastFile = {
               version: 1,
               scene: vcRaw.scene as string | undefined,
-              roles: ((vcRaw.roles ?? vcRaw.cast) ?? {}) as VoiceCastFile["roles"],
+              roles: syntheticRoles as VoiceCastFile["roles"],
             };
             preamble = buildPreamble(vcFile, line.role) ?? "";
           } catch {
@@ -901,20 +1243,31 @@ async function handleRebakeLine(
       }
     }
 
-    // Wipe cache entries for all default models so we get a fresh roll
-    for (const model of DEFAULT_MODELS) {
-      const key = computeCacheKey(text, style, voice, model, preamble);
+    // Wipe cache entries so we get a fresh roll. When the user has set a
+    // modelOverride, only invalidate that one (other models' caches stay
+    // intact in case the user wants to A/B against them later). Otherwise
+    // wipe the whole default chain.
+    const invalidateModels = modelOverride ? [modelOverride] : DEFAULT_MODELS;
+    for (const model of invalidateModels) {
+      const key = computeCacheKey(text, style, voice, model, preamble, temperature);
       deleteCacheEntry(key, RENDER_CACHE_DIR);
     }
 
-    // Render. Don't pass `models` — let renderLineAudio fall through to its
-    // internal readModelsFromEnv() so GEMINI_TTS_MODELS in .env.local takes
-    // effect (e.g. for skipping a broken preview model).
+    // Render. When modelOverride is set, force only that model. Otherwise
+    // let renderLineAudio read GEMINI_TTS_MODELS from env (the
+    // .env.local-pinned chain), so e.g. skipping a degraded preview model
+    // still works without GUI input.
+    const renderOpts: { apiKeys: string[]; cacheDir: string; models?: string[]; temperature?: number } = {
+      apiKeys,
+      cacheDir: RENDER_CACHE_DIR,
+    };
+    if (modelOverride) renderOpts.models = [modelOverride];
+    if (temperature !== undefined) renderOpts.temperature = temperature;
     const audioBuf = await renderLineAudio(
       text,
       style,
       voice,
-      { apiKeys, cacheDir: RENDER_CACHE_DIR },
+      renderOpts,
       preamble,
     );
     line.audio = audioBuf.toString("base64");
@@ -955,10 +1308,10 @@ async function handleRebakeLine(
     fs.renameSync(tmpPath, mramPath);
 
     // Update review sidecar — clear audio-related fields, demote approved
-    const reviewPath = path.join(RITUALS_DIR, `${slug}-review.json`);
+    const reviewPath = path.join(sessionDir, `${slug}-review.json`);
     if (fs.existsSync(reviewPath)) {
       try {
-        const sc = readReviewSidecar(slug);
+        const sc = readReviewSidecar(slug, session);
         const entry = sc.lines[String(lineId)];
         if (entry) {
           entry.audioHash = null;
@@ -968,7 +1321,7 @@ async function handleRebakeLine(
             entry.flaggedAt = null;
           }
           sc.updatedAt = new Date().toISOString();
-          writeReviewSidecar(slug, sc);
+          writeReviewSidecar(slug, sc, session);
         }
       } catch {
         /* swallow */
@@ -985,6 +1338,8 @@ async function handleRebakeLine(
         preambleUsed: preamble.length > 0,
         voiceUsed: voice,
         styleUsed: style,
+        modelUsed: modelOverride ?? "(chain default)",
+        temperatureUsed: temperature ?? "(API default)",
       }),
     );
   } catch (e) {
@@ -992,8 +1347,8 @@ async function handleRebakeLine(
     res.end(JSON.stringify({ error: (e as Error).message.slice(0, 300) }));
   } finally {
     resolveLock();
-    if (rebakeLockBySlug.get(slug) === lockPromise) {
-      rebakeLockBySlug.delete(slug);
+    if (rebakeLockBySlug.get(lockKey) === lockPromise) {
+      rebakeLockBySlug.delete(lockKey);
     }
   }
 }
@@ -1070,6 +1425,98 @@ export function handleIndexRequest(res: http.ServerResponse): void {
   }
   header .meta { color: var(--zinc-500); font-size: 0.85em; font-family: 'Lato', sans-serif; }
   header .err { color: var(--error); font-weight: 500; }
+  /* Session row — STT-01 Tier 2b — sits between meta and ritual tabs */
+  .session-row {
+    display: flex; flex-wrap: wrap; gap: 0.5em; align-items: center;
+    margin: 0.5em 0 0.25em;
+    padding: 0.45em 0;
+    border-bottom: 1px dashed transparent;
+  }
+  .session-row:not(:empty) { border-bottom-color: var(--zinc-800); padding-bottom: 0.65em; }
+  .session-row .session-label {
+    color: var(--zinc-500); font-size: 0.78em;
+    font-family: ui-monospace, monospace;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .session-row select#session-select {
+    background: var(--zinc-900);
+    color: var(--zinc-200);
+    border: 1px solid var(--zinc-700);
+    border-radius: 6px;
+    padding: 0.35em 0.5em;
+    font-family: 'Lato', sans-serif;
+    font-size: 0.85em;
+    min-width: 160px;
+    cursor: pointer;
+  }
+  .session-row select#session-select:hover, .session-row select#session-select:focus {
+    border-color: var(--amber-500); outline: none;
+  }
+  .session-row button {
+    background: transparent;
+    border: 1px solid var(--zinc-700);
+    color: var(--zinc-300);
+    padding: 0.35em 0.85em;
+    border-radius: 6px; cursor: pointer;
+    font-family: 'Lato', sans-serif;
+    font-size: 0.82em;
+    transition: all 120ms;
+  }
+  .session-row button:hover {
+    background: rgba(245, 158, 11, 0.1);
+    color: var(--amber-400);
+    border-color: rgba(245, 158, 11, 0.4);
+  }
+  .session-row button.session-promote {
+    border-color: rgba(74, 222, 128, 0.4);
+    color: var(--good);
+  }
+  .session-row button.session-promote:hover {
+    background: rgba(74, 222, 128, 0.12);
+    border-color: rgba(74, 222, 128, 0.6);
+    color: var(--good);
+  }
+  .session-row button.session-delete {
+    border-color: rgba(248, 113, 113, 0.35);
+    color: var(--error);
+  }
+  .session-row button.session-delete:hover {
+    background: rgba(248, 113, 113, 0.12);
+    border-color: rgba(248, 113, 113, 0.6);
+    color: var(--error);
+  }
+  .session-form {
+    display: inline-flex; align-items: center; gap: 0.5em; flex-wrap: wrap;
+    background: var(--zinc-950);
+    border: 1px solid var(--zinc-800);
+    border-radius: 8px;
+    padding: 0.4em 0.7em;
+  }
+  .session-form input[type="text"] {
+    background: var(--zinc-900);
+    color: var(--zinc-200);
+    border: 1px solid var(--zinc-700);
+    border-radius: 4px;
+    padding: 0.35em 0.5em;
+    font-family: ui-monospace, monospace;
+    font-size: 0.85em;
+    min-width: 200px;
+  }
+  .session-form input[type="text"]:focus {
+    border-color: var(--amber-500); outline: none;
+  }
+  .session-form-checkbox {
+    color: var(--zinc-400); font-size: 0.82em;
+    display: inline-flex; align-items: center; gap: 0.3em;
+  }
+  .session-form-checkbox input[type="checkbox"] {
+    accent-color: var(--amber-500);
+  }
+  .session-form button.session-cancel {
+    border-color: var(--zinc-700); color: var(--zinc-400);
+  }
+  .session-form .session-err { color: var(--error); font-size: 0.82em; }
+  .session-form .session-ok { color: var(--good); font-size: 0.82em; }
   .ritual-tabs {
     display: flex; flex-wrap: wrap; gap: 0.4em;
     margin-top: 0.75em;
@@ -1317,6 +1764,21 @@ export function handleIndexRequest(res: http.ServerResponse): void {
   .controls input[type="checkbox"] {
     vertical-align: middle; margin-right: 0.3em;
     accent-color: var(--amber-500);
+  }
+  .controls button#jump-to-current {
+    background: transparent;
+    border: 1px solid var(--zinc-700);
+    color: var(--zinc-400);
+    padding: 0.3em 0.85em;
+    border-radius: 6px; cursor: pointer;
+    font-family: 'Lato', sans-serif;
+    font-size: 0.82em;
+    transition: all 120ms;
+  }
+  .controls button#jump-to-current:hover {
+    background: rgba(245, 158, 11, 0.08);
+    color: var(--amber-400);
+    border-color: rgba(245, 158, 11, 0.3);
   }
   a { color: var(--amber-400); text-decoration: none; }
   a:hover { color: var(--amber-300); text-decoration: underline; }
@@ -1581,14 +2043,60 @@ export function handleIndexRequest(res: http.ServerResponse): void {
   .director-note[open] .summary-tag {
     color: var(--amber-300);
   }
+  .director-note-profile-row {
+    padding: 0.65em 0.95em;
+    background: rgba(245, 158, 11, 0.04);
+    border-bottom: 1px solid var(--zinc-800);
+    display: flex; align-items: center; gap: 0.6em; flex-wrap: wrap;
+  }
+  .director-note-profile-label {
+    color: var(--zinc-400); font-size: 0.78em;
+    font-family: ui-monospace, monospace;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .director-note-profile-select {
+    background: var(--zinc-900);
+    color: var(--zinc-200);
+    border: 1px solid var(--zinc-700);
+    border-radius: 6px;
+    padding: 0.4em 0.5em;
+    font-family: 'Lato', sans-serif;
+    font-size: 0.85em;
+    min-width: 220px;
+    cursor: pointer;
+  }
+  .director-note-profile-select:hover, .director-note-profile-select:focus {
+    border-color: var(--amber-500); outline: none;
+  }
+  .save-profile-btn, .delete-profile-btn {
+    background: transparent;
+    border: 1px solid var(--zinc-700);
+    color: var(--zinc-300);
+    padding: 0.4em 0.85em;
+    border-radius: 6px; cursor: pointer;
+    font-family: 'Lato', sans-serif;
+    font-size: 0.82em;
+    transition: all 120ms;
+  }
+  .save-profile-btn:hover {
+    background: rgba(245, 158, 11, 0.1);
+    color: var(--amber-400);
+    border-color: rgba(245, 158, 11, 0.4);
+  }
+  .delete-profile-btn:hover:not(:disabled) {
+    background: rgba(248, 113, 113, 0.1);
+    color: var(--error);
+    border-color: rgba(248, 113, 113, 0.4);
+  }
+  .delete-profile-btn:disabled { opacity: 0.4; cursor: not-allowed; }
   .director-note-body {
     padding: 0.85em 0.95em;
-    display: grid; grid-template-columns: 1fr 1fr 1fr 1fr;
-    gap: 0.75em 1em;
-    align-items: end;
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 1em 1.5em;
+    align-items: start;
   }
   @media (max-width: 720px) {
-    .director-note-body { grid-template-columns: 1fr 1fr; }
+    .director-note-body { grid-template-columns: 1fr; }
   }
   .director-note-field { display: flex; flex-direction: column; gap: 0.25em; min-width: 0; }
   .director-note-field label {
@@ -1610,6 +2118,79 @@ export function handleIndexRequest(res: http.ServerResponse): void {
   }
   .director-note-field select:hover, .director-note-field select:focus {
     border-color: var(--amber-500); outline: none;
+  }
+  /* Free-text prose input — sits below the preset dropdown. Empty =
+     defer to dropdown selection. Typing here overrides the preset. */
+  .director-note-field input.director-note-prose,
+  .director-note-field textarea.director-note-prose {
+    background: var(--zinc-900);
+    color: var(--zinc-200);
+    border: 1px solid var(--zinc-800);
+    border-radius: 6px;
+    padding: 0.4em 0.55em;
+    font: 13px/1.5 'Lato', system-ui, sans-serif;
+    width: 100%; box-sizing: border-box;
+    margin-top: 0.3em;
+    transition: border-color 100ms;
+  }
+  .director-note-field input.director-note-prose::placeholder,
+  .director-note-field textarea.director-note-prose::placeholder {
+    color: var(--zinc-600); font-style: italic;
+  }
+  .director-note-field input.director-note-prose:focus,
+  .director-note-field textarea.director-note-prose:focus {
+    border-color: var(--amber-500); outline: none;
+    background: var(--zinc-950);
+  }
+  .director-note-field textarea.director-note-prose {
+    min-height: 3.4em; max-height: 10em;
+    resize: vertical; line-height: 1.5;
+  }
+  /* Profile field spans the full row — it's the largest free-text input. */
+  .director-note-profile-field {
+    grid-column: 1 / -1;
+  }
+  .director-note-profile-field label {
+    color: var(--zinc-400);
+  }
+  /* Temperature slider — like Google AI Studio's. Live value next to label. */
+  .director-note-temp-display {
+    margin-left: 0.5em;
+    font-family: ui-monospace, monospace;
+    color: var(--amber-400);
+    font-weight: 700;
+    font-size: 0.92em;
+    text-transform: none; letter-spacing: 0;
+  }
+  .director-note-temp-slider {
+    width: 100%;
+    margin-top: 0.3em;
+    accent-color: var(--amber-500);
+    cursor: pointer;
+  }
+  .director-note-temp-controls {
+    display: flex; align-items: center; gap: 0.6em;
+    margin-top: 0.4em; flex-wrap: wrap;
+  }
+  .director-note-temp-reset {
+    background: transparent;
+    border: 1px solid var(--zinc-800);
+    color: var(--zinc-400);
+    padding: 0.3em 0.7em;
+    border-radius: 6px; cursor: pointer;
+    font-family: 'Lato', sans-serif;
+    font-size: 0.8em;
+    transition: all 120ms;
+  }
+  .director-note-temp-reset:hover {
+    background: rgba(245, 158, 11, 0.08);
+    border-color: rgba(245, 158, 11, 0.3);
+    color: var(--amber-400);
+  }
+  .director-note-temp-hint {
+    color: var(--zinc-500);
+    font-family: ui-monospace, monospace;
+    font-size: 0.74em;
   }
   .director-note-actions {
     grid-column: 1 / -1;
@@ -1664,6 +2245,42 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     color: var(--zinc-200);
     border-color: var(--zinc-600);
   }
+  /* Apply-to buttons — same shape as reset, slightly tinted teal so they
+     read as "broadcast this configuration to other lines" actions. */
+  .apply-to-flagged-btn,
+  .apply-to-role-btn {
+    background: transparent;
+    border: 1px solid rgba(45, 212, 191, 0.3);
+    color: #5eead4;
+    padding: 0.5em 0.9em;
+    border-radius: 8px; cursor: pointer;
+    font-family: 'Lato', sans-serif;
+    font-size: 0.85em;
+    transition: all 120ms;
+  }
+  .apply-to-flagged-btn:hover,
+  .apply-to-role-btn:hover {
+    background: rgba(45, 212, 191, 0.1);
+    border-color: rgba(45, 212, 191, 0.6);
+  }
+  /* Bulk-rebake button in the status filter row — shape matches the
+     bulk-approve button it sits next to but tinted teal/blue so it
+     reads as a regenerate action vs. a status flip. */
+  .filter-shortcut.bulk-rebake {
+    border-color: rgba(45, 212, 191, 0.4);
+    color: #5eead4;
+  }
+  .filter-shortcut.bulk-rebake:hover:not(:disabled) {
+    background: rgba(45, 212, 191, 0.12);
+    border-color: rgba(45, 212, 191, 0.6);
+    color: #5eead4;
+  }
+  .filter-shortcut.bulk-rebake::before {
+    content: "↻ "; display: inline-block;
+  }
+  .filter-shortcut.bulk-rebake.rebaking::before {
+    animation: rebake-spin 1s linear infinite;
+  }
   .note-area {
     margin-top: 0.5em;
     background: var(--zinc-950);
@@ -1716,6 +2333,7 @@ export function handleIndexRequest(res: http.ServerResponse): void {
   <div class="header-inner">
     <h1>Bake Preview <span style="color: var(--zinc-500); font-weight: 400; font-family: 'Lato', sans-serif; font-size: 0.65em; letter-spacing: 0; margin-left: 0.5em;">rituals/</span></h1>
     <div class="meta" id="header-meta">Loading…</div>
+    <div class="session-row" id="session-row"></div>
     <div class="ritual-tabs" id="tabs"></div>
   </div>
 </header>
@@ -1795,12 +2413,24 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     { value: "Australian", label: "Australian" },
     { value: "Mid-Atlantic", label: "Mid-Atlantic" },
   ];
+  // Gemini TTS model picker — pin a single model for this rebake.
+  // "(default chain)" lets the env-var chain pick (skipping degraded models).
+  const MODEL_OPTIONS = [
+    { value: "", label: "(default chain — env-var driven)" },
+    { value: "gemini-3.1-flash-tts-preview", label: "gemini-3.1-flash-tts-preview (premium)" },
+    { value: "gemini-2.5-flash-preview-tts", label: "gemini-2.5-flash-preview-tts (faster fallback)" },
+    { value: "gemini-2.5-pro-preview-tts", label: "gemini-2.5-pro-preview-tts (slower, possibly higher quality)" },
+  ];
 
   const state = {
     rituals: [],
     activeSlug: null,
     activeDoc: null,
     showCipher: false,
+    // STT-01 Tier 2b: session = parallel-bake. "" or null = canonical
+    // (rituals/), otherwise rituals/_sessions/{name}/.
+    activeSession: "",
+    allSessions: [],
     // Set of engine keys currently visible. null means "all visible"
     // (e.g. before any filter has been touched, or after Reset).
     engineFilter: null,
@@ -1822,24 +2452,205 @@ export function handleIndexRequest(res: http.ServerResponse): void {
 
   async function init() {
     try {
-      const res = await fetch("/api/rituals");
-      const data = await res.json();
-      state.rituals = data.rituals;
-      const meta = document.getElementById("header-meta");
-      if (!data.passphraseSet) {
-        meta.innerHTML = '<span class="err">MRAM_PASSPHRASE not set — restart with the env var to view ritual structure.</span>';
-      } else if (state.rituals.length === 0) {
-        meta.textContent = "No .mram files in rituals/. Run bake-all to create them.";
-      } else {
-        const total = state.rituals.reduce((n, r) => n + (r.lineCount || 0), 0);
-        meta.textContent = state.rituals.length + " ritual(s), " + total + " spoken line(s) total.";
-      }
+      // Load sessions list first, then rituals for the active session.
+      await refreshSessions();
+      await loadRitualsForActiveSession();
+      renderSessionRow();
       renderTabs();
       // Auto-select first ritual that decrypted successfully
       const first = state.rituals.find(r => r.decrypted);
       if (first) selectRitual(first.slug);
     } catch (e) {
       document.getElementById("header-meta").innerHTML = '<span class="err">Error: ' + e.message + '</span>';
+    }
+  }
+
+  async function refreshSessions() {
+    try {
+      const r = await fetch("/api/sessions").then(r => r.json());
+      state.allSessions = r.sessions || [];
+    } catch { state.allSessions = []; }
+  }
+
+  async function loadRitualsForActiveSession() {
+    const res = await fetch(withSession("/api/rituals"));
+    const data = await res.json();
+    state.rituals = data.rituals;
+    const meta = document.getElementById("header-meta");
+    const dirLabel = state.activeSession ? "rituals/_sessions/" + state.activeSession + "/" : "rituals/";
+    if (!data.passphraseSet) {
+      meta.innerHTML = '<span class="err">MRAM_PASSPHRASE not set — restart with the env var to view ritual structure.</span>';
+    } else if (state.rituals.length === 0) {
+      meta.textContent = "No .mram files in " + dirLabel + ".";
+    } else {
+      const total = state.rituals.reduce((n, r) => n + (r.lineCount || 0), 0);
+      meta.textContent = state.rituals.length + " ritual(s), " + total + " spoken line(s) total in " + dirLabel;
+    }
+  }
+
+  function renderSessionRow() {
+    const el = document.getElementById("session-row");
+    if (!el) return;
+    const isCanonical = !state.activeSession;
+    const opts = ['<option value="">Canonical</option>']
+      .concat(state.allSessions.map(s => {
+        const sel = s.name === state.activeSession ? ' selected' : '';
+        return '<option value="' + escapeHtml(s.name) + '"' + sel + '>' + escapeHtml(s.name) + '</option>';
+      }));
+    el.innerHTML =
+      '<span class="session-label">Session:</span>' +
+      '<select id="session-select">' + opts.join('') + '</select>' +
+      '<button type="button" id="session-new-btn" title="Create a new session by branching from the current one">+ New session</button>' +
+      (isCanonical ? '' :
+        '<button type="button" id="session-promote-btn" class="session-action session-promote" title="Copy this session’s files into canonical (overwrites — auto-backs up first)">Promote to canonical</button>' +
+        '<button type="button" id="session-delete-btn" class="session-action session-delete" title="Delete this session and all its ritual copies (the bake-cache is preserved)">Delete session</button>'
+      ) +
+      '<span id="session-form-host"></span>';
+    document.getElementById("session-select").addEventListener("change", async (e) => {
+      const target = e.target.value;
+      state.activeSession = target;
+      state.activeDoc = null;
+      state.activeSlug = null;
+      state.engineFilter = null;
+      state.roleFilter = null;
+      state.statusFilter = null;
+      state.review = { lines: {} };
+      state.currentLineId = null;
+      try {
+        await loadRitualsForActiveSession();
+        renderSessionRow();
+        renderTabs();
+        const first = state.rituals.find(r => r.decrypted);
+        if (first) await selectRitual(first.slug);
+        else document.getElementById("content").innerHTML = '<div class="empty">No rituals in this session.</div>';
+      } catch (err) {
+        document.getElementById("content").innerHTML = '<div class="empty err">Error: ' + escapeHtml(err.message) + '</div>';
+      }
+    });
+    document.getElementById("session-new-btn").addEventListener("click", () => showNewSessionForm());
+    if (!isCanonical) {
+      document.getElementById("session-promote-btn").addEventListener("click", () => promoteCurrentSession());
+      document.getElementById("session-delete-btn").addEventListener("click", () => deleteCurrentSession());
+    }
+  }
+
+  function showNewSessionForm() {
+    const host = document.getElementById("session-form-host");
+    if (!host) return;
+    if (host.querySelector("input")) {
+      host.innerHTML = "";
+      return;
+    }
+    const branchFromLabel = state.activeSession ? state.activeSession : "canonical";
+    host.innerHTML =
+      '<span class="session-form">' +
+      '<input id="session-new-name" type="text" placeholder="session-name" maxlength="64">' +
+      '<label class="session-form-checkbox" title="If checked, branch from canonical instead of the active session"><input type="checkbox" id="session-new-from-canonical"' + (state.activeSession ? '' : ' checked disabled') + '> from canonical</label>' +
+      '<button type="button" id="session-new-create">Create from ' + escapeHtml(branchFromLabel) + '</button>' +
+      '<button type="button" id="session-new-cancel" class="session-cancel">Cancel</button>' +
+      '<span id="session-new-msg"></span>' +
+      '</span>';
+    document.getElementById("session-new-cancel").addEventListener("click", () => { host.innerHTML = ""; });
+    document.getElementById("session-new-create").addEventListener("click", async () => {
+      const nameInput = document.getElementById("session-new-name");
+      const fromCanonical = document.getElementById("session-new-from-canonical").checked;
+      const msg = document.getElementById("session-new-msg");
+      const name = (nameInput.value || "").trim().toLowerCase().replace(/\s+/g, "-");
+      if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(name)) {
+        msg.textContent = "✗ name must be 1–64 chars, [a-z0-9_-]";
+        msg.className = "session-err";
+        return;
+      }
+      msg.textContent = "creating…";
+      msg.className = "";
+      try {
+        const branchFrom = fromCanonical ? "" : state.activeSession;
+        const res = await fetch("/api/sessions/" + encodeURIComponent(name), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ branchFrom }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || res.statusText);
+        }
+        const data = await res.json();
+        msg.textContent = "✓ created (" + data.filesCopied + " files)";
+        msg.className = "session-ok";
+        // Switch to the new session
+        await refreshSessions();
+        state.activeSession = name;
+        state.activeDoc = null;
+        state.activeSlug = null;
+        state.engineFilter = null;
+        state.roleFilter = null;
+        state.statusFilter = null;
+        state.review = { lines: {} };
+        await loadRitualsForActiveSession();
+        renderSessionRow();
+        renderTabs();
+        const first = state.rituals.find(r => r.decrypted);
+        if (first) await selectRitual(first.slug);
+      } catch (err) {
+        msg.textContent = "✗ " + (err.message || "create failed");
+        msg.className = "session-err";
+      }
+    });
+    const nameInputEl = document.getElementById("session-new-name");
+    if (nameInputEl && nameInputEl.focus) nameInputEl.focus();
+  }
+
+  async function promoteCurrentSession() {
+    if (!state.activeSession) return;
+    const ok = window.confirm(
+      'Promote session "' + state.activeSession + '" to canonical?\\n\\n' +
+      'This OVERWRITES the canonical .mram files. The current canonical will be auto-backed up to rituals/_sessions/_pre-promote-{ISO}/ first, so you can roll back if needed.'
+    );
+    if (!ok) return;
+    try {
+      const res = await fetch("/api/sessions/" + encodeURIComponent(state.activeSession) + "/promote", { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || res.statusText);
+      }
+      const data = await res.json();
+      alert("✓ promoted to canonical (" + data.filesCopied + " files). Backup at rituals/_sessions/" + data.backupDir + "/. The session is still here — you can keep tweaking it or delete it.");
+      // Refresh in case canonical's review state has changed semantically
+      await refreshSessions();
+      renderSessionRow();
+    } catch (err) {
+      alert("✗ promote failed: " + (err.message || ""));
+    }
+  }
+
+  async function deleteCurrentSession() {
+    if (!state.activeSession) return;
+    const ok = window.confirm(
+      'Delete session "' + state.activeSession + '"? This removes its directory and all .mram + review files in it. The bake-cache and canonical are untouched.'
+    );
+    if (!ok) return;
+    try {
+      const res = await fetch("/api/sessions/" + encodeURIComponent(state.activeSession), { method: "DELETE" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || res.statusText);
+      }
+      // Switch back to canonical
+      state.activeSession = "";
+      state.activeDoc = null;
+      state.activeSlug = null;
+      state.engineFilter = null;
+      state.roleFilter = null;
+      state.statusFilter = null;
+      state.review = { lines: {} };
+      await refreshSessions();
+      await loadRitualsForActiveSession();
+      renderSessionRow();
+      renderTabs();
+      const first = state.rituals.find(r => r.decrypted);
+      if (first) await selectRitual(first.slug);
+    } catch (err) {
+      alert("✗ delete failed: " + (err.message || ""));
     }
   }
 
@@ -1868,8 +2679,8 @@ export function handleIndexRequest(res: http.ServerResponse): void {
       // Fetch ritual detail and review sidecar in parallel — sidecar is
       // tiny so this never blocks render meaningfully.
       const [docRes, reviewRes] = await Promise.all([
-        fetch("/api/ritual/" + encodeURIComponent(slug)),
-        fetch("/api/ritual/" + encodeURIComponent(slug) + "/review"),
+        fetch(withSession("/api/ritual/" + encodeURIComponent(slug))),
+        fetch(withSession("/api/ritual/" + encodeURIComponent(slug) + "/review")),
       ]);
       if (!docRes.ok) {
         const err = await docRes.json().catch(() => ({}));
@@ -2004,6 +2815,7 @@ export function handleIndexRequest(res: http.ServerResponse): void {
       '<label><input type="checkbox" id="hide-action"> Hide stage actions</label>' +
       '<label><input type="checkbox" id="expand-all-details"> Expand all line details</label>' +
       '<label><input type="checkbox" id="autoplay-sequence"' + (state.autoplay ? ' checked' : '') + '> Autoplay sequence</label>' +
+      '<button type="button" id="jump-to-current" title="Scroll back to whichever line is currently playing — autoplay no longer auto-scrolls so the page stays still while audio advances">Jump to current</button>' +
       '<span class="kbd-hint"><kbd>Space</kbd> play/pause &middot; <kbd>&uarr;</kbd><kbd>&darr;</kbd> nav &middot; <kbd>a</kbd> approve &middot; <kbd>f</kbd> flag-review &middot; <kbd>r</kbd> flag-regen &middot; <kbd>n</kbd> note &middot; <kbd>shift</kbd>+click Rebake = with voice anchor</span>' +
       '</div>';
     if (filterPills) {
@@ -2048,12 +2860,14 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         '<span class="status-pill status-' + s + '" style="cursor:default">' + escapeHtml(statusLabels[s]) + '<span class="status-count">' + statusCounts[s] + '</span></span>' +
         '</label>';
     }).join('');
+    const flaggedRegenCount = statusCounts["flagged-regen"];
     html += '<div class="controls status-filters">' +
       '<span class="filter-label">Review:</span>' + statusPillsHtml +
       '<button type="button" id="status-filter-flagged" class="filter-shortcut">Only flagged</button>' +
       '<button type="button" id="status-filter-unmarked" class="filter-shortcut">Only unmarked</button>' +
       '<button type="button" id="status-filter-show-all" class="filter-shortcut">Show all</button>' +
       '<button type="button" id="bulk-approve-unmarked" class="filter-shortcut bulk-approve" title="Approve every unmarked line in this ritual">Approve all unmarked (' + statusCounts.unmarked + ')</button>' +
+      '<button type="button" id="bulk-rebake-flagged-regen" class="filter-shortcut bulk-rebake" title="Rebake every line currently flagged-regen, using each line’s director-note overrides where set">Rebake all flagged-regen (' + flaggedRegenCount + ')</button>' +
       '</div>';
     for (const sid of sectionOrder) {
       const lines = linesBySection.get(sid) || [];
@@ -2226,6 +3040,17 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         try { localStorage.setItem("preview-bake.autoplay", state.autoplay ? "1" : "0"); } catch (_) {}
       });
     }
+    // Jump-to-current button — opt back into following the playhead after
+    // the user has scrolled away. Autoplay-advance no longer auto-scrolls,
+    // so this is the explicit way to re-sync.
+    const jumpBtn = document.getElementById("jump-to-current");
+    if (jumpBtn) {
+      jumpBtn.addEventListener("click", () => {
+        if (state.currentLineId == null) return;
+        const el = document.querySelector('.line[data-line-id="' + state.currentLineId + '"]');
+        if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    }
 
     // Wire each audio: pause-others on play, mark current line, advance on end.
     // Two events for defense-in-depth on the pause-others side:
@@ -2298,7 +3123,7 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         const originalText = btn.textContent;
         btn.textContent = forcePreamble ? "Rebaking (anchored)…" : "Rebaking…";
         try {
-          const res = await fetch("/api/ritual/" + encodeURIComponent(slug) + "/rebake/line/" + encodeURIComponent(lineId), {
+          const res = await fetch(withSession("/api/ritual/" + encodeURIComponent(slug) + "/rebake/line/" + encodeURIComponent(lineId)), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ forcePreamble }),
@@ -2315,7 +3140,7 @@ export function handleIndexRequest(res: http.ServerResponse): void {
             const audio = lineEl.querySelector("audio");
             if (audio) {
               const baseSrc = "/api/ritual/" + encodeURIComponent(slug) + "/line/" + encodeURIComponent(lineId) + ".opus";
-              audio.src = baseSrc + "?h=" + encodeURIComponent(data.audioHash || Date.now());
+              audio.src = withSession(baseSrc + "?h=" + encodeURIComponent(data.audioHash || Date.now()));
               audio.load();
             }
           }
@@ -2327,7 +3152,7 @@ export function handleIndexRequest(res: http.ServerResponse): void {
             if (docLine) docLine.audioHash = data.audioHash;
           }
           try {
-            const sc = await fetch("/api/ritual/" + encodeURIComponent(slug) + "/review").then(r => r.json());
+            const sc = await fetch(withSession("/api/ritual/" + encodeURIComponent(slug) + "/review")).then(r => r.json());
             state.review = sc;
             if (!state.review.lines) state.review.lines = {};
           } catch { /* swallow — local state still mostly correct */ }
@@ -2353,24 +3178,340 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         }
       });
     });
-    // === STT-01 Tier 1: Director's note dropdowns + Try/Clear buttons ===
-    document.querySelectorAll(".director-note select[data-field]").forEach(sel => {
+    // === STT-01 Tier 2a: Profile dropdown + Save/Delete buttons ===
+    document.querySelectorAll(".director-note-profile-select[data-line-id]").forEach(sel => {
+      const lineId = sel.dataset.lineId;
+      const det = sel.closest(".director-note");
+      const delBtn = det && det.querySelector(".delete-profile-btn");
+      // Disable Delete unless a profile is selected.
+      const updateDeleteBtn = () => {
+        if (delBtn) delBtn.disabled = !sel.value;
+      };
+      updateDeleteBtn();
       sel.addEventListener("change", () => {
-        const lineId = sel.dataset.lineId;
-        const stored = readDirectorNote(state.activeSlug, lineId);
-        stored[sel.dataset.field] = sel.value || undefined;
-        writeDirectorNote(state.activeSlug, lineId, stored);
-        // Update the summary tag inline (no full re-render).
-        const det = document.querySelector('.director-note[data-line-id="' + lineId + '"]');
+        const name = sel.value;
+        if (!name) {
+          updateDeleteBtn();
+          return;
+        }
+        const profiles = readProfiles();
+        const p = profiles[name];
+        if (!p) return;
+        // Apply this profile to the line: fill all four override dropdowns
+        // and persist to localStorage. We DO NOT auto-rebake — user clicks
+        // Try when ready.
+        const overrides = profileSettingsToOverrides(p);
+        writeDirectorNote(state.activeSlug, lineId, overrides);
         if (det) {
+          det.querySelectorAll('select[data-field]').forEach(s => {
+            const field = s.dataset.field;
+            s.value = (overrides && overrides[field]) || "";
+          });
           const tag = det.querySelector('.summary-tag');
           if (tag) {
             const desc = describeOverrides(readDirectorNote(state.activeSlug, lineId));
             tag.textContent = desc || 'experiment with voice + style';
           }
         }
+        const info = document.querySelector('.director-note-info[data-line-id="' + lineId + '"]');
+        if (info) {
+          info.textContent = 'loaded profile: ' + name + ' — click Try to render';
+          setTimeout(() => { if (info && info.textContent.startsWith('loaded profile')) info.textContent = ''; }, 2400);
+        }
+        updateDeleteBtn();
       });
     });
+    document.querySelectorAll(".save-profile-btn[data-line-id]").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const lineId = btn.dataset.lineId;
+        const stored = readDirectorNote(state.activeSlug, lineId);
+        if (Object.keys(stored).length === 0) {
+          alert("This line has no overrides set. Pick voice/style/pace/accent first, then save as profile.");
+          return;
+        }
+        const desc = describeOverrides(stored);
+        const suggested = (stored.voiceOverride ? stored.voiceOverride + " " : "") +
+                          (stored.styleOverride || "Custom") + " profile";
+        const name = (window.prompt(
+          "Save these settings as a profile?\\n\\n" + desc + "\\n\\nName:",
+          suggested
+        ) || "").trim();
+        if (!name) return;
+        if (name.length > 64) {
+          alert("Profile name too long (max 64 chars).");
+          return;
+        }
+        const existing = readProfiles();
+        if (existing[name]) {
+          if (!window.confirm("Profile \\"" + name + "\\" already exists. Overwrite?")) return;
+        }
+        saveProfile(name, stored);
+        // Refresh all profile dropdowns in the page so the new profile is
+        // immediately selectable everywhere.
+        document.querySelectorAll(".director-note-profile-select").forEach(sel => {
+          const cur = sel.value;
+          const profiles = readProfiles();
+          const opts = ['<option value="">(no profile)</option>'].concat(
+            Object.keys(profiles).sort().map(n => '<option value="' + n.replace(/"/g, '&quot;') + '"' + (n === cur ? ' selected' : '') + '>' + n.replace(/</g, '&lt;') + '</option>')
+          );
+          sel.innerHTML = opts.join('');
+        });
+        // Set THIS line's profile dropdown to the just-saved name
+        const sel = document.querySelector('.director-note-profile-select[data-line-id="' + lineId + '"]');
+        if (sel) {
+          sel.value = name;
+          const det = sel.closest(".director-note");
+          const delBtn = det && det.querySelector(".delete-profile-btn");
+          if (delBtn) delBtn.disabled = false;
+        }
+        const info = document.querySelector('.director-note-info[data-line-id="' + lineId + '"]');
+        if (info) {
+          info.textContent = "✓ saved profile: " + name;
+          setTimeout(() => { if (info) info.textContent = ''; }, 2400);
+        }
+      });
+    });
+    document.querySelectorAll(".delete-profile-btn[data-line-id]").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const lineId = btn.dataset.lineId;
+        const sel = document.querySelector('.director-note-profile-select[data-line-id="' + lineId + '"]');
+        if (!sel || !sel.value) return;
+        const name = sel.value;
+        if (!window.confirm('Delete profile "' + name + '" globally? This cannot be undone.')) return;
+        deleteProfile(name);
+        // Refresh ALL profile dropdowns; if any line had this profile selected, clear it.
+        document.querySelectorAll(".director-note-profile-select").forEach(s => {
+          const wasSelected = s.value === name;
+          const profiles = readProfiles();
+          const opts = ['<option value="">(no profile)</option>'].concat(
+            Object.keys(profiles).sort().map(n => '<option value="' + n.replace(/"/g, '&quot;') + '">' + n.replace(/</g, '&lt;') + '</option>')
+          );
+          s.innerHTML = opts.join('');
+          if (wasSelected) s.value = "";
+          const det = s.closest(".director-note");
+          const dBtn = det && det.querySelector(".delete-profile-btn");
+          if (dBtn) dBtn.disabled = !s.value;
+        });
+        const info = document.querySelector('.director-note-info[data-line-id="' + lineId + '"]');
+        if (info) {
+          info.textContent = "✓ deleted profile: " + name;
+          setTimeout(() => { if (info) info.textContent = ''; }, 2400);
+        }
+      });
+    });
+
+    // === STT-01 Tier 1+3: Director's note dropdowns + free-text inputs ===
+    // Dropdown change: write the preset value, AND clear the corresponding
+    // prose textbox (typed custom text is mutually exclusive with a preset).
+    document.querySelectorAll(".director-note select[data-field]").forEach(sel => {
+      sel.addEventListener("change", () => {
+        const lineId = sel.dataset.lineId;
+        const field = sel.dataset.field;
+        const stored = readDirectorNote(state.activeSlug, lineId);
+        stored[field] = sel.value || undefined;
+        writeDirectorNote(state.activeSlug, lineId, stored);
+        // Clear the matching prose textbox so the preset wins
+        const proseInput = document.querySelector('.director-note input.director-note-prose[data-field="' + field + '"][data-line-id="' + lineId + '"]');
+        if (proseInput) proseInput.value = "";
+        updateSummaryTag(lineId);
+      });
+    });
+    // Free-text input change: prose overrides preset. When user types
+    // anything, drop the dropdown's selection so the prose value is what
+    // gets persisted + sent.
+    document.querySelectorAll(".director-note .director-note-prose[data-field]").forEach(input => {
+      input.addEventListener("input", () => {
+        const lineId = input.dataset.lineId;
+        const field = input.dataset.field;
+        const value = input.value.trim();
+        const stored = readDirectorNote(state.activeSlug, lineId);
+        stored[field] = value || undefined;
+        writeDirectorNote(state.activeSlug, lineId, stored);
+        // If user typed text, deselect the matching dropdown (only for the
+        // 3 fields that have a paired dropdown — profile is textarea-only).
+        if (value && field !== "profileOverride") {
+          const sel = document.querySelector('.director-note select[data-field="' + field + '"][data-line-id="' + lineId + '"]');
+          if (sel) sel.value = "";
+        }
+        updateSummaryTag(lineId);
+      });
+    });
+    function updateSummaryTag(lineId) {
+      const det = document.querySelector('.director-note[data-line-id="' + lineId + '"]');
+      if (!det) return;
+      const tag = det.querySelector('.summary-tag');
+      if (!tag) return;
+      const desc = describeOverrides(readDirectorNote(state.activeSlug, lineId));
+      tag.textContent = desc || 'experiment with voice + style';
+    }
+
+    // Temperature slider — live updates the displayed value AND persists.
+    document.querySelectorAll(".director-note-temp-slider[data-line-id]").forEach(slider => {
+      slider.addEventListener("input", () => {
+        const lineId = slider.dataset.lineId;
+        const val = parseFloat(slider.value);
+        const display = document.querySelector('.director-note-temp-display[data-line-id="' + lineId + '"]');
+        if (display) display.textContent = val.toFixed(2);
+        const stored = readDirectorNote(state.activeSlug, lineId);
+        stored.temperature = val;
+        writeDirectorNote(state.activeSlug, lineId, stored);
+        updateSummaryTag(lineId);
+      });
+    });
+    // "Use API default" button — clears the stored temperature so the
+    // request omits the field entirely (Gemini uses its own default).
+    document.querySelectorAll(".director-note-temp-reset[data-line-id]").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const lineId = btn.dataset.lineId;
+        const stored = readDirectorNote(state.activeSlug, lineId);
+        delete stored.temperature;
+        writeDirectorNote(state.activeSlug, lineId, stored);
+        const display = document.querySelector('.director-note-temp-display[data-line-id="' + lineId + '"]');
+        if (display) display.textContent = "(API default)";
+        const slider = document.querySelector('.director-note-temp-slider[data-line-id="' + lineId + '"]');
+        if (slider) slider.value = "1";
+        updateSummaryTag(lineId);
+      });
+    });
+    // === STT-01 Tier 1: Bulk-apply director's note settings ===
+    // Source line's director-note settings are read from localStorage and
+    // copied into localStorage for each target line. No rebake yet — that's
+    // a separate explicit step (the "Rebake all flagged-regen" button).
+    function applyDirectorNoteToTargets(sourceLineId, targetLineIds, scopeLabel) {
+      if (targetLineIds.length === 0) {
+        alert("No target lines for scope: " + scopeLabel);
+        return;
+      }
+      const sourceSettings = readDirectorNote(state.activeSlug, sourceLineId);
+      if (Object.keys(sourceSettings).length === 0) {
+        alert("Source line has no director-note overrides set. Pick a voice/style/pace/accent first, then apply.");
+        return;
+      }
+      const settingsDesc = describeOverrides(sourceSettings);
+      const ok = window.confirm(
+        "Apply these settings to " + targetLineIds.length + " " + scopeLabel + " line(s)?\\n\\n" +
+        "Settings: " + settingsDesc + "\\n\\n" +
+        "This only copies the settings. Use 'Rebake all flagged-regen' afterward to render them."
+      );
+      if (!ok) return;
+      let applied = 0;
+      for (const tid of targetLineIds) {
+        if (String(tid) === String(sourceLineId)) continue; // don't overwrite source
+        writeDirectorNote(state.activeSlug, tid, sourceSettings);
+        applied++;
+      }
+      // Re-render so each director-note panel reflects the new settings.
+      renderRitual();
+      const sourceInfo = document.querySelector('.director-note-info[data-line-id="' + sourceLineId + '"]');
+      if (sourceInfo) {
+        sourceInfo.textContent = "✓ Applied to " + applied + " " + scopeLabel + " line(s). Use 'Rebake all flagged-regen' to render.";
+      }
+    }
+
+    document.querySelectorAll(".apply-to-flagged-btn[data-line-id]").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const sourceLineId = btn.dataset.lineId;
+        const targets = doc.lines
+          .filter(l => {
+            if (l.action || !l.hasAudio) return false;
+            const entry = (state.review.lines || {})[String(l.id)];
+            const s = (entry && entry.status) || "unmarked";
+            return s === "flagged-regen";
+          })
+          .map(l => l.id);
+        applyDirectorNoteToTargets(sourceLineId, targets, "flagged-regen");
+      });
+    });
+    document.querySelectorAll(".apply-to-role-btn[data-line-id]").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const sourceLineId = btn.dataset.lineId;
+        const sourceRole = btn.dataset.sourceRole;
+        const targets = doc.lines
+          .filter(l => !l.action && l.hasAudio && l.role === sourceRole)
+          .map(l => l.id);
+        applyDirectorNoteToTargets(sourceLineId, targets, "role " + sourceRole);
+      });
+    });
+
+    // === Bulk rebake: every flagged-regen line, sequentially ===
+    const bulkRebakeBtn = document.getElementById("bulk-rebake-flagged-regen");
+    if (bulkRebakeBtn) {
+      bulkRebakeBtn.addEventListener("click", async () => {
+        const flaggedRegen = doc.lines.filter(l => {
+          if (l.action || !l.hasAudio) return false;
+          const entry = (state.review.lines || {})[String(l.id)];
+          return (entry && entry.status) === "flagged-regen";
+        });
+        if (flaggedRegen.length === 0) {
+          alert("No lines currently flagged-regen.");
+          return;
+        }
+        // Surface how many target lines have director-note overrides vs.
+        // will use role defaults (with forcePreamble true on overrides).
+        let withOverrides = 0;
+        for (const l of flaggedRegen) {
+          const o = readDirectorNote(state.activeSlug, l.id);
+          if (Object.keys(o).length > 0) withOverrides++;
+        }
+        const ok = window.confirm(
+          "Rebake " + flaggedRegen.length + " flagged-regen line(s)?\\n\\n" +
+          withOverrides + " have director-note overrides; " + (flaggedRegen.length - withOverrides) + " will use role defaults (with preamble forced).\\n\\n" +
+          "Each rebake takes 5–15 seconds. Total ~" + Math.ceil(flaggedRegen.length * 8 / 60) + " minute(s). The .mram is auto-backed up before each write."
+        );
+        if (!ok) return;
+        bulkRebakeBtn.disabled = true;
+        bulkRebakeBtn.classList.add("rebaking");
+        const original = bulkRebakeBtn.textContent;
+        let done = 0;
+        let failed = 0;
+        for (const l of flaggedRegen) {
+          const overrides = readDirectorNote(state.activeSlug, l.id);
+          const payload = { forcePreamble: true, ...overrides };
+          bulkRebakeBtn.textContent = "Rebaking " + (done + failed + 1) + "/" + flaggedRegen.length + "…";
+          try {
+            const res = await fetch(withSession("/api/ritual/" + encodeURIComponent(state.activeSlug) + "/rebake/line/" + encodeURIComponent(l.id)), {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+            if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
+            const data = await res.json();
+            // Refresh this line's audio src in place
+            const lineEl = document.querySelector('.line[data-line-id="' + l.id + '"]');
+            if (lineEl) {
+              const audio = lineEl.querySelector("audio");
+              if (audio) {
+                const baseSrc = "/api/ritual/" + encodeURIComponent(state.activeSlug) + "/line/" + encodeURIComponent(l.id) + ".opus";
+                audio.src = withSession(baseSrc + "?h=" + encodeURIComponent(data.audioHash || Date.now()));
+                audio.load();
+              }
+              const docLine = doc.lines.find(x => x.id === l.id);
+              if (docLine) docLine.audioHash = data.audioHash;
+            }
+            done++;
+          } catch (e) {
+            console.error("Bulk rebake line " + l.id + " failed:", e);
+            failed++;
+          }
+        }
+        // Refetch review sidecar once at the end (each rebake updates it)
+        try {
+          const sc = await fetch(withSession("/api/ritual/" + encodeURIComponent(state.activeSlug) + "/review")).then(r => r.json());
+          state.review = sc;
+          if (!state.review.lines) state.review.lines = {};
+        } catch { /* swallow */ }
+        // Re-render so all line widgets reflect new state (status pills, hashes).
+        renderRitual();
+        const summary = "Done. " + done + " rebaked" + (failed > 0 ? ", " + failed + " failed" : "") + ".";
+        alert(summary);
+      });
+    }
+
     document.querySelectorAll(".reset-overrides-btn[data-line-id]").forEach(btn => {
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -2379,6 +3520,11 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         const det = document.querySelector('.director-note[data-line-id="' + lineId + '"]');
         if (det) {
           det.querySelectorAll('select[data-field]').forEach(s => { s.value = ""; });
+          det.querySelectorAll('.director-note-prose[data-field]').forEach(inp => { inp.value = ""; });
+          const slider = det.querySelector('.director-note-temp-slider');
+          if (slider) slider.value = "1";
+          const tempDisplay = det.querySelector('.director-note-temp-display');
+          if (tempDisplay) tempDisplay.textContent = "(API default)";
           const tag = det.querySelector('.summary-tag');
           if (tag) tag.textContent = 'experiment with voice + style';
         }
@@ -2405,7 +3551,7 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         btn.textContent = "Rebaking…";
         if (info) info.textContent = 'rendering with overrides…';
         try {
-          const res = await fetch("/api/ritual/" + encodeURIComponent(slug) + "/rebake/line/" + encodeURIComponent(lineId), {
+          const res = await fetch(withSession("/api/ritual/" + encodeURIComponent(slug) + "/rebake/line/" + encodeURIComponent(lineId)), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
@@ -2421,7 +3567,7 @@ export function handleIndexRequest(res: http.ServerResponse): void {
             const audio = lineEl.querySelector("audio");
             if (audio) {
               const baseSrc = "/api/ritual/" + encodeURIComponent(slug) + "/line/" + encodeURIComponent(lineId) + ".opus";
-              audio.src = baseSrc + "?h=" + encodeURIComponent(data.audioHash || Date.now());
+              audio.src = withSession(baseSrc + "?h=" + encodeURIComponent(data.audioHash || Date.now()));
               audio.load();
             }
           }
@@ -2430,7 +3576,7 @@ export function handleIndexRequest(res: http.ServerResponse): void {
             if (docLine) docLine.audioHash = data.audioHash;
           }
           try {
-            const sc = await fetch("/api/ritual/" + encodeURIComponent(slug) + "/review").then(r => r.json());
+            const sc = await fetch(withSession("/api/ritual/" + encodeURIComponent(slug) + "/review")).then(r => r.json());
             state.review = sc;
             if (!state.review.lines) state.review.lines = {};
           } catch { /* swallow */ }
@@ -2440,6 +3586,8 @@ export function handleIndexRequest(res: http.ServerResponse): void {
             const usedParts = [];
             if (data.voiceUsed) usedParts.push("voice: " + data.voiceUsed);
             if (data.styleUsed) usedParts.push("style: " + data.styleUsed);
+            if (data.temperatureUsed !== undefined && data.temperatureUsed !== "(API default)") usedParts.push("temp: " + data.temperatureUsed);
+            if (data.modelUsed && data.modelUsed !== "(chain default)") usedParts.push("model: " + data.modelUsed);
             info.textContent = "✓ rendered (" + usedParts.join(", ") + ")";
           }
           setTimeout(() => {
@@ -2489,14 +3637,21 @@ export function handleIndexRequest(res: http.ServerResponse): void {
   // === STT-01 Step 1: helper functions hoisted to script scope so the
   // global keydown handler can call them across re-renders. ===
 
-  function setCurrentLine(lineId) {
+  function setCurrentLine(lineId, opts) {
     state.currentLineId = lineId;
     document.querySelectorAll(".line.is-current").forEach(el => el.classList.remove("is-current"));
     if (lineId == null) return;
     const el = document.querySelector('.line[data-line-id="' + lineId + '"]');
     if (el) {
       el.classList.add("is-current");
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      // Scroll into view ONLY when the caller explicitly requests it.
+      // Autoplay-advance and audio play/playing events update the indicator
+      // but leave the scroll position alone — the user might be auditing
+      // a different line while audio plays. Keyboard nav passes scroll: true
+      // because that IS the user asking to navigate.
+      if (opts && opts.scroll) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
     }
   }
 
@@ -2515,7 +3670,7 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     return visible.findIndex(el => String(el.dataset.lineId) === String(id));
   }
 
-  function playLineByEl(el) {
+  function playLineByEl(el, opts) {
     if (!el) return;
     const audio = el.querySelector("audio");
     if (!audio) return;
@@ -2523,7 +3678,7 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     // that can otherwise let two audios start audibly during the queued
     // delay before the new audio's "play" event fires.
     pauseAllExcept(audio);
-    setCurrentLine(el.dataset.lineId);
+    setCurrentLine(el.dataset.lineId, opts);
     audio.play().catch(() => { /* autoplay-blocked or load error; ignore */ });
   }
 
@@ -2543,8 +3698,12 @@ export function handleIndexRequest(res: http.ServerResponse): void {
   function writeDirectorNote(slug, lineId, obj) {
     try {
       const cleaned = {};
-      for (const k of ["voiceOverride", "styleOverride", "paceOverride", "accentOverride"]) {
+      for (const k of ["voiceOverride", "styleOverride", "paceOverride", "accentOverride", "profileOverride", "modelOverride"]) {
         if (obj[k]) cleaned[k] = obj[k];
+      }
+      // Temperature is a number, not a string — preserve 0 as a real value.
+      if (typeof obj.temperature === "number" && Number.isFinite(obj.temperature)) {
+        cleaned.temperature = obj.temperature;
       }
       if (Object.keys(cleaned).length === 0) {
         localStorage.removeItem(dnKey(slug, lineId));
@@ -2553,13 +3712,89 @@ export function handleIndexRequest(res: http.ServerResponse): void {
       }
     } catch { /* localStorage may be blocked or full */ }
   }
+  // === STT-01 Tier 2b: Session-aware fetch helper ===
+  // Append ?session={state.activeSession} to any URL when on a non-canonical
+  // session. Canonical is the empty/missing case — server-side default.
+  function withSession(url) {
+    if (!state.activeSession) return url;
+    const sep = url.includes('?') ? '&' : '?';
+    return url + sep + 'session=' + encodeURIComponent(state.activeSession);
+  }
+
+  // Returns the dropdown value if the stored override matches a preset
+  // option, otherwise returns "" (so the dropdown renders unselected and
+  // the prose textbox carries the user's custom text). Used at render
+  // time so a re-render cleanly distinguishes preset vs custom input.
+  function isPresetValue(options, storedValue) {
+    if (!storedValue) return "";
+    const match = options.find(o => o.value === storedValue);
+    return match ? match.value : "";
+  }
+
   function describeOverrides(stored) {
+    const trunc = (s, n) => s && s.length > n ? s.slice(0, n - 1) + "…" : s;
     const parts = [];
     if (stored.voiceOverride) parts.push(stored.voiceOverride);
-    if (stored.styleOverride) parts.push(stored.styleOverride);
-    if (stored.paceOverride) parts.push(stored.paceOverride + " pace");
-    if (stored.accentOverride) parts.push(stored.accentOverride);
+    if (stored.styleOverride) parts.push(trunc(stored.styleOverride, 30));
+    if (stored.paceOverride) parts.push(trunc(stored.paceOverride, 30) + " pace");
+    if (stored.accentOverride) parts.push(trunc(stored.accentOverride, 30));
+    if (stored.profileOverride) parts.push("custom profile");
+    if (typeof stored.temperature === "number") parts.push("temp=" + stored.temperature.toFixed(2));
+    if (stored.modelOverride) parts.push(trunc(stored.modelOverride.replace(/^gemini-/, ""), 25));
     return parts.join(" · ");
+  }
+
+  // === STT-01 Tier 2a: Saved director-note profiles ===
+  // Profiles are global (not per-ritual): a useful "voice + style + pace +
+  // accent" combo for one ritual is usually useful for others too. Stored
+  // in localStorage at "preview-bake.profiles". Profile names are
+  // free-form but trimmed + capped at 64 chars + duplicates blocked.
+  const PROFILES_KEY = "preview-bake.profiles";
+  function readProfiles() {
+    try {
+      const raw = localStorage.getItem(PROFILES_KEY);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") return {};
+      return parsed.profiles && typeof parsed.profiles === "object"
+        ? parsed.profiles
+        : {};
+    } catch { return {}; }
+  }
+  function writeProfiles(profiles) {
+    try {
+      localStorage.setItem(PROFILES_KEY, JSON.stringify({ version: 1, profiles }));
+    } catch { /* localStorage may be blocked or full */ }
+  }
+  function saveProfile(name, settings) {
+    const profiles = readProfiles();
+    const entry = {
+      voiceOverride: settings.voiceOverride || "",
+      styleOverride: settings.styleOverride || "",
+      paceOverride: settings.paceOverride || "",
+      accentOverride: settings.accentOverride || "",
+      profileOverride: settings.profileOverride || "",
+      modelOverride: settings.modelOverride || "",
+    };
+    if (typeof settings.temperature === "number") entry.temperature = settings.temperature;
+    profiles[name] = entry;
+    writeProfiles(profiles);
+  }
+  function deleteProfile(name) {
+    const profiles = readProfiles();
+    delete profiles[name];
+    writeProfiles(profiles);
+  }
+  function profileSettingsToOverrides(p) {
+    const o = {};
+    if (p.voiceOverride) o.voiceOverride = p.voiceOverride;
+    if (p.styleOverride) o.styleOverride = p.styleOverride;
+    if (p.paceOverride) o.paceOverride = p.paceOverride;
+    if (p.accentOverride) o.accentOverride = p.accentOverride;
+    if (p.profileOverride) o.profileOverride = p.profileOverride;
+    if (typeof p.temperature === "number") o.temperature = p.temperature;
+    if (p.modelOverride) o.modelOverride = p.modelOverride;
+    return o;
   }
 
   // === STT-01 Step 2: review state helpers ===
@@ -2593,7 +3828,7 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     }
     const slug = state.activeSlug;
     if (!slug) return;
-    const res = await fetch("/api/ritual/" + encodeURIComponent(slug) + "/review/line/" + encodeURIComponent(lineId), {
+    const res = await fetch(withSession("/api/ritual/" + encodeURIComponent(slug) + "/review/line/" + encodeURIComponent(lineId)), {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
@@ -2646,6 +3881,8 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         e.preventDefault();
         e.stopPropagation();
         if (idx < 0) {
+          // No current line yet — pick the first visible. User isn't
+          // nav'ing to it deliberately; don't scroll. Indicator updates.
           playLineByEl(visible[0]);
         } else {
           const audio = visible[idx].querySelector("audio");
@@ -2662,12 +3899,12 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         e.preventDefault();
         e.stopPropagation();
         const next = idx < 0 ? visible[0] : visible[idx + 1];
-        if (next) playLineByEl(next);
+        if (next) playLineByEl(next, { scroll: true });
       } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
         e.preventDefault();
         e.stopPropagation();
         const prev = idx <= 0 ? null : visible[idx - 1];
-        if (prev) playLineByEl(prev);
+        if (prev) playLineByEl(prev, { scroll: true });
       } else if (e.key === "a" || e.key === "A") {
         // Approve current line. No preventDefault on bare letter keys
         // unless we matched — let normal typing through.
@@ -2718,7 +3955,7 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     const text = isAction ? l.action : (state.showCipher ? l.cipher : l.plain);
     const gavels = l.gavels > 0 ? '<span class="gavels">' + '*'.repeat(l.gavels) + '</span>' : '';
     const audio = l.hasAudio
-      ? '<audio controls preload="none" src="/api/ritual/' + encodeURIComponent(slug) + '/line/' + l.id + '.opus"></audio>'
+      ? '<audio controls preload="none" src="' + escapeHtml(withSession("/api/ritual/" + encodeURIComponent(slug) + "/line/" + l.id + ".opus")) + '"></audio>'
       : (isAction ? '<span class="no-audio-note">(stage action)</span>' : '<span class="no-audio-note">(no audio baked)</span>');
     const engineLabels = {
       "gemini-flash-tts": "Gemini Flash",
@@ -2789,8 +4026,23 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         const sel = current === o.value ? ' selected' : '';
         return '<option value="' + escapeHtml(o.value) + '"' + sel + '>' + escapeHtml(o.label) + '</option>';
       }).join('');
+      // Profile dropdown — saved (voice, style, pace, accent) tuples
+      // stored globally in localStorage. Picking a profile fills the four
+      // dropdowns below and persists to this line's settings.
+      const profiles = readProfiles();
+      const profileNames = Object.keys(profiles).sort();
+      const buildProfileOpts = () => {
+        const opts = profileNames.map(n => '<option value="' + escapeHtml(n) + '">' + escapeHtml(n) + '</option>').join('');
+        return '<option value="">(no profile)</option>' + opts;
+      };
       directorNote = '<details class="director-note" data-line-id="' + l.id + '"' + isOpen + '>' +
-        '<summary>Director&rsquo;s note <span class="summary-tag">' + escapeHtml(summaryTag || 'experiment with voice + style') + '</span></summary>' +
+        '<summary>Director’s note <span class="summary-tag">' + escapeHtml(summaryTag || 'experiment with voice + style') + '</span></summary>' +
+        '<div class="director-note-profile-row">' +
+        '<label class="director-note-profile-label">Profile:</label>' +
+        '<select class="director-note-profile-select" data-line-id="' + l.id + '">' + buildProfileOpts() + '</select>' +
+        '<button type="button" class="save-profile-btn" data-line-id="' + l.id + '" title="Save the current voice/style/pace/accent settings as a named profile (global, available across rituals)">Save as profile…</button>' +
+        '<button type="button" class="delete-profile-btn" data-line-id="' + l.id + '" title="Delete the currently selected profile" disabled>Delete profile</button>' +
+        '</div>' +
         '<div class="director-note-body">' +
         '<div class="director-note-field">' +
         '<label>Voice</label>' +
@@ -2798,18 +4050,40 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         '</div>' +
         '<div class="director-note-field">' +
         '<label>Style</label>' +
-        '<select data-field="styleOverride" data-line-id="' + l.id + '">' + buildOpts(STYLE_OPTIONS, stored.styleOverride || "") + '</select>' +
+        '<select data-field="styleOverride" data-line-id="' + l.id + '">' + buildOpts(STYLE_OPTIONS, isPresetValue(STYLE_OPTIONS, stored.styleOverride)) + '</select>' +
+        '<input type="text" class="director-note-prose" data-field="styleOverride" data-line-id="' + l.id + '" maxlength="500" placeholder="or custom prose…" value="' + escapeHtml(isPresetValue(STYLE_OPTIONS, stored.styleOverride) ? "" : (stored.styleOverride || "")) + '">' +
         '</div>' +
         '<div class="director-note-field">' +
         '<label>Pace</label>' +
-        '<select data-field="paceOverride" data-line-id="' + l.id + '">' + buildOpts(PACE_OPTIONS, stored.paceOverride || "") + '</select>' +
+        '<select data-field="paceOverride" data-line-id="' + l.id + '">' + buildOpts(PACE_OPTIONS, isPresetValue(PACE_OPTIONS, stored.paceOverride)) + '</select>' +
+        '<input type="text" class="director-note-prose" data-field="paceOverride" data-line-id="' + l.id + '" maxlength="500" placeholder="or custom prose…" value="' + escapeHtml(isPresetValue(PACE_OPTIONS, stored.paceOverride) ? "" : (stored.paceOverride || "")) + '">' +
         '</div>' +
         '<div class="director-note-field">' +
         '<label>Accent</label>' +
-        '<select data-field="accentOverride" data-line-id="' + l.id + '">' + buildOpts(ACCENT_OPTIONS, stored.accentOverride || "") + '</select>' +
+        '<select data-field="accentOverride" data-line-id="' + l.id + '">' + buildOpts(ACCENT_OPTIONS, isPresetValue(ACCENT_OPTIONS, stored.accentOverride)) + '</select>' +
+        '<input type="text" class="director-note-prose" data-field="accentOverride" data-line-id="' + l.id + '" maxlength="500" placeholder="or custom prose…" value="' + escapeHtml(isPresetValue(ACCENT_OPTIONS, stored.accentOverride) ? "" : (stored.accentOverride || "")) + '">' +
+        '</div>' +
+        '<div class="director-note-field director-note-profile-field">' +
+        '<label>Profile (override)</label>' +
+        '<textarea class="director-note-prose director-note-profile" data-field="profileOverride" data-line-id="' + l.id + '" maxlength="1000" placeholder="Override the role profile prose for this rebake. Empty = use the role-card profile from voice-cast.json. Free-text goes into the Director’s Note preamble verbatim. Example: “An elderly Mason in his 70s, voice slightly hoarse from decades of declamation”">' + escapeHtml(stored.profileOverride || "") + '</textarea>' +
+        '</div>' +
+        '<div class="director-note-field">' +
+        '<label>Temperature <span class="director-note-temp-display" data-line-id="' + l.id + '">' + (typeof stored.temperature === "number" ? stored.temperature.toFixed(2) : "(API default)") + '</span></label>' +
+        '<input type="range" class="director-note-temp-slider" data-line-id="' + l.id + '" min="0" max="2" step="0.05" value="' + (typeof stored.temperature === "number" ? stored.temperature : 1) + '">' +
+        '<div class="director-note-temp-controls">' +
+        '<button type="button" class="director-note-temp-reset" data-line-id="' + l.id + '" title="Use Gemini API default (~1.0). Removes temperature from the request entirely.">Use API default</button>' +
+        '<span class="director-note-temp-hint">0 = deterministic · 2 = most varied</span>' +
+        '</div>' +
+        '</div>' +
+        '<div class="director-note-field">' +
+        '<label>Model</label>' +
+        '<select data-field="modelOverride" data-line-id="' + l.id + '">' + buildOpts(MODEL_OPTIONS, isPresetValue(MODEL_OPTIONS, stored.modelOverride)) + '</select>' +
+        '<input type="text" class="director-note-prose" data-field="modelOverride" data-line-id="' + l.id + '" maxlength="128" placeholder="or custom model id (e.g. gemini-4-flash-tts-preview)…" value="' + escapeHtml(isPresetValue(MODEL_OPTIONS, stored.modelOverride) ? "" : (stored.modelOverride || "")) + '">' +
         '</div>' +
         '<div class="director-note-actions">' +
         '<span class="director-note-info" data-line-id="' + l.id + '"></span>' +
+        '<button type="button" class="apply-to-flagged-btn" data-line-id="' + l.id + '" data-source-role="' + escapeHtml(l.role) + '" title="Copy these settings to every line currently flagged-regen — does not rebake yet">Apply to flagged-regen</button>' +
+        '<button type="button" class="apply-to-role-btn" data-line-id="' + l.id + '" data-source-role="' + escapeHtml(l.role) + '" title="Copy these settings to every line where role = ' + escapeHtml(l.role) + ' — does not rebake yet">Apply to role ' + escapeHtml(l.role) + '</button>' +
         '<button type="button" class="reset-overrides-btn" data-line-id="' + l.id + '">Clear overrides</button>' +
         '<button type="button" class="try-overrides-btn" data-line-id="' + l.id + '">Try these settings</button>' +
         '</div>' +
@@ -2947,42 +4221,65 @@ export function handleIndexJson(
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url ?? "/", `http://${BIND_HOST}:${BIND_PORT}`);
+    // Session is read uniformly from the ?session= query param. Empty
+    // string or missing = canonical (the rituals/ root).
+    const sessionParam = url.searchParams.get("session") || undefined;
     if (url.pathname === "/" || url.pathname === "/index.html") {
       handleIndexRequest(res);
       return;
     }
+    // Session management endpoints (above ritual routes so /api/sessions
+    // doesn't collide with /api/ritual/...)
+    if (url.pathname === "/api/sessions" && req.method === "GET") {
+      handleSessionsList(res);
+      return;
+    }
+    const sessionPromoteMatch = /^\/api\/sessions\/([^/]+)\/promote$/.exec(url.pathname);
+    if (sessionPromoteMatch && req.method === "POST") {
+      handleSessionPromote(res, sessionPromoteMatch[1]!);
+      return;
+    }
+    const sessionMatch = /^\/api\/sessions\/([^/]+)$/.exec(url.pathname);
+    if (sessionMatch && req.method === "POST") {
+      await handleSessionCreate(req, res, sessionMatch[1]!);
+      return;
+    }
+    if (sessionMatch && req.method === "DELETE") {
+      handleSessionDelete(res, sessionMatch[1]!);
+      return;
+    }
     if (url.pathname === "/api/rituals") {
-      await handleRitualsList(res);
+      await handleRitualsList(res, sessionParam);
       return;
     }
     // /api/ritual/{slug}/line/{id}.opus
     const lineMatch = /^\/api\/ritual\/([^/]+)\/line\/([^/]+)\.opus$/.exec(url.pathname);
     if (lineMatch) {
-      await handleRitualLineAudio(req, res, lineMatch[1]!, lineMatch[2]!);
+      await handleRitualLineAudio(req, res, lineMatch[1]!, lineMatch[2]!, sessionParam);
       return;
     }
     // /api/ritual/{slug}/review/line/{id} — PUT to update one line's status/note
     const reviewLineMatch = /^\/api\/ritual\/([^/]+)\/review\/line\/([^/]+)$/.exec(url.pathname);
     if (reviewLineMatch && req.method === "PUT") {
-      await handleReviewPut(req, res, reviewLineMatch[1]!, reviewLineMatch[2]!);
+      await handleReviewPut(req, res, reviewLineMatch[1]!, reviewLineMatch[2]!, sessionParam);
       return;
     }
     // /api/ritual/{slug}/rebake/line/{id} — POST to re-render one line via Gemini
     const rebakeLineMatch = /^\/api\/ritual\/([^/]+)\/rebake\/line\/([^/]+)$/.exec(url.pathname);
     if (rebakeLineMatch && req.method === "POST") {
-      await handleRebakeLine(req, res, rebakeLineMatch[1]!, rebakeLineMatch[2]!);
+      await handleRebakeLine(req, res, rebakeLineMatch[1]!, rebakeLineMatch[2]!, sessionParam);
       return;
     }
     // /api/ritual/{slug}/review — GET sidecar
     const reviewMatch = /^\/api\/ritual\/([^/]+)\/review$/.exec(url.pathname);
     if (reviewMatch && req.method === "GET") {
-      handleReviewGet(res, reviewMatch[1]!);
+      handleReviewGet(res, reviewMatch[1]!, sessionParam);
       return;
     }
     // /api/ritual/{slug}
     const detailMatch = /^\/api\/ritual\/([^/]+)$/.exec(url.pathname);
     if (detailMatch) {
-      await handleRitualDetail(res, detailMatch[1]!);
+      await handleRitualDetail(res, detailMatch[1]!, sessionParam);
       return;
     }
     if (url.pathname === "/api/index") {
