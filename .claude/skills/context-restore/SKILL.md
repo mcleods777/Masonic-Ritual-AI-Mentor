@@ -1,0 +1,1 @@
+/home/mcleods777/Masonic-Ritual-AI-Mentor/.claude/skills/gstack/context-restore/SKILL.md

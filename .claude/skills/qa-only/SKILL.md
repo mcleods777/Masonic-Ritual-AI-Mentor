@@ -1,0 +1,1 @@
+/home/mcleods777/Masonic-Ritual-AI-Mentor/.claude/skills/gstack/qa-only/SKILL.md
