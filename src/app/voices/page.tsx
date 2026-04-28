@@ -642,7 +642,7 @@ export default function VoicesPage() {
     <div className="space-y-8 py-8">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold text-zinc-100">Custom Voices</h1>
+        <h1 className="text-2xl font-cinzel uppercase tracking-[0.18em] text-zinc-100">Custom Voices</h1>
         <p className="text-zinc-400 mt-2">
           Record your voice (or a brother&apos;s) to create custom voice
           profiles for Voxtral TTS. Each recording needs just 3-10 seconds.

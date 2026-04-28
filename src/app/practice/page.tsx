@@ -100,7 +100,7 @@ function PracticeContent() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-zinc-100">Practice</h1>
+          <h1 className="text-2xl font-cinzel uppercase tracking-[0.18em] text-zinc-100">Practice</h1>
           <p className="text-zinc-500 mt-1">
             {activeTab === "rehearsal"
               ? "Pick your role and rehearse the full ceremony with AI reading the other parts."

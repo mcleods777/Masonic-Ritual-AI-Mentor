@@ -38,7 +38,7 @@ export default function UploadPage() {
   return (
     <div className="space-y-8 max-w-2xl mx-auto">
       <div>
-        <h1 className="text-2xl font-bold text-zinc-100">Upload Ritual</h1>
+        <h1 className="text-2xl font-cinzel uppercase tracking-[0.18em] text-zinc-100">Upload Ritual</h1>
         <p className="text-zinc-500 mt-2">
           Upload your encrypted ritual file (.mram). It will be decrypted,
           structured into practice sections, and re-encrypted on your device.
