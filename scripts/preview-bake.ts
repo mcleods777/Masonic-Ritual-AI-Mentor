@@ -1432,18 +1432,31 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     position: sticky; top: 0; z-index: 10;
     background: var(--zinc-950);
     border-bottom: 1px solid var(--zinc-800);
-    padding: 1em 1.5em;
+    padding: 1.25em 1.5em 1em;
   }
   header .header-inner {
     max-width: 64rem; margin: 0 auto;
   }
+  /* Wordmark — Cinzel small caps, tracked, matching the main app's
+     title treatment. The amber accent is the only chromatic moment in
+     the header strip; everything else stays zinc. */
   header h1 {
-    margin: 0 0 0.25em 0;
+    margin: 0 0 0.4em 0;
     font-family: 'Cinzel', Georgia, serif;
-    font-size: 1.35em; font-weight: 600;
-    color: var(--amber-500); letter-spacing: 0.02em;
+    font-size: 1.05em; font-weight: 600;
+    color: var(--amber-500);
+    text-transform: uppercase; letter-spacing: 0.18em;
   }
-  header .meta { color: var(--zinc-500); font-size: 0.85em; font-family: 'Lato', sans-serif; }
+  header h1 > span {
+    color: var(--zinc-600) !important;
+    font-weight: 400 !important;
+    font-family: 'Lato', sans-serif !important;
+    font-size: 0.75em !important;
+    letter-spacing: 0.04em !important;
+    text-transform: none !important;
+    margin-left: 0.7em !important;
+  }
+  header .meta { color: var(--zinc-500); font-size: 0.82em; font-family: 'Lato', sans-serif; }
   header .err { color: var(--error); font-weight: 500; }
   /* Session row — STT-01 Tier 2b — sits between meta and ritual tabs */
   .session-row {
@@ -1600,6 +1613,23 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     border-bottom: 1px solid var(--zinc-800);
     transition: background 100ms;
   }
+  /* Mobile: stack id/role above the body so the audio + director's
+     note get the full column width. Without this, the body column
+     collapses to a sliver and the textarea wraps to a single
+     character per line. */
+  @media (max-width: 640px) {
+    .line {
+      grid-template-columns: auto 1fr;
+      grid-template-areas:
+        "id role"
+        "body body";
+      gap: 0.5em 0.75em;
+      padding: 0.85em 0.9em;
+    }
+    .line .id { grid-area: id; text-align: left; padding-top: 0; }
+    .line .role { grid-area: role; padding-top: 0; }
+    .line .body { grid-area: body; }
+  }
   .line:last-child { border-bottom: none; }
   .line:hover { background: rgba(63, 63, 70, 0.3); }
   .line.no-audio { opacity: 0.55; }
@@ -1653,24 +1683,28 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     border: 1px solid transparent;
     letter-spacing: 0.02em;
   }
-  /* Gemini = amber gold (matches app accent) */
+  /* Gemini = filled amber (the primary engine — most lines).
+     Google = outlined zinc (the fallback engine — distinguished by
+     treatment, not by introducing a second chromatic color).
+     Unknown = filled zinc (de-emphasized, can't classify).
+     This replaces the previous teal accent for Google, which broke
+     the masonic-style amber-only constraint. */
   .engine-gemini-flash-tts {
     background: rgba(245, 158, 11, 0.12);
     color: var(--amber-300);
     border-color: rgba(245, 158, 11, 0.3);
   }
-  /* Google = teal (separate enough to spot, not competing with gold) */
   .engine-google-cloud-tts {
-    background: rgba(45, 212, 191, 0.12);
-    color: #5eead4;
-    border-color: rgba(45, 212, 191, 0.3);
+    background: transparent;
+    color: var(--zinc-300);
+    border-color: var(--zinc-700);
   }
   .engine-unknown {
     background: rgba(113, 113, 122, 0.15);
     color: var(--zinc-400); border-color: rgba(113, 113, 122, 0.3);
   }
   .line.line-google-cloud-tts {
-    border-left: 3px solid rgba(45, 212, 191, 0.4);
+    border-left: 3px solid var(--zinc-700);
     padding-left: calc(1.25em - 3px);
   }
 
@@ -2006,9 +2040,8 @@ export function handleIndexRequest(res: http.ServerResponse): void {
   }
   .rebake-btn::before { content: "↻"; font-size: 1.1em; line-height: 1; }
   .rebake-btn:hover:not(:disabled) {
-    background: rgba(45, 212, 191, 0.1);
-    color: #5eead4;
-    border-color: rgba(45, 212, 191, 0.5);
+    color: var(--amber-400);
+    border-color: rgba(245, 158, 11, 0.5);
   }
   .rebake-btn:active:not(:disabled) { transform: scale(0.97); }
   .rebake-btn:disabled {
@@ -2366,16 +2399,17 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     }
   }
   /* Bulk-rebake button in the status filter row — shape matches the
-     bulk-approve button it sits next to but tinted teal/blue so it
-     reads as a regenerate action vs. a status flip. */
+     bulk-approve button it sits next to. Uses amber-quiet (matches
+     the per-line .rebake-btn hover) so the regenerate action reads
+     as the same family across the page. */
   .filter-shortcut.bulk-rebake {
-    border-color: rgba(45, 212, 191, 0.4);
-    color: #5eead4;
+    border-color: rgba(245, 158, 11, 0.35);
+    color: var(--amber-400);
   }
   .filter-shortcut.bulk-rebake:hover:not(:disabled) {
-    background: rgba(45, 212, 191, 0.12);
-    border-color: rgba(45, 212, 191, 0.6);
-    color: #5eead4;
+    background: rgba(245, 158, 11, 0.08);
+    border-color: rgba(245, 158, 11, 0.55);
+    color: var(--amber-300);
   }
   .filter-shortcut.bulk-rebake::before {
     content: "↻ "; display: inline-block;
