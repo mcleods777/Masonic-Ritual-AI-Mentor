@@ -1,6 +1,6 @@
 ---
 name: masonic-style
-description: House style for the Masonic Ritual Mentor app. Defines the visual identity, color usage, typography, ornament discipline, motion restraint, and copy register for any UI work in this repo. Use whenever generating, redesigning, or critiquing a page, route, or component in this Next.js project. Triggers on tasks involving the upload/bake page, practice page, voices page, progress page, sign-in, walkthrough, or any new UI surface. Pair with the shadcn, frontend-design, web-design-guidelines, vercel-react-best-practices, and vercel-react-view-transitions skills — this skill provides the project-specific guardrails those skills should operate within.
+description: House style for the Masonic Ritual Mentor app AND its internal bake-preview voice-director tool. Defines the visual identity, color usage, typography, ornament discipline, motion restraint, and copy register for any UI work in this repo. Use whenever generating, redesigning, or critiquing a page, route, or component in this Next.js project — and also for any visual work in scripts/preview-bake.ts (the bake tool follows the same look with documented carve-outs for system mono and the no-React/Tailwind/shadcn constraint). Triggers on tasks involving the upload/bake page, practice page, voices page, progress page, sign-in, walkthrough, the bake-preview tool, or any new UI surface. Pair with the shadcn, frontend-design, web-design-guidelines, vercel-react-best-practices, and vercel-react-view-transitions skills — this skill provides the project-specific guardrails those skills should operate within.
 allowed-tools: Read, Edit, Write, Glob, Grep, Bash(npx shadcn@latest *)
 ---
 
@@ -145,6 +145,51 @@ This is where most "Masonic" designs go wrong. Restraint is the rule.
 - All-caps tracked H1: `UPLOAD RITUAL FILE` (Cinzel, `tracking-[0.2em]`, `text-2xl md:text-3xl`).
 - Use shadcn primitives: `Card`, `Input`, `Label`, `Button`, `Progress`, `Alert`. Do not roll custom equivalents.
 
+## The Bake Preview Tool — Carve-outs
+
+The internal voice-director surface at `scripts/preview-bake.ts` (launched via `npm run preview-bake`) is a separate dev tool, not part of the Next.js app. It is read-only, localhost-only (`127.0.0.1`), gated by `assertDevOnly`, and meant to be used by project maintainers to review baked `.mram` files. It still adheres to the visual identity above, but with a few intentional carve-outs.
+
+### Stack — what is and isn't
+
+The bake tool is **a single ~4000-line Node `http.createServer` script that returns one server-rendered HTML string**. There is no React, no Next.js, no Tailwind, no shadcn, no Vite, no build step. The entire HTML/CSS/JS lives inside one backtick template literal in `handleIndexRequest()`. Edits land directly on `scripts/preview-bake.ts` and take effect after a server restart.
+
+This is deliberate. The bake tool is project-internal, ships only to maintainers, and the dependency-free design means no migration debt as the main app evolves. Treat it as a separate codebase that happens to share the same visual language.
+
+### What does and doesn't apply from the rules above
+
+| Rule from above | Applies to bake tool? |
+|---|---|
+| Cinzel for headings, Lato for body | Yes — both fonts loaded from Google Fonts directly via `<link>` (the bake tool can't use `next/font/google`). |
+| Geist Mono for cipher / mono | **No** — bake tool intentionally uses `ui-monospace, 'SF Mono', Menlo, monospace` (system mono). Geist + Geist Mono are deliberately omitted to keep the bake page's font payload small. Don't add them. |
+| Amber + zinc only, no other chroma | Yes, with the same green/red exception for semantic success/destructive (e.g. `session-promote`, `session-delete`, status pills). |
+| shadcn primitives, `Card`/`Input`/`Button` | **No** — bake tool uses vanilla HTML form elements styled with inline CSS. Don't introduce shadcn here; there's no React runtime. |
+| Tailwind utility classes | **No** — bake tool has no Tailwind. Style with the inline `<style>` block, using the existing `--zinc-*`, `--amber-*`, `--surface-*`, `--border-subtle` custom properties. New tokens go at the top of `:root` alongside them. |
+| Lucide icons | **No** — bake tool uses Unicode glyphs (`▸`, `↻`, `+`, `−`, `✓`) for chevrons/spinners. Don't import an icon library. |
+| `<ViewTransition>` / `animate-fade-up` | **No** — bake tool has no React. Use plain CSS transitions in the 120–200ms range. |
+| `prefers-reduced-motion` honored | Yes — bake tool has a global `@media (prefers-reduced-motion: reduce)` guard near the top of the inline `<style>`. New transitions/animations inherit from it; nothing extra needed. |
+| `localStorage` not for ritual content | Yes — bake tool uses localStorage **only** for director-note overrides + saved profiles (user preferences, not ritual content). Don't store cipher or plain text from `.mram` documents in localStorage. |
+| Single column for reading surfaces | Sanctioned exception — bake tool is a workbench/dashboard, multi-column grid for parameter cells is appropriate per the "dashboards and selection grids" carve-out. |
+| `📝` emoji on note button | Grandfathered. Don't add **new** emoji elsewhere in the bake tool. Other Unicode glyphs (`▸ ↻ +`) are not emoji and are fine. |
+
+### Editing traps
+
+These are the bake-tool-specific footguns. Watch for them when working in `scripts/preview-bake.ts`.
+
+1. **Backticks inside the outer template.** The entire HTML response is one backtick template literal. A literal `` ` `` anywhere inside it — including in CSS or JS comments — silently terminates the template mid-string. The TS errors that follow point at lines 200+ away from the actual cause. **Use straight quotes (`"..."`) in comments inside the served HTML/CSS/JS.**
+2. **`tsx` does not hot-reload.** After editing this file, the running server is still serving the old code from memory. Kill the actual port-bound process (`fuser -k 4757/tcp` is reliable) and restart `npm run preview-bake`. The recorded PID file usually points at the parent shell, not the bound child — don't trust it for `kill`.
+3. **Director's note CSS lives between roughly lines 2027 and 2400** in the inline `<style>` block. The HTML template for the panel is in `renderLine()` around line 4239. The tag palette data lives at `RITUAL_TAG_PALETTE` (line ~2514, in the served `<script>` block, so it's a browser-side constant, not a Node export). Plan large CSS changes around the existing structure rather than rewriting it; the file is too long for a clean rewrite.
+
+### Director's note panel — design contract
+
+After the Phase-1/2/3 redesign (commits `d730d73`, `b010d94`, `b8b77ae` on the `redesign/bake-preview-gui` branch), the panel follows this hierarchy:
+
+- **Hero** — the spoken-text textarea on `--surface-elevated`. The visual focus.
+- **Tag palette** — collapsed behind a left-anchored `+ Insert tag` disclosure. Default closed. Inserts at cursor with auto-spacing.
+- **Parameter rail** — auto-fit grid of one-control-per-cell combobox cells (Style/Pace/Accent/Model end with `(custom prose…)` which reveals a free-text input only when picked). Voice and Profile (override) keep their existing single-control patterns.
+- **Action bar** — info span (left), apply-to-flagged-regen / apply-to-role / clear (zinc-quiet), `Try these settings` (the only solid amber button on the panel).
+
+If a future change adds a new "knob" to the Director's note, prefer extending the parameter rail with another combobox cell over inventing a new visual treatment. The amber-600 fill stays reserved for the primary CTA.
+
 ## Component Conventions
 
 - **Always read** `npx shadcn@latest info --json` before generating components. Use the installed primitives; install missing ones via `npx shadcn@latest add <name>` from the `@shadcn` registry.
@@ -170,19 +215,36 @@ If a design suggestion fits one of the above, reject it.
 
 ## Verification Checklist (run before declaring a redesign done)
 
+### Universal (1–13) — applies to both the main app and the bake tool
+
 1. Headings use Cinzel and are all-caps tracked where appropriate.
-2. Body uses Lato; mono uses Geist Mono.
-3. Only amber and zinc/gray are present. No blue, yellow, or orange.
-4. No imported icon libraries other than Lucide.
+2. Body uses Lato; mono uses Geist Mono *(main app)* or system mono *(bake tool — Geist Mono is intentionally not loaded there; see Bake Preview Tool carve-outs)*.
+3. Only amber and zinc/gray are present. No blue, yellow, or orange. Green/red used only for semantic success/destructive states.
+4. No imported icon libraries other than Lucide *(main app)* / no icon library at all *(bake tool — Unicode glyphs only)*.
 5. No new font dependencies in `layout.tsx`.
 6. No `localStorage` calls touching ritual content.
 7. `prefers-reduced-motion` honored on every new animation.
 8. Single column for reading surfaces, `max-w-prose` enforced for prose.
-9. No emoji in JSX.
+9. No new emoji in JSX (the bake tool's `📝` note button is grandfathered).
 10. No "Oops!", "Welcome!", "Let's get started!" or marketing-voice copy.
 11. Privacy/security language is factual, not promotional.
-12. Run the `web-design-guidelines` skill against the new code before commit.
-13. Run `npx shadcn@latest info --json` and confirm no orphaned imports.
+12. Run the `web-design-guidelines` skill against the new code before commit (main app only — the bake tool has no TSX surface to scan).
+13. Run `npx shadcn@latest info --json` and confirm no orphaned imports (main app only).
+
+### Main-app-only (14)
+
+14. Use shadcn primitives (`Card`, `Input`, `Label`, `Button`, etc.) for new surfaces; do not roll custom equivalents.
+
+### Bake-tool-only (15–20)
+
+When the change lands in `scripts/preview-bake.ts`, also verify:
+
+15. No literal backticks inside the outer HTML template (including in CSS/JS comments inside the served block) — they terminate the outer template literal mid-string. Use straight quotes in comments.
+16. No React, Tailwind, shadcn, or build-time dependency added; new CSS lives inside the inline `<style>` block, new browser JS inside the inline `<script>` block.
+17. Color tokens use the existing `--zinc-*`, `--amber-*`, `--surface-card`, `--surface-elevated`, `--border-subtle` custom properties. New tokens are added at the top of `:root` alongside them; no inline hex literals.
+18. The Director's note panel's hierarchy is preserved: hero (spoken text) → tag-palette disclosure (collapsed by default) → parameter rail (combobox-with-custom) → action bar (one solid amber CTA).
+19. Mobile (<640px) does not break the per-line layout — the `.line` row stacks via the existing `@media (max-width: 640px)` rule rather than collapsing the body column.
+20. After editing, restart `npm run preview-bake` (kill the bound child via `fuser -k <PORT>/tcp`) before reviewing the change in a browser — `tsx` does not hot-reload.
 
 ## When in Doubt
 

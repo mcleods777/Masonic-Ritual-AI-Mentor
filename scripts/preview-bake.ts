@@ -27,6 +27,20 @@
  *
  * Related: src/lib/dev-guard.ts (D-15 single source of truth),
  * src/lib/mram-format.ts (decryptMRAM — the .mram → MRAMDocument boundary).
+ *
+ * Editing notes:
+ *   - The entire HTML response (handleIndexRequest, ~lines 1374–4358) is
+ *     ONE backtick template literal. Do NOT put a literal backtick (`)
+ *     anywhere inside it — including CSS or JS comments — or you will
+ *     terminate the template mid-string and produce confusing TS errors
+ *     hundreds of lines away. Use straight quotes ("...") in comments.
+ *   - tsx does NOT hot-reload. After editing this file, kill the running
+ *     server (`fuser -k <PORT>/tcp` is reliable; the recorded PID is the
+ *     parent shell, not the bound child) and restart `npm run preview-bake`.
+ *   - The bake-tool UI is intentionally vanilla HTML/CSS in a single file
+ *     with no React, Tailwind, shadcn, or build step. See the bake-tool
+ *     carve-outs in .claude/skills/masonic-style/SKILL.md for the
+ *     project-style rationale.
  */
 
 import http from "node:http";
@@ -1405,6 +1419,12 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     /* Status */
     --error: #f87171;
     --good: #4ade80;
+    /* Surface tones — slightly elevated zinc for cards/hero areas
+       on the bake page. Director's note uses these to establish
+       depth without adding chroma. */
+    --surface-card: #161618;
+    --surface-elevated: #1d1d20;
+    --border-subtle: #2a2a2e;
   }
   * { box-sizing: border-box; }
   body {
@@ -1426,18 +1446,31 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     position: sticky; top: 0; z-index: 10;
     background: var(--zinc-950);
     border-bottom: 1px solid var(--zinc-800);
-    padding: 1em 1.5em;
+    padding: 1.25em 1.5em 1em;
   }
   header .header-inner {
     max-width: 64rem; margin: 0 auto;
   }
+  /* Wordmark — Cinzel small caps, tracked, matching the main app's
+     title treatment. The amber accent is the only chromatic moment in
+     the header strip; everything else stays zinc. */
   header h1 {
-    margin: 0 0 0.25em 0;
+    margin: 0 0 0.4em 0;
     font-family: 'Cinzel', Georgia, serif;
-    font-size: 1.35em; font-weight: 600;
-    color: var(--amber-500); letter-spacing: 0.02em;
+    font-size: 1.05em; font-weight: 600;
+    color: var(--amber-500);
+    text-transform: uppercase; letter-spacing: 0.18em;
   }
-  header .meta { color: var(--zinc-500); font-size: 0.85em; font-family: 'Lato', sans-serif; }
+  header h1 > span {
+    color: var(--zinc-600) !important;
+    font-weight: 400 !important;
+    font-family: 'Lato', sans-serif !important;
+    font-size: 0.75em !important;
+    letter-spacing: 0.04em !important;
+    text-transform: none !important;
+    margin-left: 0.7em !important;
+  }
+  header .meta { color: var(--zinc-500); font-size: 0.82em; font-family: 'Lato', sans-serif; }
   header .err { color: var(--error); font-weight: 500; }
   /* Session row — STT-01 Tier 2b — sits between meta and ritual tabs */
   .session-row {
@@ -1594,6 +1627,23 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     border-bottom: 1px solid var(--zinc-800);
     transition: background 100ms;
   }
+  /* Mobile: stack id/role above the body so the audio + director's
+     note get the full column width. Without this, the body column
+     collapses to a sliver and the textarea wraps to a single
+     character per line. */
+  @media (max-width: 640px) {
+    .line {
+      grid-template-columns: auto 1fr;
+      grid-template-areas:
+        "id role"
+        "body body";
+      gap: 0.5em 0.75em;
+      padding: 0.85em 0.9em;
+    }
+    .line .id { grid-area: id; text-align: left; padding-top: 0; }
+    .line .role { grid-area: role; padding-top: 0; }
+    .line .body { grid-area: body; }
+  }
   .line:last-child { border-bottom: none; }
   .line:hover { background: rgba(63, 63, 70, 0.3); }
   .line.no-audio { opacity: 0.55; }
@@ -1636,7 +1686,7 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     align-items: center;
   }
   .line .no-audio-note {
-    color: var(--zinc-600); font-style: italic; font-size: 0.85em;
+    color: var(--zinc-500); font-style: italic; font-size: 0.85em;
   }
   /* Engine badge — small pill showing which TTS rendered each line */
   .engine-badge {
@@ -1647,24 +1697,28 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     border: 1px solid transparent;
     letter-spacing: 0.02em;
   }
-  /* Gemini = amber gold (matches app accent) */
+  /* Gemini = filled amber (the primary engine — most lines).
+     Google = outlined zinc (the fallback engine — distinguished by
+     treatment, not by introducing a second chromatic color).
+     Unknown = filled zinc (de-emphasized, can't classify).
+     This replaces the previous teal accent for Google, which broke
+     the masonic-style amber-only constraint. */
   .engine-gemini-flash-tts {
     background: rgba(245, 158, 11, 0.12);
     color: var(--amber-300);
     border-color: rgba(245, 158, 11, 0.3);
   }
-  /* Google = teal (separate enough to spot, not competing with gold) */
   .engine-google-cloud-tts {
-    background: rgba(45, 212, 191, 0.12);
-    color: #5eead4;
-    border-color: rgba(45, 212, 191, 0.3);
+    background: transparent;
+    color: var(--zinc-300);
+    border-color: var(--zinc-700);
   }
   .engine-unknown {
     background: rgba(113, 113, 122, 0.15);
     color: var(--zinc-400); border-color: rgba(113, 113, 122, 0.3);
   }
   .line.line-google-cloud-tts {
-    border-left: 3px solid rgba(45, 212, 191, 0.4);
+    border-left: 3px solid var(--zinc-700);
     padding-left: calc(1.25em - 3px);
   }
 
@@ -2000,9 +2054,8 @@ export function handleIndexRequest(res: http.ServerResponse): void {
   }
   .rebake-btn::before { content: "↻"; font-size: 1.1em; line-height: 1; }
   .rebake-btn:hover:not(:disabled) {
-    background: rgba(45, 212, 191, 0.1);
-    color: #5eead4;
-    border-color: rgba(45, 212, 191, 0.5);
+    color: var(--amber-400);
+    border-color: rgba(245, 158, 11, 0.5);
   }
   .rebake-btn:active:not(:disabled) { transform: scale(0.97); }
   .rebake-btn:disabled {
@@ -2018,354 +2071,398 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     to { transform: rotate(360deg); }
   }
 
-  /* Director's note panel — per-line voice + style + pace + accent
-     overrides for experimental rebakes. Mirrors Google AI Studio's voice
-     playground UX. Settings persist in localStorage per (slug, lineId). */
+  /* === Global motion + a11y polish (Phase 3) ============================
+     The bake tool is a working surface — voice directors spend long
+     stretches in it. We honor reduced-motion globally (not just on the
+     director's note) and make focus-visible rings explicit on every
+     interactive control. Per masonic-style: amber-400 ring at 2px,
+     not the browser default blue.
+     =================================================================== */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  /* Keyboard focus — every interactive control gets the same amber ring
+     when it was focused via keyboard (not click). The default browser
+     ring is blue, which would violate the amber-only constraint.
+     !important is justified: many per-element rules across the file set
+     "outline: none" on ":focus" for click-aesthetic reasons. Without
+     !important, those rules outweigh this one on specificity and the
+     keyboard ring goes invisible — defeating the whole a11y guarantee. */
+  button:focus-visible,
+  select:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible,
+  details > summary:focus-visible,
+  a:focus-visible {
+    outline: 2px solid var(--amber-400) !important;
+    outline-offset: 2px !important;
+  }
+  /* Tag chips already have a tight border; offset their ring so it
+     doesn't crowd the chip outline. */
+  .tag-chip:focus-visible {
+    outline-offset: 1px !important;
+  }
+
+
+  /* === Director's Note (Phase 1 redesign) ============================
+     The panel is a workbench, not a control panel. Hierarchy is:
+       1. Spoken text (the hero)        — large textarea, elevated surface
+       2. Parameter rail (the tools)    — single-control-per-cell grid
+       3. Primary CTA (Try these)       — only solid amber on the panel
+     Profile + summary chrome live in the header strip; the tag palette
+     hides behind a "+ Insert tag" disclosure beneath the textarea so the
+     editor is what the eye lands on.
+     Amber-600 is reserved for the CTA. Amber-400 marks focus + the
+     summary tag when overrides are pinned. Everything else is zinc.
+     ====================================================================== */
   .director-note {
-    margin-top: 0.5em;
-    background: var(--zinc-950);
-    border: 1px solid var(--zinc-800);
-    border-radius: 8px;
-    padding: 0; overflow: hidden;
-    transition: border-color 100ms;
+    margin-top: 0.6em;
+    background: var(--surface-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: 10px;
+    overflow: hidden;
+    transition: border-color 150ms ease;
   }
-  .director-note[open] {
-    border-color: rgba(245, 158, 11, 0.35);
+  .director-note[open] { border-color: var(--zinc-700); }
+  /* Header strip — title + summary tag + profile compact row */
+  .director-note > summary {
+    list-style: none;
+    cursor: pointer; user-select: none;
+    display: flex; align-items: center; gap: 0.65rem;
+    padding: 0.7rem 0.95rem;
+    transition: background 150ms ease;
   }
-  .director-note summary {
-    cursor: pointer; padding: 0.55em 0.85em;
-    color: var(--zinc-400); font-family: ui-monospace, monospace;
-    font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.05em;
-    user-select: none; list-style: none;
-    display: flex; align-items: center; gap: 0.5em;
+  .director-note > summary::-webkit-details-marker { display: none; }
+  .director-note > summary::before {
+    content: "▸"; color: var(--zinc-600);
+    font-size: 0.85em; line-height: 1;
+    transition: transform 150ms ease, color 150ms ease;
+    display: inline-block; width: 1ch;
   }
-  .director-note summary::before {
-    content: "▸"; color: var(--zinc-500);
-    transition: transform 150ms;
+  .director-note[open] > summary::before {
+    transform: rotate(90deg); color: var(--zinc-400);
   }
-  .director-note[open] summary::before {
-    transform: rotate(90deg); color: var(--amber-500);
-  }
-  .director-note summary:hover { color: var(--amber-400); }
-  .director-note[open] summary {
-    color: var(--amber-400); border-bottom: 1px solid var(--zinc-800);
+  .director-note > summary:hover { background: rgba(255, 255, 255, 0.015); }
+  .director-note .dn-title {
+    font-family: 'Cinzel', Georgia, serif;
+    font-size: 0.78em; font-weight: 600;
+    color: var(--zinc-300);
+    text-transform: uppercase; letter-spacing: 0.18em;
   }
   .director-note .summary-tag {
-    margin-left: auto; font-size: 0.95em;
-    color: var(--zinc-500); text-transform: none; letter-spacing: 0;
+    margin-left: auto;
+    font-family: 'Lato', sans-serif;
+    font-size: 0.78em;
+    color: var(--zinc-500);
+    font-style: italic;
   }
-  .director-note[open] .summary-tag {
-    color: var(--amber-300);
+  .director-note[open] .summary-tag { color: var(--zinc-400); }
+  .director-note[open] .summary-tag.has-overrides { color: var(--amber-400); font-style: normal; }
+  .director-note .summary-tag.has-overrides { color: var(--amber-500); font-style: normal; }
+
+  /* Content frame — opens beneath the summary */
+  .dn-content {
+    display: flex; flex-direction: column;
+    gap: 1rem;
+    padding: 0.5rem 1rem 1rem;
+    border-top: 1px solid var(--zinc-800);
   }
-  .director-note-profile-row {
-    padding: 0.65em 0.95em;
-    background: rgba(245, 158, 11, 0.04);
-    border-bottom: 1px solid var(--zinc-800);
-    display: flex; align-items: center; gap: 0.6em; flex-wrap: wrap;
+
+  /* Eyebrow — uppercase tracked label used for every field heading */
+  .dn-eyebrow {
+    display: inline-block;
+    font: 600 0.7em/1 'Lato', system-ui, sans-serif;
+    color: var(--zinc-500);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
   }
-  .director-note-profile-label {
-    color: var(--zinc-400); font-size: 0.78em;
-    font-family: ui-monospace, monospace;
-    text-transform: uppercase; letter-spacing: 0.05em;
+
+  /* Profile compact row — single line, tucked at top */
+  .dn-profile-row {
+    display: flex; align-items: center; gap: 0.5rem;
+    flex-wrap: wrap;
   }
+  .dn-profile-row .dn-eyebrow { margin-right: 0.15rem; }
   .director-note-profile-select {
-    background: var(--zinc-900);
-    color: var(--zinc-200);
-    border: 1px solid var(--zinc-700);
-    border-radius: 6px;
-    padding: 0.4em 0.5em;
-    font-family: 'Lato', sans-serif;
-    font-size: 0.85em;
-    min-width: 220px;
-    cursor: pointer;
-  }
-  .director-note-profile-select:hover, .director-note-profile-select:focus {
-    border-color: var(--amber-500); outline: none;
-  }
-  .save-profile-btn, .delete-profile-btn {
-    background: transparent;
-    border: 1px solid var(--zinc-700);
-    color: var(--zinc-300);
-    padding: 0.4em 0.85em;
-    border-radius: 6px; cursor: pointer;
-    font-family: 'Lato', sans-serif;
-    font-size: 0.82em;
-    transition: all 120ms;
-  }
-  .save-profile-btn:hover {
-    background: rgba(245, 158, 11, 0.1);
-    color: var(--amber-400);
-    border-color: rgba(245, 158, 11, 0.4);
-  }
-  .delete-profile-btn:hover:not(:disabled) {
-    background: rgba(248, 113, 113, 0.1);
-    color: var(--error);
-    border-color: rgba(248, 113, 113, 0.4);
-  }
-  .delete-profile-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  .director-note-body {
-    padding: 0.85em 0.95em;
-    display: grid; grid-template-columns: 1fr 1fr;
-    gap: 1em 1.5em;
-    align-items: start;
-  }
-  @media (max-width: 720px) {
-    .director-note-body { grid-template-columns: 1fr; }
-  }
-  .director-note-field { display: flex; flex-direction: column; gap: 0.25em; min-width: 0; }
-  .director-note-field label {
-    color: var(--zinc-500); font-size: 0.72em;
-    font-family: ui-monospace, monospace;
-    text-transform: uppercase; letter-spacing: 0.05em;
-  }
-  .director-note-field select {
-    background: var(--zinc-900);
-    color: var(--zinc-200);
-    border: 1px solid var(--zinc-700);
-    border-radius: 6px;
-    padding: 0.4em 0.5em;
-    font-family: 'Lato', sans-serif;
-    font-size: 0.85em;
-    cursor: pointer;
-    width: 100%;
-    transition: border-color 100ms;
-  }
-  .director-note-field select:hover, .director-note-field select:focus {
-    border-color: var(--amber-500); outline: none;
-  }
-  /* Free-text prose input — sits below the preset dropdown. Empty =
-     defer to dropdown selection. Typing here overrides the preset. */
-  .director-note-field input.director-note-prose,
-  .director-note-field textarea.director-note-prose {
     background: var(--zinc-900);
     color: var(--zinc-200);
     border: 1px solid var(--zinc-800);
     border-radius: 6px;
     padding: 0.4em 0.55em;
+    font: 0.85em/1.2 'Lato', sans-serif;
+    min-width: 200px;
+    flex: 1 1 240px;
+    cursor: pointer;
+    transition: border-color 120ms ease;
+  }
+  .director-note-profile-select:hover,
+  .director-note-profile-select:focus { border-color: var(--amber-500); outline: none; }
+  .save-profile-btn, .delete-profile-btn {
+    background: transparent;
+    border: 1px solid var(--zinc-800);
+    color: var(--zinc-400);
+    padding: 0.4em 0.75em;
+    border-radius: 6px;
+    cursor: pointer;
+    font: 0.78em/1 'Lato', sans-serif;
+    transition: color 120ms ease, border-color 120ms ease;
+  }
+  .save-profile-btn:hover { color: var(--amber-400); border-color: var(--zinc-700); }
+  .delete-profile-btn:hover:not(:disabled) { color: var(--error); border-color: rgba(248, 113, 113, 0.4); }
+  .delete-profile-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* Hero — spoken text + tag disclosure. The textarea is the visual focus. */
+  .dn-hero {
+    background: var(--surface-elevated);
+    border: 1px solid var(--zinc-800);
+    border-radius: 8px;
+    padding: 0.85rem 0.95rem;
+    display: flex; flex-direction: column; gap: 0.55rem;
+  }
+  .dn-hero-header {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 0.5rem;
+  }
+  .speakas-reset-btn {
+    background: transparent;
+    border: 1px solid var(--zinc-800);
+    color: var(--zinc-400);
+    padding: 0.3em 0.7em;
+    border-radius: 5px; cursor: pointer;
+    font: 0.74em/1 'Lato', sans-serif;
+    transition: color 120ms ease, border-color 120ms ease;
+  }
+  .speakas-reset-btn:hover { color: var(--amber-400); border-color: var(--zinc-700); }
+  .director-note-speakas-textarea {
+    width: 100%; box-sizing: border-box;
+    min-height: 7em; max-height: 18em; resize: vertical;
+    background: var(--zinc-950);
+    color: var(--zinc-100);
+    border: 1px solid var(--zinc-800);
+    border-radius: 6px;
+    padding: 0.65rem 0.8rem;
+    font: 15px/1.55 'Lato', system-ui, sans-serif;
+    transition: border-color 120ms ease, background 120ms ease;
+  }
+  .director-note-speakas-textarea::placeholder { color: var(--zinc-500); font-style: italic; }
+  .director-note-speakas-textarea:focus {
+    border-color: var(--amber-500); outline: none;
+    background: #0a0a0c;
+  }
+
+  /* Tag-palette disclosure — collapsed by default; opens beneath textarea.
+     Anchor flush-left so it reads as a control on the textarea, not a
+     centered floater. */
+  .dn-tag-disclosure { margin-top: 0.1rem; align-self: flex-start; }
+  .dn-tag-disclosure > summary {
+    list-style: none;
+    cursor: pointer; user-select: none;
+    display: inline-flex; align-items: center; gap: 0.4em;
+    color: var(--zinc-400);
+    font: 0.78em/1 'Lato', sans-serif;
+    padding: 0.35em 0.5em 0.35em 0;
+    transition: color 120ms ease;
+  }
+  .dn-tag-disclosure > summary::-webkit-details-marker { display: none; }
+  .dn-tag-disclosure > summary::before {
+    content: "+";
+    font: 1em ui-monospace, 'SF Mono', monospace;
+    width: 1em; text-align: center;
+    color: var(--zinc-500);
+    transition: color 120ms ease;
+  }
+  .dn-tag-disclosure[open] > summary::before { content: "−"; color: var(--amber-400); }
+  .dn-tag-disclosure > summary:hover { color: var(--zinc-200); }
+  .dn-tag-disclosure > summary:hover::before { color: var(--zinc-300); }
+  .dn-tag-tray {
+    margin-top: 0.55rem;
+    background: var(--zinc-950);
+    border: 1px solid var(--zinc-800);
+    border-radius: 6px;
+    padding: 0.65rem 0.8rem;
+  }
+  .tag-group {
+    display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap;
+    padding: 0.3rem 0;
+  }
+  .tag-group + .tag-group {
+    border-top: 1px dashed var(--zinc-800);
+    margin-top: 0.15rem; padding-top: 0.5rem;
+  }
+  .tag-group-label {
+    flex: 0 0 9.5rem;
+    color: var(--zinc-500);
+    font: 600 0.68em/1.2 'Lato', sans-serif;
+    text-transform: uppercase; letter-spacing: 0.08em;
+  }
+  .tag-group-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+  .tag-chip {
+    background: var(--zinc-900);
+    border: 1px solid var(--zinc-800);
+    color: var(--zinc-300);
+    padding: 0.22em 0.65em;
+    border-radius: 12px;
+    cursor: pointer;
+    font: 0.76em/1.2 ui-monospace, 'SF Mono', Menlo, monospace;
+    transition: background 100ms ease, color 100ms ease, border-color 100ms ease;
+  }
+  .tag-chip:hover {
+    background: var(--zinc-800);
+    color: var(--zinc-100);
+    border-color: var(--zinc-700);
+  }
+  .tag-chip:active { transform: scale(0.97); }
+  .director-note-speakas-hint {
+    margin: 0.55rem 0 0;
+    color: var(--zinc-500);
+    font: italic 0.74em/1.55 'Lato', sans-serif;
+  }
+
+  /* Parameter grid — one control per cell. Custom prose appears only
+     when the user selects "(custom prose)" in the dropdown.            */
+  .dn-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 0.85rem 1rem;
+  }
+  .dn-cell { display: flex; flex-direction: column; gap: 0.3rem; min-width: 0; }
+  .dn-cell.dn-cell-wide { grid-column: 1 / -1; }
+  .dn-cell select,
+  .dn-cell input[type="text"],
+  .dn-cell textarea {
+    background: var(--zinc-900);
+    color: var(--zinc-200);
+    border: 1px solid var(--zinc-800);
+    border-radius: 6px;
+    padding: 0.45em 0.6em;
     font: 13px/1.5 'Lato', system-ui, sans-serif;
     width: 100%; box-sizing: border-box;
-    margin-top: 0.3em;
-    transition: border-color 100ms;
+    transition: border-color 120ms ease;
   }
-  .director-note-field input.director-note-prose::placeholder,
-  .director-note-field textarea.director-note-prose::placeholder {
-    color: var(--zinc-600); font-style: italic;
-  }
-  .director-note-field input.director-note-prose:focus,
-  .director-note-field textarea.director-note-prose:focus {
+  .dn-cell select { cursor: pointer; }
+  .dn-cell select:hover, .dn-cell select:focus,
+  .dn-cell input:hover, .dn-cell input:focus,
+  .dn-cell textarea:hover, .dn-cell textarea:focus {
     border-color: var(--amber-500); outline: none;
-    background: var(--zinc-950);
   }
-  .director-note-field textarea.director-note-prose {
-    min-height: 3.4em; max-height: 10em;
-    resize: vertical; line-height: 1.5;
+  .dn-cell input::placeholder, .dn-cell textarea::placeholder {
+    color: var(--zinc-500); font-style: italic;
   }
-  /* Profile field spans the full row — it's the largest free-text input. */
-  .director-note-profile-field {
-    grid-column: 1 / -1;
-  }
-  .director-note-profile-field label {
-    color: var(--zinc-400);
-  }
-  /* Temperature slider — like Google AI Studio's. Live value next to label. */
+  .dn-cell textarea { min-height: 3.2em; max-height: 10em; resize: vertical; line-height: 1.5; }
+  /* Custom-prose input revealed only when select is at "__custom__" */
+  .dn-cell-custom { display: none; }
+  .dn-cell.dn-cell--custom-open .dn-cell-custom { display: block; }
+
+  /* Temperature row — the only cell with multiple controls */
   .director-note-temp-display {
-    margin-left: 0.5em;
-    font-family: ui-monospace, monospace;
+    margin-left: auto;
+    font: 700 0.92em/1 ui-monospace, 'SF Mono', monospace;
     color: var(--amber-400);
-    font-weight: 700;
-    font-size: 0.92em;
-    text-transform: none; letter-spacing: 0;
   }
+  .dn-cell .dn-temp-head { display: flex; align-items: center; gap: 0.5rem; }
   .director-note-temp-slider {
     width: 100%;
-    margin-top: 0.3em;
     accent-color: var(--amber-500);
     cursor: pointer;
   }
   .director-note-temp-controls {
-    display: flex; align-items: center; gap: 0.6em;
-    margin-top: 0.4em; flex-wrap: wrap;
+    display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
   }
   .director-note-temp-reset {
     background: transparent;
     border: 1px solid var(--zinc-800);
     color: var(--zinc-400);
     padding: 0.3em 0.7em;
-    border-radius: 6px; cursor: pointer;
-    font-family: 'Lato', sans-serif;
-    font-size: 0.8em;
-    transition: all 120ms;
+    border-radius: 5px; cursor: pointer;
+    font: 0.74em/1 'Lato', sans-serif;
+    transition: color 120ms ease, border-color 120ms ease;
   }
-  .director-note-temp-reset:hover {
-    background: rgba(245, 158, 11, 0.08);
-    border-color: rgba(245, 158, 11, 0.3);
-    color: var(--amber-400);
-  }
+  .director-note-temp-reset:hover { color: var(--amber-400); border-color: var(--zinc-700); }
   .director-note-temp-hint {
     color: var(--zinc-500);
-    font-family: ui-monospace, monospace;
-    font-size: 0.74em;
+    font: 0.7em/1 ui-monospace, 'SF Mono', monospace;
   }
-  /* Spoken-text editor — full-width panel above the parameter knobs.
-     Inline Gemini tags ([whispered], [pause], …) are inserted at cursor
-     via the tag-palette buttons below the textarea. */
-  .director-note-speakas {
-    margin: 0.6em 0 0.8em;
-    padding: 0.7em 0.8em;
-    background: rgba(245, 158, 11, 0.04);
-    border: 1px solid rgba(245, 158, 11, 0.18);
-    border-radius: 7px;
-  }
-  .director-note-speakas-header {
-    display: flex; align-items: baseline; justify-content: space-between;
-    gap: 0.6em; margin-bottom: 0.4em;
-  }
-  .director-note-speakas-header label {
-    color: var(--amber-400);
-    font: 600 0.78em/1 'Lato', sans-serif;
-    text-transform: uppercase; letter-spacing: 0.04em;
-  }
-  .speakas-reset-btn {
-    background: transparent;
-    border: 1px solid var(--zinc-800);
-    color: var(--zinc-400);
-    padding: 0.25em 0.6em;
-    border-radius: 5px; cursor: pointer;
-    font-family: 'Lato', sans-serif; font-size: 0.75em;
-    transition: all 120ms;
-  }
-  .speakas-reset-btn:hover {
-    background: rgba(245, 158, 11, 0.08);
-    border-color: rgba(245, 158, 11, 0.3);
-    color: var(--amber-400);
-  }
-  .director-note-speakas-textarea {
-    min-height: 4.2em !important; max-height: 14em !important;
-    font: 14px/1.55 'Lato', system-ui, sans-serif !important;
-  }
-  .director-note-tag-palette {
-    display: flex; flex-direction: column; gap: 0.45em;
-    margin-top: 0.55em;
-  }
-  .tag-group {
-    display: flex; align-items: baseline; gap: 0.55em; flex-wrap: wrap;
-  }
-  .tag-group-label {
-    color: var(--zinc-500); font-size: 0.7em;
-    text-transform: uppercase; letter-spacing: 0.05em;
-    min-width: 8.5em;
-  }
-  .tag-group-chips {
-    display: flex; flex-wrap: wrap; gap: 0.3em;
-  }
-  .tag-chip {
-    background: var(--zinc-900);
-    border: 1px solid var(--zinc-800);
-    color: var(--zinc-300);
-    padding: 0.18em 0.55em;
-    border-radius: 12px;
-    cursor: pointer;
-    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-    font-size: 0.78em;
-    transition: all 100ms;
-  }
-  .tag-chip:hover {
-    background: rgba(245, 158, 11, 0.12);
-    border-color: rgba(245, 158, 11, 0.4);
-    color: var(--amber-300);
-    transform: translateY(-1px);
-  }
-  .tag-chip:active {
-    transform: translateY(0);
-  }
-  .director-note-speakas-hint {
-    color: var(--zinc-500);
-    font-size: 0.74em; line-height: 1.45;
-    margin: 0.55em 0 0;
-    font-style: italic;
-  }
-  .director-note-actions {
-    grid-column: 1 / -1;
-    display: flex; gap: 0.6em; flex-wrap: wrap;
-    justify-content: flex-end; align-items: center;
-    padding-top: 0.4em;
-    border-top: 1px dashed var(--zinc-800);
+
+  /* Action bar — Info on left, quiet utilities, primary CTA on right */
+  .dn-actions {
+    display: flex; gap: 0.6rem; flex-wrap: wrap;
+    align-items: center;
+    padding-top: 0.55rem;
+    border-top: 1px solid var(--zinc-800);
   }
   .director-note-info {
-    color: var(--zinc-500); font-size: 0.78em;
-    font-family: ui-monospace, monospace;
     margin-right: auto;
+    font: 0.78em/1.4 'Lato', sans-serif;
+    color: var(--zinc-500);
   }
-  .try-overrides-btn {
-    background: rgba(245, 158, 11, 0.12);
-    border: 1.5px solid rgba(245, 158, 11, 0.5);
-    color: var(--amber-400);
-    padding: 0.5em 1.15em;
-    border-radius: 8px; cursor: pointer;
-    font-family: 'Lato', sans-serif;
-    font-size: 0.9em; font-weight: 600;
-    transition: all 120ms, transform 80ms;
-    display: inline-flex; align-items: center; gap: 0.4em;
-    line-height: 1;
-  }
-  .try-overrides-btn::before { content: "↻"; font-size: 1.1em; line-height: 1; }
-  .try-overrides-btn:hover:not(:disabled) {
-    background: rgba(245, 158, 11, 0.18);
-    border-color: rgba(245, 158, 11, 0.7);
-    filter: brightness(1.1);
-  }
-  .try-overrides-btn:active:not(:disabled) { transform: scale(0.97); }
-  .try-overrides-btn:disabled {
-    opacity: 0.5; cursor: not-allowed;
-    border-style: dashed;
-  }
-  .try-overrides-btn.rebaking::before {
-    animation: rebake-spin 1s linear infinite;
-    display: inline-block;
-  }
-  .reset-overrides-btn {
-    background: transparent;
-    border: 1px solid var(--zinc-700);
-    color: var(--zinc-400);
-    padding: 0.5em 0.9em;
-    border-radius: 8px; cursor: pointer;
-    font-family: 'Lato', sans-serif;
-    font-size: 0.85em;
-    transition: all 120ms;
-  }
-  .reset-overrides-btn:hover {
-    color: var(--zinc-200);
-    border-color: var(--zinc-600);
-  }
-  /* Apply-to buttons — same shape as reset, slightly tinted teal so they
-     read as "broadcast this configuration to other lines" actions. */
+  /* Quiet buttons — apply-to and clear share one shape, zinc only. */
+  .reset-overrides-btn,
   .apply-to-flagged-btn,
   .apply-to-role-btn {
     background: transparent;
-    border: 1px solid rgba(45, 212, 191, 0.3);
-    color: #5eead4;
-    padding: 0.5em 0.9em;
-    border-radius: 8px; cursor: pointer;
-    font-family: 'Lato', sans-serif;
-    font-size: 0.85em;
-    transition: all 120ms;
+    border: 1px solid var(--zinc-800);
+    color: var(--zinc-400);
+    padding: 0.5em 0.85em;
+    border-radius: 6px; cursor: pointer;
+    font: 0.82em/1 'Lato', sans-serif;
+    transition: color 120ms ease, border-color 120ms ease;
   }
+  .reset-overrides-btn:hover,
   .apply-to-flagged-btn:hover,
   .apply-to-role-btn:hover {
-    background: rgba(45, 212, 191, 0.1);
-    border-color: rgba(45, 212, 191, 0.6);
+    color: var(--zinc-100);
+    border-color: var(--zinc-700);
+  }
+  /* Primary CTA — solid amber-600, the only filled button on the panel.
+     Matches src/app/page.tsx's "Upload .mram File" treatment.           */
+  .try-overrides-btn {
+    background: var(--amber-600);
+    border: 1px solid var(--amber-600);
+    color: #fff;
+    padding: 0.55em 1.15em;
+    border-radius: 7px; cursor: pointer;
+    font: 600 0.88em/1 'Lato', sans-serif;
+    transition: background 120ms ease, transform 80ms ease;
+    display: inline-flex; align-items: center; gap: 0.4em;
+  }
+  .try-overrides-btn:hover:not(:disabled) { background: var(--amber-500); border-color: var(--amber-500); }
+  .try-overrides-btn:active:not(:disabled) { transform: scale(0.97); }
+  .try-overrides-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .try-overrides-btn.rebaking { background: var(--amber-500); }
+  .try-overrides-btn.rebaking::before {
+    content: "↻"; display: inline-block; font-size: 1em;
+    animation: rebake-spin 1s linear infinite;
+  }
+
+  /* Honor reduced-motion — disable all transitions/animations on the
+     Director's note when the user prefers less motion.                  */
+  @media (prefers-reduced-motion: reduce) {
+    .director-note,
+    .director-note *,
+    .director-note *::before,
+    .director-note *::after {
+      transition: none !important;
+      animation: none !important;
+    }
   }
   /* Bulk-rebake button in the status filter row — shape matches the
-     bulk-approve button it sits next to but tinted teal/blue so it
-     reads as a regenerate action vs. a status flip. */
+     bulk-approve button it sits next to. Uses amber-quiet (matches
+     the per-line .rebake-btn hover) so the regenerate action reads
+     as the same family across the page. */
   .filter-shortcut.bulk-rebake {
-    border-color: rgba(45, 212, 191, 0.4);
-    color: #5eead4;
+    border-color: rgba(245, 158, 11, 0.35);
+    color: var(--amber-400);
   }
   .filter-shortcut.bulk-rebake:hover:not(:disabled) {
-    background: rgba(45, 212, 191, 0.12);
-    border-color: rgba(45, 212, 191, 0.6);
-    color: #5eead4;
+    background: rgba(245, 158, 11, 0.08);
+    border-color: rgba(245, 158, 11, 0.55);
+    color: var(--amber-300);
   }
   .filter-shortcut.bulk-rebake::before {
     content: "↻ "; display: inline-block;
@@ -2393,7 +2490,7 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     padding: 0;
   }
   .note-area textarea::placeholder {
-    color: var(--zinc-600); font-style: italic;
+    color: var(--zinc-500); font-style: italic;
   }
   .note-saved-indicator {
     font-size: 0.72em; color: var(--zinc-500);
@@ -3313,15 +3410,48 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         const overrides = profileSettingsToOverrides(p);
         writeDirectorNote(state.activeSlug, lineId, overrides);
         if (det) {
+          // Sync each cell to the loaded profile. Two flavors:
+          //   - Combobox cell (Style/Pace/Accent/Model): select has a
+          //     "(custom prose…)" option that pairs with .dn-cell-custom.
+          //     Custom prose values open the cell + fill the prose input.
+          //   - Plain select (Voice): no __custom__ option, no custom
+          //     input. Just set the value if it matches an option;
+          //     otherwise leave the select blank and warn — silently
+          //     forcing __custom__ here would desync UI from storage.
           det.querySelectorAll('select[data-field]').forEach(s => {
             const field = s.dataset.field;
-            s.value = (overrides && overrides[field]) || "";
+            const value = (overrides && overrides[field]) || "";
+            const cell = s.closest('.dn-cell');
+            const customInput = cell ? cell.querySelector('input.dn-cell-custom[data-field="' + field + '"]') : null;
+            const hasCustomOption = Array.from(s.options).some(o => o.value === '__custom__');
+            const presetOpt = Array.from(s.options).find(o => o.value === value && o.value !== '__custom__');
+            if (value && !presetOpt && hasCustomOption) {
+              // Combobox cell with a non-preset value — open custom mode.
+              s.value = '__custom__';
+              if (cell) cell.classList.add('dn-cell--custom-open');
+              if (customInput) customInput.value = value;
+            } else if (value && !presetOpt && !hasCustomOption) {
+              // Plain select (Voice) with an orphan value — value isn't
+              // in the catalog. Don't force __custom__; clear the storage
+              // entry instead so UI and storage stay aligned, and surface
+              // a one-shot warning so the user knows the profile drifted.
+              s.value = "";
+              const stored = readDirectorNote(state.activeSlug, lineId);
+              delete stored[field];
+              writeDirectorNote(state.activeSlug, lineId, stored);
+              const info = document.querySelector('.director-note-info[data-line-id="' + lineId + '"]');
+              if (info) {
+                info.textContent = 'profile contained an unknown ' + field.replace('Override', '') + ' value (' + value + ') — dropped';
+                setTimeout(() => { if (info && info.textContent.startsWith('profile contained')) info.textContent = ''; }, 4000);
+              }
+            } else {
+              // Preset value or blank — straight assignment.
+              s.value = value;
+              if (cell) cell.classList.remove('dn-cell--custom-open');
+              if (customInput) customInput.value = "";
+            }
           });
-          const tag = det.querySelector('.summary-tag');
-          if (tag) {
-            const desc = describeOverrides(readDirectorNote(state.activeSlug, lineId));
-            tag.textContent = desc || 'experiment with voice + style';
-          }
+          updateSummaryTag(lineId);
         }
         const info = document.querySelector('.director-note-info[data-line-id="' + lineId + '"]');
         if (info) {
@@ -3412,25 +3542,41 @@ export function handleIndexRequest(res: http.ServerResponse): void {
       });
     });
 
-    // === STT-01 Tier 1+3: Director's note dropdowns + free-text inputs ===
-    // Dropdown change: write the preset value, AND clear the corresponding
-    // prose textbox (typed custom text is mutually exclusive with a preset).
+    // === Director's note dropdowns + combobox-with-custom inputs ===
+    // Each parameter cell has one select. Style/Pace/Accent/Model selects
+    // include a final "__custom__" option that reveals a free-text input
+    // below; voice + temperature have no custom mode.
+    //   - Picking a preset: save it, hide + clear the custom input.
+    //   - Picking "__custom__": don't save yet — wait for user to type;
+    //     reveal the input + focus it. If a custom prose value is already
+    //     stored, keep it and pre-fill the input.
+    //   - Typing in the custom input: save the prose, ensure the select
+    //     stays at "__custom__" so the cell stays open.
     document.querySelectorAll(".director-note select[data-field]").forEach(sel => {
       sel.addEventListener("change", () => {
         const lineId = sel.dataset.lineId;
         const field = sel.dataset.field;
+        const cell = sel.closest('.dn-cell');
+        const customInput = cell ? cell.querySelector('input.dn-cell-custom[data-field="' + field + '"]') : null;
         const stored = readDirectorNote(state.activeSlug, lineId);
-        stored[field] = sel.value || undefined;
-        writeDirectorNote(state.activeSlug, lineId, stored);
-        // Clear the matching prose textbox so the preset wins
-        const proseInput = document.querySelector('.director-note input.director-note-prose[data-field="' + field + '"][data-line-id="' + lineId + '"]');
-        if (proseInput) proseInput.value = "";
+        if (sel.value === "__custom__") {
+          if (cell) cell.classList.add('dn-cell--custom-open');
+          if (customInput) {
+            // If the stored value is already a custom-prose override,
+            // keep it; otherwise start blank and let the user type.
+            const existing = stored[field] || "";
+            customInput.value = existing;
+            customInput.focus();
+          }
+        } else {
+          if (cell) cell.classList.remove('dn-cell--custom-open');
+          if (customInput) customInput.value = "";
+          stored[field] = sel.value || undefined;
+          writeDirectorNote(state.activeSlug, lineId, stored);
+        }
         updateSummaryTag(lineId);
       });
     });
-    // Free-text input change: prose overrides preset. When user types
-    // anything, drop the dropdown's selection so the prose value is what
-    // gets persisted + sent.
     document.querySelectorAll(".director-note .director-note-prose[data-field]").forEach(input => {
       input.addEventListener("input", () => {
         const lineId = input.dataset.lineId;
@@ -3439,12 +3585,12 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         const stored = readDirectorNote(state.activeSlug, lineId);
         stored[field] = value || undefined;
         writeDirectorNote(state.activeSlug, lineId, stored);
-        // If user typed text, deselect the matching dropdown (only for
-        // fields that have a paired dropdown — profile + speakAs are
-        // textarea-only with no preset list).
-        if (value && field !== "profileOverride" && field !== "speakAsOverride") {
+        // For combobox cells: keep select at "__custom__" while the user
+        // is typing — that's the visible state. profileOverride and
+        // speakAsOverride are textarea-only and have no paired select.
+        if (input.classList.contains('dn-cell-custom')) {
           const sel = document.querySelector('.director-note select[data-field="' + field + '"][data-line-id="' + lineId + '"]');
-          if (sel) sel.value = "";
+          if (sel && sel.value !== '__custom__') sel.value = '__custom__';
         }
         updateSummaryTag(lineId);
       });
@@ -3455,7 +3601,15 @@ export function handleIndexRequest(res: http.ServerResponse): void {
       const tag = det.querySelector('.summary-tag');
       if (!tag) return;
       const desc = describeOverrides(readDirectorNote(state.activeSlug, lineId));
-      tag.textContent = desc || 'experiment with voice + style';
+      // Toggle has-overrides so CSS can switch from italic-zinc placeholder
+      // to amber pinned-overrides label.
+      if (desc) {
+        tag.textContent = desc;
+        tag.classList.add('has-overrides');
+      } else {
+        tag.textContent = 'no overrides';
+        tag.classList.remove('has-overrides');
+      }
     }
 
     // Temperature slider — live updates the displayed value AND persists.
@@ -3676,11 +3830,7 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         const stored = readDirectorNote(state.activeSlug, lineId);
         delete stored.speakAsOverride;
         writeDirectorNote(state.activeSlug, lineId, stored);
-        const det = document.querySelector('.director-note[data-line-id="' + lineId + '"]');
-        if (det) {
-          const tag = det.querySelector('.summary-tag');
-          if (tag) tag.textContent = describeOverrides(stored) || 'experiment with voice + style';
-        }
+        updateSummaryTag(lineId);
       });
     });
     document.querySelectorAll(".reset-overrides-btn[data-line-id]").forEach(btn => {
@@ -3692,12 +3842,13 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         if (det) {
           det.querySelectorAll('select[data-field]').forEach(s => { s.value = ""; });
           det.querySelectorAll('.director-note-prose[data-field]').forEach(inp => { inp.value = ""; });
+          // Close any cells currently in custom-prose mode
+          det.querySelectorAll('.dn-cell--custom-open').forEach(c => c.classList.remove('dn-cell--custom-open'));
           const slider = det.querySelector('.director-note-temp-slider');
           if (slider) slider.value = "1";
           const tempDisplay = det.querySelector('.director-note-temp-display');
           if (tempDisplay) tempDisplay.textContent = "(API default)";
-          const tag = det.querySelector('.summary-tag');
-          if (tag) tag.textContent = 'experiment with voice + style';
+          updateSummaryTag(lineId);
         }
         const info = document.querySelector('.director-note-info[data-line-id="' + lineId + '"]');
         if (info) info.textContent = 'cleared — using role defaults';
@@ -4212,7 +4363,9 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         return '<option value="">(no profile)</option>' + opts;
       };
       // Build the inline-tag palette HTML — grouped buttons that insert
-      // their tag at the speakAs textarea cursor.
+      // their tag at the speakAs textarea cursor. The whole tray hides
+      // behind a "+ Insert tag" disclosure so the textarea stays the
+      // visual focus of the panel.
       const buildTagPalette = () => {
         return RITUAL_TAG_PALETTE.map(g => {
           const btns = g.tags.map(t =>
@@ -4224,71 +4377,104 @@ export function handleIndexRequest(res: http.ServerResponse): void {
             '</div>';
         }).join('');
       };
+      // Combobox-with-custom: each parameter cell renders a single select
+      // whose options end with "(custom prose…)". Picking that reveals a
+      // matching free-text input below; picking any preset hides it.
+      // Render-time, if the saved override isn't one of the presets, we
+      // open the cell in custom mode and pre-fill the input.
+      const buildComboCell = (field, labelText, options, current) => {
+        const raw = current || "";
+        const isPreset = options.some(o => o.value === raw);
+        const customOpen = !!raw && !isPreset;
+        const presetSel = isPreset ? raw : (customOpen ? "__custom__" : "");
+        const opts = options.map(o => {
+          const sel = o.value === presetSel ? ' selected' : '';
+          return '<option value="' + escapeHtml(o.value) + '"' + sel + '>' + escapeHtml(o.label) + '</option>';
+        }).join('') +
+          '<option value="__custom__"' + (customOpen ? ' selected' : '') + '>(custom prose…)</option>';
+        const cellCls = 'dn-cell' + (customOpen ? ' dn-cell--custom-open' : '');
+        const inputVal = customOpen ? escapeHtml(raw) : "";
+        const inputId = 'dn-' + field + '-' + l.id;
+        const labelId = inputId + '-label';
+        return '<div class="' + cellCls + '" data-cell-field="' + field + '" data-line-id="' + l.id + '">' +
+          '<label class="dn-eyebrow" for="' + inputId + '" id="' + labelId + '">' + escapeHtml(labelText) + '</label>' +
+          '<select id="' + inputId + '" data-field="' + field + '" data-line-id="' + l.id + '">' + opts + '</select>' +
+          '<input type="text" class="director-note-prose dn-cell-custom" data-field="' + field + '" data-line-id="' + l.id + '" maxlength="500" placeholder="Custom prose…" aria-labelledby="' + labelId + '" value="' + inputVal + '">' +
+        '</div>';
+      };
       // Default value for the speakAs editor — the user's saved override
       // wins, otherwise show the line's plain text as the editing baseline
       // (so they can edit + insert tags into the existing transcript).
       const speakAsValue = stored.speakAsOverride || l.plain || "";
+      // summary-tag visual treatment depends on whether overrides are
+      // pinned (amber) vs. blank (zinc italic placeholder).
+      const summaryTagCls = summaryTag.length > 0 ? 'summary-tag has-overrides' : 'summary-tag';
+      const summaryTagText = summaryTag.length > 0 ? summaryTag : 'no overrides';
+      const speakAsTextareaId = 'dn-speakas-' + l.id;
       directorNote = '<details class="director-note" data-line-id="' + l.id + '"' + isOpen + '>' +
-        '<summary>Director’s note <span class="summary-tag">' + escapeHtml(summaryTag || 'experiment with voice + style') + '</span></summary>' +
-        '<div class="director-note-profile-row">' +
-        '<label class="director-note-profile-label">Profile:</label>' +
-        '<select class="director-note-profile-select" data-line-id="' + l.id + '">' + buildProfileOpts() + '</select>' +
-        '<button type="button" class="save-profile-btn" data-line-id="' + l.id + '" title="Save the current voice/style/pace/accent settings as a named profile (global, available across rituals)">Save as profile…</button>' +
-        '<button type="button" class="delete-profile-btn" data-line-id="' + l.id + '" title="Delete the currently selected profile" disabled>Delete profile</button>' +
-        '</div>' +
-        '<div class="director-note-speakas">' +
-        '<div class="director-note-speakas-header">' +
-        '<label>Spoken text (with inline tags)</label>' +
-        '<button type="button" class="speakas-reset-btn" data-line-id="' + l.id + '" title="Reset to the original line text — clears any tags you added">Reset to original</button>' +
-        '</div>' +
-        '<textarea class="director-note-prose director-note-speakas-textarea" data-field="speakAsOverride" data-line-id="' + l.id + '" maxlength="4000" placeholder="The line as the model will read it. Click a tag below to insert it at the cursor. Empty = use the line text unchanged.">' + escapeHtml(speakAsValue) + '</textarea>' +
-        '<div class="director-note-tag-palette">' + buildTagPalette() + '</div>' +
-        '<p class="director-note-speakas-hint">Tags work best when used sparingly — don’t spray them on every line. Tags must be in English even if the spoken text is not. Some tags may be read aloud instead of interpreted; test before committing.</p>' +
-        '</div>' +
-        '<div class="director-note-body">' +
-        '<div class="director-note-field">' +
-        '<label>Voice</label>' +
-        '<select data-field="voiceOverride" data-line-id="' + l.id + '">' + buildVoiceOpts() + '</select>' +
-        '</div>' +
-        '<div class="director-note-field">' +
-        '<label>Style</label>' +
-        '<select data-field="styleOverride" data-line-id="' + l.id + '">' + buildOpts(STYLE_OPTIONS, isPresetValue(STYLE_OPTIONS, stored.styleOverride)) + '</select>' +
-        '<input type="text" class="director-note-prose" data-field="styleOverride" data-line-id="' + l.id + '" maxlength="500" placeholder="or custom prose…" value="' + escapeHtml(isPresetValue(STYLE_OPTIONS, stored.styleOverride) ? "" : (stored.styleOverride || "")) + '">' +
-        '</div>' +
-        '<div class="director-note-field">' +
-        '<label>Pace</label>' +
-        '<select data-field="paceOverride" data-line-id="' + l.id + '">' + buildOpts(PACE_OPTIONS, isPresetValue(PACE_OPTIONS, stored.paceOverride)) + '</select>' +
-        '<input type="text" class="director-note-prose" data-field="paceOverride" data-line-id="' + l.id + '" maxlength="500" placeholder="or custom prose…" value="' + escapeHtml(isPresetValue(PACE_OPTIONS, stored.paceOverride) ? "" : (stored.paceOverride || "")) + '">' +
-        '</div>' +
-        '<div class="director-note-field">' +
-        '<label>Accent</label>' +
-        '<select data-field="accentOverride" data-line-id="' + l.id + '">' + buildOpts(ACCENT_OPTIONS, isPresetValue(ACCENT_OPTIONS, stored.accentOverride)) + '</select>' +
-        '<input type="text" class="director-note-prose" data-field="accentOverride" data-line-id="' + l.id + '" maxlength="500" placeholder="or custom prose…" value="' + escapeHtml(isPresetValue(ACCENT_OPTIONS, stored.accentOverride) ? "" : (stored.accentOverride || "")) + '">' +
-        '</div>' +
-        '<div class="director-note-field director-note-profile-field">' +
-        '<label>Profile (override)</label>' +
-        '<textarea class="director-note-prose director-note-profile" data-field="profileOverride" data-line-id="' + l.id + '" maxlength="1000" placeholder="Override the role profile prose for this rebake. Empty = use the role-card profile from voice-cast.json. Free-text goes into the Director’s Note preamble verbatim. Example: “An elderly Mason in his 70s, voice slightly hoarse from decades of declamation”">' + escapeHtml(stored.profileOverride || "") + '</textarea>' +
-        '</div>' +
-        '<div class="director-note-field">' +
-        '<label>Temperature <span class="director-note-temp-display" data-line-id="' + l.id + '">' + (typeof stored.temperature === "number" ? stored.temperature.toFixed(2) : "(API default)") + '</span></label>' +
-        '<input type="range" class="director-note-temp-slider" data-line-id="' + l.id + '" min="0" max="2" step="0.05" value="' + (typeof stored.temperature === "number" ? stored.temperature : 1) + '">' +
-        '<div class="director-note-temp-controls">' +
-        '<button type="button" class="director-note-temp-reset" data-line-id="' + l.id + '" title="Use Gemini API default (~1.0). Removes temperature from the request entirely.">Use API default</button>' +
-        '<span class="director-note-temp-hint">0 = deterministic · 2 = most varied</span>' +
-        '</div>' +
-        '</div>' +
-        '<div class="director-note-field">' +
-        '<label>Model</label>' +
-        '<select data-field="modelOverride" data-line-id="' + l.id + '">' + buildOpts(MODEL_OPTIONS, isPresetValue(MODEL_OPTIONS, stored.modelOverride)) + '</select>' +
-        '<input type="text" class="director-note-prose" data-field="modelOverride" data-line-id="' + l.id + '" maxlength="128" placeholder="or custom model id (e.g. gemini-4-flash-tts-preview)…" value="' + escapeHtml(isPresetValue(MODEL_OPTIONS, stored.modelOverride) ? "" : (stored.modelOverride || "")) + '">' +
-        '</div>' +
-        '<div class="director-note-actions">' +
-        '<span class="director-note-info" data-line-id="' + l.id + '"></span>' +
-        '<button type="button" class="apply-to-flagged-btn" data-line-id="' + l.id + '" data-source-role="' + escapeHtml(l.role) + '" title="Copy these settings to every line currently flagged-regen — does not rebake yet">Apply to flagged-regen</button>' +
-        '<button type="button" class="apply-to-role-btn" data-line-id="' + l.id + '" data-source-role="' + escapeHtml(l.role) + '" title="Copy these settings to every line where role = ' + escapeHtml(l.role) + ' — does not rebake yet">Apply to role ' + escapeHtml(l.role) + '</button>' +
-        '<button type="button" class="reset-overrides-btn" data-line-id="' + l.id + '">Clear overrides</button>' +
-        '<button type="button" class="try-overrides-btn" data-line-id="' + l.id + '">Try these settings</button>' +
-        '</div>' +
+        '<summary>' +
+          '<span class="dn-title">Director’s note</span>' +
+          '<span class="' + summaryTagCls + '">' + escapeHtml(summaryTagText) + '</span>' +
+        '</summary>' +
+        '<div class="dn-content">' +
+          // Profile compact row
+          '<div class="dn-profile-row">' +
+            '<span class="dn-eyebrow">Profile</span>' +
+            '<select class="director-note-profile-select" data-line-id="' + l.id + '" aria-label="Saved profile">' + buildProfileOpts() + '</select>' +
+            '<button type="button" class="save-profile-btn" data-line-id="' + l.id + '" title="Save voice/style/pace/accent as a named profile (global, available across rituals)">Save as profile…</button>' +
+            '<button type="button" class="delete-profile-btn" data-line-id="' + l.id + '" title="Delete the currently selected profile" disabled>Delete profile</button>' +
+          '</div>' +
+          // Hero — spoken text + tag-palette disclosure
+          '<div class="dn-hero">' +
+            '<div class="dn-hero-header">' +
+              '<label class="dn-eyebrow" for="' + speakAsTextareaId + '">Spoken text</label>' +
+              '<button type="button" class="speakas-reset-btn" data-line-id="' + l.id + '" title="Reset the textarea to the original line text and clear the saved override">Reset to original</button>' +
+            '</div>' +
+            '<textarea id="' + speakAsTextareaId + '" class="director-note-prose director-note-speakas-textarea" data-field="speakAsOverride" data-line-id="' + l.id + '" maxlength="4000" placeholder="The line as the model will read it. Use the tag picker below to insert pauses or delivery cues at the cursor.">' + escapeHtml(speakAsValue) + '</textarea>' +
+            '<details class="dn-tag-disclosure">' +
+              '<summary aria-label="Insert delivery tag">Insert tag</summary>' +
+              '<div class="dn-tag-tray">' + buildTagPalette() +
+                '<p class="director-note-speakas-hint">Tags work best when used sparingly — don’t spray them on every line. They must be in English even when the spoken text is not. Some tags may be read aloud rather than interpreted; test before committing.</p>' +
+              '</div>' +
+            '</details>' +
+          '</div>' +
+          // Parameter grid — one control per cell, free-text only when "custom" is picked
+          '<div class="dn-grid">' +
+            // Voice — single select, no custom prose
+            '<div class="dn-cell" data-cell-field="voiceOverride" data-line-id="' + l.id + '">' +
+              '<label class="dn-eyebrow" for="dn-voiceOverride-' + l.id + '">Voice</label>' +
+              '<select id="dn-voiceOverride-' + l.id + '" data-field="voiceOverride" data-line-id="' + l.id + '">' + buildVoiceOpts() + '</select>' +
+            '</div>' +
+            buildComboCell('styleOverride', 'Style', STYLE_OPTIONS, stored.styleOverride) +
+            buildComboCell('paceOverride', 'Pace', PACE_OPTIONS, stored.paceOverride) +
+            buildComboCell('accentOverride', 'Accent', ACCENT_OPTIONS, stored.accentOverride) +
+            buildComboCell('modelOverride', 'Model', MODEL_OPTIONS, stored.modelOverride) +
+            // Temperature — slider widget
+            '<div class="dn-cell" data-cell-field="temperature" data-line-id="' + l.id + '">' +
+              '<div class="dn-temp-head">' +
+                '<span class="dn-eyebrow">Temperature</span>' +
+                '<span class="director-note-temp-display" data-line-id="' + l.id + '">' + (typeof stored.temperature === "number" ? stored.temperature.toFixed(2) : "(API default)") + '</span>' +
+              '</div>' +
+              '<input type="range" class="director-note-temp-slider" data-line-id="' + l.id + '" min="0" max="2" step="0.05" value="' + (typeof stored.temperature === "number" ? stored.temperature : 1) + '" aria-label="Temperature">' +
+              '<div class="director-note-temp-controls">' +
+                '<button type="button" class="director-note-temp-reset" data-line-id="' + l.id + '" title="Use Gemini API default (~1.0). Removes temperature from the request entirely.">Use API default</button>' +
+                '<span class="director-note-temp-hint">0 = deterministic · 2 = most varied</span>' +
+              '</div>' +
+            '</div>' +
+            // Profile (override) — full-width textarea
+            '<div class="dn-cell dn-cell-wide" data-cell-field="profileOverride" data-line-id="' + l.id + '">' +
+              '<label class="dn-eyebrow" for="dn-profileOverride-' + l.id + '">Profile (override)</label>' +
+              '<textarea id="dn-profileOverride-' + l.id + '" class="director-note-prose" data-field="profileOverride" data-line-id="' + l.id + '" maxlength="1000" placeholder="Override the role profile prose for this rebake. Empty = use the role-card profile from voice-cast.json. Example: “An elderly Mason in his 70s, voice slightly hoarse from decades of declamation.”">' + escapeHtml(stored.profileOverride || "") + '</textarea>' +
+            '</div>' +
+          '</div>' +
+          // Action bar
+          '<div class="dn-actions">' +
+            '<span class="director-note-info" data-line-id="' + l.id + '"></span>' +
+            '<button type="button" class="apply-to-flagged-btn" data-line-id="' + l.id + '" data-source-role="' + escapeHtml(l.role) + '" title="Copy these settings to every line currently flagged-regen — does not rebake yet">Apply to flagged-regen</button>' +
+            '<button type="button" class="apply-to-role-btn" data-line-id="' + l.id + '" data-source-role="' + escapeHtml(l.role) + '" title="Copy these settings to every line where role = ' + escapeHtml(l.role) + ' — does not rebake yet">Apply to role ' + escapeHtml(l.role) + '</button>' +
+            '<button type="button" class="reset-overrides-btn" data-line-id="' + l.id + '">Clear overrides</button>' +
+            '<button type="button" class="try-overrides-btn" data-line-id="' + l.id + '">Try these settings</button>' +
+          '</div>' +
         '</div>' +
         '</details>';
     }
