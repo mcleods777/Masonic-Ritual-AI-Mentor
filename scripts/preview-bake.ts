@@ -27,6 +27,20 @@
  *
  * Related: src/lib/dev-guard.ts (D-15 single source of truth),
  * src/lib/mram-format.ts (decryptMRAM — the .mram → MRAMDocument boundary).
+ *
+ * Editing notes:
+ *   - The entire HTML response (handleIndexRequest, ~lines 1374–4358) is
+ *     ONE backtick template literal. Do NOT put a literal backtick (`)
+ *     anywhere inside it — including CSS or JS comments — or you will
+ *     terminate the template mid-string and produce confusing TS errors
+ *     hundreds of lines away. Use straight quotes ("...") in comments.
+ *   - tsx does NOT hot-reload. After editing this file, kill the running
+ *     server (`fuser -k <PORT>/tcp` is reliable; the recorded PID is the
+ *     parent shell, not the bound child) and restart `npm run preview-bake`.
+ *   - The bake-tool UI is intentionally vanilla HTML/CSS in a single file
+ *     with no React, Tailwind, shadcn, or build step. See the bake-tool
+ *     carve-outs in .claude/skills/masonic-style/SKILL.md for the
+ *     project-style rationale.
  */
 
 import http from "node:http";
