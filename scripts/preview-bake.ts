@@ -1074,13 +1074,15 @@ async function handleRebakeLine(
   }
   const apiKeys = apiKeysRaw.split(",").map((s) => s.trim()).filter(Boolean);
 
-  // Parse small JSON body — { forcePreamble?: boolean }
+  // Parse JSON body — director-note overrides plus optional speakAsOverride
+  // (free-text spoken transcript with inline Gemini tags). Cap at 8KB so
+  // speakAs (up to 4000 chars) + profile (1000) + others + JSON overhead fit.
   const chunks: Buffer[] = [];
   let total = 0;
   for await (const c of req) {
     const buf = c as Buffer;
     total += buf.length;
-    if (total > 1024) {
+    if (total > 8192) {
       res.writeHead(413);
       res.end("Body too large");
       return;
@@ -1094,6 +1096,7 @@ async function handleRebakeLine(
     paceOverride?: string;
     accentOverride?: string;
     profileOverride?: string;
+    speakAsOverride?: string;
     temperature?: number;
     modelOverride?: string;
   } = {};
@@ -1123,6 +1126,11 @@ async function handleRebakeLine(
   const paceOverride = isSafeProse(body.paceOverride, 500) ? body.paceOverride : undefined;
   const accentOverride = isSafeProse(body.accentOverride, 500) ? body.accentOverride : undefined;
   const profileOverride = isSafeProse(body.profileOverride, 1000) ? body.profileOverride : undefined;
+  // speakAsOverride: free-text spoken transcript with inline Gemini tags
+  // ([whispered], [pause], etc.). Replaces the line's plain text in the
+  // prompt for this rebake. Cap at 4000 chars — Gemini's total prompt
+  // (preamble + text) limit is ~8KB, and the preamble can run several KB.
+  const speakAsOverride = isSafeProse(body.speakAsOverride, 4000) ? body.speakAsOverride : undefined;
   // Temperature: numeric, range 0.0-2.0, undefined = use Gemini default
   const temperatureRaw = body.temperature;
   const temperature = (typeof temperatureRaw === "number" && Number.isFinite(temperatureRaw) && temperatureRaw >= 0 && temperatureRaw <= 2)
@@ -1187,20 +1195,26 @@ async function handleRebakeLine(
     // of directives.
     const stylesByHash = loadStylesSidecar(slug, session);
     const sidecar = stylesByHash.get(hashLineText(line.plain));
-    const speakAs = sidecar?.speakAs;
+    // Two distinct flavors of speakAs:
+    //   sidecarSpeakAs = committed instructional prompt — replaces text AND
+    //     suppresses the voice-cast preamble (the prompt is self-contained).
+    //   speakAsOverride = ephemeral GUI edit (e.g. inline Gemini tags like
+    //     [whispered], [pause]) — replaces text but PRESERVES the preamble,
+    //     since tags are meant to compose with role/scene context.
+    const sidecarSpeakAs = sidecar?.speakAs;
     const baseStyle = line.style ?? sidecar?.style;
     const style = baseStyle; // pass only the base style; overrides → preamble
-    const text = speakAs ?? line.plain;
+    const text = speakAsOverride ?? sidecarSpeakAs ?? line.plain;
 
     const VOICE_CAST_MIN_LINE_CHARS = parseInt(
       process.env.VOICE_CAST_MIN_LINE_CHARS ?? "40",
       10,
     );
 
-    const hasAnyOverride = !!(styleOverride || paceOverride || accentOverride || profileOverride);
+    const hasAnyOverride = !!(styleOverride || paceOverride || accentOverride || profileOverride || speakAsOverride);
 
     let preamble = "";
-    if (!speakAs) {
+    if (!sidecarSpeakAs) {
       const overThreshold = line.plain.length >= VOICE_CAST_MIN_LINE_CHARS;
       // Always inject preamble when style/pace/accent overrides are set —
       // they have nowhere else to go.
@@ -2192,6 +2206,84 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     font-family: ui-monospace, monospace;
     font-size: 0.74em;
   }
+  /* Spoken-text editor — full-width panel above the parameter knobs.
+     Inline Gemini tags ([whispered], [pause], …) are inserted at cursor
+     via the tag-palette buttons below the textarea. */
+  .director-note-speakas {
+    margin: 0.6em 0 0.8em;
+    padding: 0.7em 0.8em;
+    background: rgba(245, 158, 11, 0.04);
+    border: 1px solid rgba(245, 158, 11, 0.18);
+    border-radius: 7px;
+  }
+  .director-note-speakas-header {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 0.6em; margin-bottom: 0.4em;
+  }
+  .director-note-speakas-header label {
+    color: var(--amber-400);
+    font: 600 0.78em/1 'Lato', sans-serif;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .speakas-reset-btn {
+    background: transparent;
+    border: 1px solid var(--zinc-800);
+    color: var(--zinc-400);
+    padding: 0.25em 0.6em;
+    border-radius: 5px; cursor: pointer;
+    font-family: 'Lato', sans-serif; font-size: 0.75em;
+    transition: all 120ms;
+  }
+  .speakas-reset-btn:hover {
+    background: rgba(245, 158, 11, 0.08);
+    border-color: rgba(245, 158, 11, 0.3);
+    color: var(--amber-400);
+  }
+  .director-note-speakas-textarea {
+    min-height: 4.2em !important; max-height: 14em !important;
+    font: 14px/1.55 'Lato', system-ui, sans-serif !important;
+  }
+  .director-note-tag-palette {
+    display: flex; flex-direction: column; gap: 0.45em;
+    margin-top: 0.55em;
+  }
+  .tag-group {
+    display: flex; align-items: baseline; gap: 0.55em; flex-wrap: wrap;
+  }
+  .tag-group-label {
+    color: var(--zinc-500); font-size: 0.7em;
+    text-transform: uppercase; letter-spacing: 0.05em;
+    min-width: 8.5em;
+  }
+  .tag-group-chips {
+    display: flex; flex-wrap: wrap; gap: 0.3em;
+  }
+  .tag-chip {
+    background: var(--zinc-900);
+    border: 1px solid var(--zinc-800);
+    color: var(--zinc-300);
+    padding: 0.18em 0.55em;
+    border-radius: 12px;
+    cursor: pointer;
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 0.78em;
+    transition: all 100ms;
+  }
+  .tag-chip:hover {
+    background: rgba(245, 158, 11, 0.12);
+    border-color: rgba(245, 158, 11, 0.4);
+    color: var(--amber-300);
+    transform: translateY(-1px);
+  }
+  .tag-chip:active {
+    transform: translateY(0);
+  }
+  .director-note-speakas-hint {
+    color: var(--zinc-500);
+    font-size: 0.74em; line-height: 1.45;
+    margin: 0.55em 0 0;
+    font-style: italic;
+  }
   .director-note-actions {
     grid-column: 1 / -1;
     display: flex; gap: 0.6em; flex-wrap: wrap;
@@ -2412,6 +2504,24 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     { value: "Irish", label: "Irish" },
     { value: "Australian", label: "Australian" },
     { value: "Mid-Atlantic", label: "Mid-Atlantic" },
+  ];
+  // Inline-tag palette for the spoken-text editor. Tags are inserted
+  // verbatim at the cursor — Gemini 3.1 Flash TTS interprets bracketed
+  // English directives like [whispered], [pause], [solemnly] inside the
+  // transcript. ALM Corp guidance: use deliberately, not on every line —
+  // over-tagging destabilizes delivery. Replicate guidance: any descriptive
+  // English tag works; test new tags before relying on them.
+  const RITUAL_TAG_PALETTE = [
+    { group: "Pauses", tags: ["[pause]", "[short pause]", "[long pause]", "[breath]", "[deep breath]"] },
+    { group: "Solemn / ritual gravity", tags: ["[solemnly]", "[reverently]", "[gravely]", "[with gravitas]", "[slowly]"] },
+    { group: "Volume", tags: ["[whispered]", "[softly]", "[quietly]", "[firmly]", "[boldly]"] },
+    { group: "Warmth", tags: ["[warmly]", "[kindly]", "[fraternally]"] },
+    { group: "Stern / charge", tags: ["[sternly]", "[exhorting]", "[admonishing]", "[authoritatively]"] },
+    { group: "Catechism", tags: ["[questioningly]", "[matter-of-factly]", "[answering plainly]"] },
+    { group: "Reflection", tags: ["[reflectively]", "[thoughtfully]", "[meditatively]"] },
+    { group: "Reluctance / oath", tags: ["[reluctantly]", "[hesitantly]", "[resolutely]"] },
+    { group: "Special delivery", tags: ["[chanted]", "[intoned]", "[as if reciting from memory]", "[announcing]", "[proclaiming]"] },
+    { group: "Mechanical", tags: ["[clears throat]", "[sighs]"] },
   ];
   // Gemini TTS model picker — pin a single model for this rebake.
   // "(default chain)" lets the env-var chain pick (skipping degraded models).
@@ -3329,9 +3439,10 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         const stored = readDirectorNote(state.activeSlug, lineId);
         stored[field] = value || undefined;
         writeDirectorNote(state.activeSlug, lineId, stored);
-        // If user typed text, deselect the matching dropdown (only for the
-        // 3 fields that have a paired dropdown — profile is textarea-only).
-        if (value && field !== "profileOverride") {
+        // If user typed text, deselect the matching dropdown (only for
+        // fields that have a paired dropdown — profile + speakAs are
+        // textarea-only with no preset list).
+        if (value && field !== "profileOverride" && field !== "speakAsOverride") {
           const sel = document.querySelector('.director-note select[data-field="' + field + '"][data-line-id="' + lineId + '"]');
           if (sel) sel.value = "";
         }
@@ -3385,22 +3496,32 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         alert("No target lines for scope: " + scopeLabel);
         return;
       }
-      const sourceSettings = readDirectorNote(state.activeSlug, sourceLineId);
+      const rawSourceSettings = readDirectorNote(state.activeSlug, sourceLineId);
+      // speakAsOverride is line-specific text — never copy it to siblings
+      // (different lines have different transcripts). Style/voice/pace/etc.
+      // are the cross-line settings.
+      const { speakAsOverride: droppedSpeakAs, ...sourceSettings } = rawSourceSettings;
       if (Object.keys(sourceSettings).length === 0) {
-        alert("Source line has no director-note overrides set. Pick a voice/style/pace/accent first, then apply.");
+        alert("Source line has no shareable director-note overrides set. Pick a voice/style/pace/accent first, then apply. (Tagged spoken text is per-line and isn’t copied.)");
         return;
       }
       const settingsDesc = describeOverrides(sourceSettings);
+      const droppedNotice = droppedSpeakAs ? "\\n\\nNote: tagged spoken text stays on the source line only." : "";
       const ok = window.confirm(
         "Apply these settings to " + targetLineIds.length + " " + scopeLabel + " line(s)?\\n\\n" +
-        "Settings: " + settingsDesc + "\\n\\n" +
+        "Settings: " + settingsDesc + droppedNotice + "\\n\\n" +
         "This only copies the settings. Use 'Rebake all flagged-regen' afterward to render them."
       );
       if (!ok) return;
       let applied = 0;
       for (const tid of targetLineIds) {
         if (String(tid) === String(sourceLineId)) continue; // don't overwrite source
-        writeDirectorNote(state.activeSlug, tid, sourceSettings);
+        // Preserve any existing speakAsOverride on the target — only the
+        // shareable settings get overwritten.
+        const existing = readDirectorNote(state.activeSlug, tid);
+        const merged = { ...sourceSettings };
+        if (existing.speakAsOverride) merged.speakAsOverride = existing.speakAsOverride;
+        writeDirectorNote(state.activeSlug, tid, merged);
         applied++;
       }
       // Re-render so each director-note panel reflects the new settings.
@@ -3512,6 +3633,56 @@ export function handleIndexRequest(res: http.ServerResponse): void {
       });
     }
 
+    // === Inline tag palette: insert at cursor in the speakAs textarea ===
+    document.querySelectorAll(".tag-chip[data-tag][data-line-id]").forEach(chip => {
+      chip.addEventListener("click", (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        const lineId = chip.dataset.lineId;
+        const tag = chip.dataset.tag || "";
+        const ta = document.querySelector('textarea.director-note-speakas-textarea[data-line-id="' + lineId + '"]');
+        if (!ta) return;
+        const start = ta.selectionStart ?? ta.value.length;
+        const end = ta.selectionEnd ?? ta.value.length;
+        const before = ta.value.slice(0, start);
+        const after = ta.value.slice(end);
+        // Surround with single spaces if neighboring chars aren't already
+        // whitespace — keeps tags from glomming onto adjacent words.
+        const needsLeadSpace = before.length > 0 && !/\s$/.test(before);
+        const needsTrailSpace = after.length > 0 && !/^\s/.test(after);
+        const insert = (needsLeadSpace ? " " : "") + tag + (needsTrailSpace ? " " : "");
+        ta.value = before + insert + after;
+        const cursor = before.length + insert.length;
+        ta.focus();
+        ta.setSelectionRange(cursor, cursor);
+        // Persist via the existing input-handler path
+        ta.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    });
+    // === Reset speakAs textarea to the original line text ===
+    // Clears stored.speakAsOverride and restores the textarea to l.plain.
+    // Other director-note overrides are untouched.
+    document.querySelectorAll(".speakas-reset-btn[data-line-id]").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const lineId = btn.dataset.lineId;
+        const ta = document.querySelector('textarea.director-note-speakas-textarea[data-line-id="' + lineId + '"]');
+        if (!ta) return;
+        const docLine = (state.activeDoc && state.activeDoc.lines)
+          ? state.activeDoc.lines.find(l => String(l.id) === String(lineId))
+          : null;
+        const original = (docLine && docLine.plain) || "";
+        ta.value = original;
+        const stored = readDirectorNote(state.activeSlug, lineId);
+        delete stored.speakAsOverride;
+        writeDirectorNote(state.activeSlug, lineId, stored);
+        const det = document.querySelector('.director-note[data-line-id="' + lineId + '"]');
+        if (det) {
+          const tag = det.querySelector('.summary-tag');
+          if (tag) tag.textContent = describeOverrides(stored) || 'experiment with voice + style';
+        }
+      });
+    });
     document.querySelectorAll(".reset-overrides-btn[data-line-id]").forEach(btn => {
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -3698,7 +3869,7 @@ export function handleIndexRequest(res: http.ServerResponse): void {
   function writeDirectorNote(slug, lineId, obj) {
     try {
       const cleaned = {};
-      for (const k of ["voiceOverride", "styleOverride", "paceOverride", "accentOverride", "profileOverride", "modelOverride"]) {
+      for (const k of ["voiceOverride", "styleOverride", "paceOverride", "accentOverride", "profileOverride", "speakAsOverride", "modelOverride"]) {
         if (obj[k]) cleaned[k] = obj[k];
       }
       // Temperature is a number, not a string — preserve 0 as a real value.
@@ -3739,6 +3910,7 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     if (stored.paceOverride) parts.push(trunc(stored.paceOverride, 30) + " pace");
     if (stored.accentOverride) parts.push(trunc(stored.accentOverride, 30));
     if (stored.profileOverride) parts.push("custom profile");
+    if (stored.speakAsOverride) parts.push("tagged text");
     if (typeof stored.temperature === "number") parts.push("temp=" + stored.temperature.toFixed(2));
     if (stored.modelOverride) parts.push(trunc(stored.modelOverride.replace(/^gemini-/, ""), 25));
     return parts.join(" · ");
@@ -4009,7 +4181,11 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     if (!isAction && l.hasAudio) {
       const stored = readDirectorNote(slug, l.id);
       const summaryTag = describeOverrides(stored);
-      const isOpen = summaryTag.length > 0 ? ' open' : '';
+      // Always collapsed by default — the panel is dense and crowds the
+      // line list when expanded automatically. The summary-tag still shows
+      // any pinned overrides so the user can see at a glance which lines
+      // have a director-note set without expanding them.
+      const isOpen = '';
       const buildVoiceOpts = () => {
         const groups = Object.entries(VOICE_CATALOG).map(([groupName, voices]) => {
           const opts = voices.map(v => {
@@ -4035,6 +4211,23 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         const opts = profileNames.map(n => '<option value="' + escapeHtml(n) + '">' + escapeHtml(n) + '</option>').join('');
         return '<option value="">(no profile)</option>' + opts;
       };
+      // Build the inline-tag palette HTML — grouped buttons that insert
+      // their tag at the speakAs textarea cursor.
+      const buildTagPalette = () => {
+        return RITUAL_TAG_PALETTE.map(g => {
+          const btns = g.tags.map(t =>
+            '<button type="button" class="tag-chip" data-line-id="' + l.id + '" data-tag="' + escapeHtml(t) + '" title="Insert ' + escapeHtml(t) + ' at cursor">' + escapeHtml(t) + '</button>'
+          ).join('');
+          return '<div class="tag-group">' +
+            '<span class="tag-group-label">' + escapeHtml(g.group) + '</span>' +
+            '<div class="tag-group-chips">' + btns + '</div>' +
+            '</div>';
+        }).join('');
+      };
+      // Default value for the speakAs editor — the user's saved override
+      // wins, otherwise show the line's plain text as the editing baseline
+      // (so they can edit + insert tags into the existing transcript).
+      const speakAsValue = stored.speakAsOverride || l.plain || "";
       directorNote = '<details class="director-note" data-line-id="' + l.id + '"' + isOpen + '>' +
         '<summary>Director’s note <span class="summary-tag">' + escapeHtml(summaryTag || 'experiment with voice + style') + '</span></summary>' +
         '<div class="director-note-profile-row">' +
@@ -4042,6 +4235,15 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         '<select class="director-note-profile-select" data-line-id="' + l.id + '">' + buildProfileOpts() + '</select>' +
         '<button type="button" class="save-profile-btn" data-line-id="' + l.id + '" title="Save the current voice/style/pace/accent settings as a named profile (global, available across rituals)">Save as profile…</button>' +
         '<button type="button" class="delete-profile-btn" data-line-id="' + l.id + '" title="Delete the currently selected profile" disabled>Delete profile</button>' +
+        '</div>' +
+        '<div class="director-note-speakas">' +
+        '<div class="director-note-speakas-header">' +
+        '<label>Spoken text (with inline tags)</label>' +
+        '<button type="button" class="speakas-reset-btn" data-line-id="' + l.id + '" title="Reset to the original line text — clears any tags you added">Reset to original</button>' +
+        '</div>' +
+        '<textarea class="director-note-prose director-note-speakas-textarea" data-field="speakAsOverride" data-line-id="' + l.id + '" maxlength="4000" placeholder="The line as the model will read it. Click a tag below to insert it at the cursor. Empty = use the line text unchanged.">' + escapeHtml(speakAsValue) + '</textarea>' +
+        '<div class="director-note-tag-palette">' + buildTagPalette() + '</div>' +
+        '<p class="director-note-speakas-hint">Tags work best when used sparingly — don’t spray them on every line. Tags must be in English even if the spoken text is not. Some tags may be read aloud instead of interpreted; test before committing.</p>' +
         '</div>' +
         '<div class="director-note-body">' +
         '<div class="director-note-field">' +

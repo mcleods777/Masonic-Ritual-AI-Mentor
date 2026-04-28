@@ -22,8 +22,11 @@
 
 <!-- ────────────────────────────────────────────────────────────────────
      BEGIN COPYABLE EMAIL BODY
+     id="email-body" is the anchor the copy-handler script uses to
+     force clipboard contents to this element only, regardless of what
+     the user actually selected. Do not remove the id.
      ──────────────────────────────────────────────────────────────────── -->
-<div style="max-width: 680px; margin: 0 auto; background: #ffffff; border: 1px solid #e0d9c8; padding: 32px 36px; color: #222;">
+<div id="email-body" style="max-width: 680px; margin: 0 auto; background: #ffffff; border: 1px solid #e0d9c8; padding: 32px 36px; color: #222;">
 
 <p>Brother,</p>
 
@@ -365,6 +368,49 @@
 
 </div>
 <!-- END COPYABLE EMAIL BODY -->
+
+<!-- ────────────────────────────────────────────────────────────────────
+     Copy-scope enforcement.
+
+     `user-select: none` on the yellow banner isn't reliable — Ctrl+A
+     still includes the banner in the selection Range in some browsers,
+     and the HTML serializer that runs during copy emits the content
+     even when it's visually excluded. Intercepting the `copy` event
+     and explicitly setting clipboard data to just #email-body is the
+     only bulletproof way to guarantee the banner never ends up in the
+     paste.
+
+     Behavior:
+       - Select-all + copy → pastes email body only (banner stripped).
+       - Select text inside the email body → pastes the selection (no
+         interference; browser's normal copy runs).
+       - Select anything that touches the banner → pastes email body
+         only (banner stripped, because we don't trust a cross-banner
+         selection to be what the user wanted).
+     ──────────────────────────────────────────────────────────────── -->
+<script>
+  document.addEventListener('copy', function (e) {
+    var email = document.getElementById('email-body');
+    if (!email || !e.clipboardData) return;
+
+    var selection = window.getSelection && window.getSelection();
+    if (!selection || selection.isCollapsed) return;
+
+    // If the entire selection is inside the email body, let the browser
+    // handle the copy normally — user is grabbing a specific quote.
+    var anchorInEmail = selection.anchorNode && email.contains(selection.anchorNode);
+    var focusInEmail = selection.focusNode && email.contains(selection.focusNode);
+    if (anchorInEmail && focusInEmail) return;
+
+    // Otherwise (select-all or banner-touching selection): force clipboard
+    // to the email body, stripped of the yellow banner.
+    var wrapper = document.createElement('div');
+    wrapper.appendChild(email.cloneNode(true));
+    e.clipboardData.setData('text/html', wrapper.innerHTML);
+    e.clipboardData.setData('text/plain', email.innerText || email.textContent || '');
+    e.preventDefault();
+  });
+</script>
 
 </body>
 </html>
