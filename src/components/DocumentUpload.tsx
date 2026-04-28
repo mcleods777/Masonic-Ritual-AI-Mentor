@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
+import { ShieldCheck } from "lucide-react";
 import { decryptMRAM, isMRAMFile, MRAMExpiredError } from "@/lib/mram-format";
 import { saveMRAMDocument } from "@/lib/storage";
 
@@ -80,20 +81,30 @@ export default function DocumentUpload({ onDocumentSaved }: DocumentUploadProps)
       setStage("idle");
       onDocumentSaved(docId, title, mramDoc.lines.length);
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Failed to decrypt file. Check your passphrase and try again."
-      );
       // An expired file won't be fixed by re-typing the passphrase — bounce the
       // user back to the upload screen so they can request a fresh file from
       // their lodge. All other errors keep them on the passphrase screen so
       // they can retry a typo.
       if (err instanceof MRAMExpiredError) {
+        setError(err.message);
         fileDataRef.current = null;
         setPassphrase("");
         setStage("idle");
       } else {
+        // The library throws "Decryption failed. The passphrase is incorrect or
+        // the file has been tampered with." for any AES-GCM auth-tag mismatch —
+        // which is overwhelmingly a wrong passphrase in practice. Surface a
+        // shorter, friendlier message for that case; pass other errors
+        // (corrupt JSON, bad header, missing fields) through verbatim.
+        const isPassphraseFailure =
+          err instanceof Error && /passphrase is incorrect/i.test(err.message);
+        setError(
+          isPassphraseFailure
+            ? "Passphrase did not decrypt this file."
+            : err instanceof Error
+              ? err.message
+              : "Failed to decrypt file. Check your passphrase and try again.",
+        );
         setStage("passphrase");
       }
       setProgress(null);
@@ -257,10 +268,16 @@ export default function DocumentUpload({ onDocumentSaved }: DocumentUploadProps)
             <p className="text-sm text-zinc-500 mt-1">
               Accepts .mram files only
             </p>
-            <p className="text-xs text-zinc-600 mt-2">
-              Your ritual file is decrypted and re-encrypted entirely on your device.
-              It never leaves your browser.
-            </p>
+            <div className="mt-3 flex items-center justify-center gap-2 text-xs text-zinc-500">
+              <ShieldCheck
+                className="size-3.5 text-amber-500 shrink-0"
+                strokeWidth={2}
+                aria-hidden="true"
+              />
+              <span>
+                Decryption happens on this device. Your passphrase is never transmitted.
+              </span>
+            </div>
           </div>
         </div>
       )}
