@@ -1672,7 +1672,7 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     align-items: center;
   }
   .line .no-audio-note {
-    color: var(--zinc-600); font-style: italic; font-size: 0.85em;
+    color: var(--zinc-500); font-style: italic; font-size: 0.85em;
   }
   /* Engine badge — small pill showing which TTS rendered each line */
   .engine-badge {
@@ -2057,6 +2057,41 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     to { transform: rotate(360deg); }
   }
 
+  /* === Global motion + a11y polish (Phase 3) ============================
+     The bake tool is a working surface — voice directors spend long
+     stretches in it. We honor reduced-motion globally (not just on the
+     director's note) and make focus-visible rings explicit on every
+     interactive control. Per masonic-style: amber-400 ring at 2px,
+     not the browser default blue.
+     =================================================================== */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  /* Keyboard focus — every interactive control gets the same amber ring
+     when it was focused via keyboard (not click). The default browser
+     ring is blue, which would violate the amber-only constraint. */
+  button:focus-visible,
+  select:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible,
+  details > summary:focus-visible,
+  a:focus-visible {
+    outline: 2px solid var(--amber-400);
+    outline-offset: 2px;
+  }
+  /* Tag chips already have a tight border; offset their ring so it
+     doesn't crowd the chip outline. */
+  .tag-chip:focus-visible {
+    outline-offset: 1px;
+  }
+
+
   /* === Director's Note (Phase 1 redesign) ============================
      The panel is a workbench, not a control panel. Hierarchy is:
        1. Spoken text (the hero)        — large textarea, elevated surface
@@ -2197,7 +2232,7 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     font: 15px/1.55 'Lato', system-ui, sans-serif;
     transition: border-color 120ms ease, background 120ms ease;
   }
-  .director-note-speakas-textarea::placeholder { color: var(--zinc-600); font-style: italic; }
+  .director-note-speakas-textarea::placeholder { color: var(--zinc-500); font-style: italic; }
   .director-note-speakas-textarea:focus {
     border-color: var(--amber-500); outline: none;
     background: #0a0a0c;
@@ -2299,7 +2334,7 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     border-color: var(--amber-500); outline: none;
   }
   .dn-cell input::placeholder, .dn-cell textarea::placeholder {
-    color: var(--zinc-600); font-style: italic;
+    color: var(--zinc-500); font-style: italic;
   }
   .dn-cell textarea { min-height: 3.2em; max-height: 10em; resize: vertical; line-height: 1.5; }
   /* Custom-prose input revealed only when select is at "__custom__" */
@@ -2437,7 +2472,7 @@ export function handleIndexRequest(res: http.ServerResponse): void {
     padding: 0;
   }
   .note-area textarea::placeholder {
-    color: var(--zinc-600); font-style: italic;
+    color: var(--zinc-500); font-style: italic;
   }
   .note-saved-indicator {
     font-size: 0.72em; color: var(--zinc-500);
