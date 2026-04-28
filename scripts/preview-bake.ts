@@ -2089,20 +2089,24 @@ export function handleIndexRequest(res: http.ServerResponse): void {
 
   /* Keyboard focus — every interactive control gets the same amber ring
      when it was focused via keyboard (not click). The default browser
-     ring is blue, which would violate the amber-only constraint. */
+     ring is blue, which would violate the amber-only constraint.
+     !important is justified: many per-element rules across the file set
+     "outline: none" on ":focus" for click-aesthetic reasons. Without
+     !important, those rules outweigh this one on specificity and the
+     keyboard ring goes invisible — defeating the whole a11y guarantee. */
   button:focus-visible,
   select:focus-visible,
   input:focus-visible,
   textarea:focus-visible,
   details > summary:focus-visible,
   a:focus-visible {
-    outline: 2px solid var(--amber-400);
-    outline-offset: 2px;
+    outline: 2px solid var(--amber-400) !important;
+    outline-offset: 2px !important;
   }
   /* Tag chips already have a tight border; offset their ring so it
      doesn't crowd the chip outline. */
   .tag-chip:focus-visible {
-    outline-offset: 1px;
+    outline-offset: 1px !important;
   }
 
 
@@ -3406,21 +3410,42 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         const overrides = profileSettingsToOverrides(p);
         writeDirectorNote(state.activeSlug, lineId, overrides);
         if (det) {
-          // Sync each combobox cell to the loaded profile. If the loaded
-          // value matches a preset option, select it directly. Otherwise
-          // open the cell in custom mode and fill the prose input.
+          // Sync each cell to the loaded profile. Two flavors:
+          //   - Combobox cell (Style/Pace/Accent/Model): select has a
+          //     "(custom prose…)" option that pairs with .dn-cell-custom.
+          //     Custom prose values open the cell + fill the prose input.
+          //   - Plain select (Voice): no __custom__ option, no custom
+          //     input. Just set the value if it matches an option;
+          //     otherwise leave the select blank and warn — silently
+          //     forcing __custom__ here would desync UI from storage.
           det.querySelectorAll('select[data-field]').forEach(s => {
             const field = s.dataset.field;
             const value = (overrides && overrides[field]) || "";
             const cell = s.closest('.dn-cell');
             const customInput = cell ? cell.querySelector('input.dn-cell-custom[data-field="' + field + '"]') : null;
+            const hasCustomOption = Array.from(s.options).some(o => o.value === '__custom__');
             const presetOpt = Array.from(s.options).find(o => o.value === value && o.value !== '__custom__');
-            if (value && !presetOpt) {
-              // Custom prose value
+            if (value && !presetOpt && hasCustomOption) {
+              // Combobox cell with a non-preset value — open custom mode.
               s.value = '__custom__';
               if (cell) cell.classList.add('dn-cell--custom-open');
               if (customInput) customInput.value = value;
+            } else if (value && !presetOpt && !hasCustomOption) {
+              // Plain select (Voice) with an orphan value — value isn't
+              // in the catalog. Don't force __custom__; clear the storage
+              // entry instead so UI and storage stay aligned, and surface
+              // a one-shot warning so the user knows the profile drifted.
+              s.value = "";
+              const stored = readDirectorNote(state.activeSlug, lineId);
+              delete stored[field];
+              writeDirectorNote(state.activeSlug, lineId, stored);
+              const info = document.querySelector('.director-note-info[data-line-id="' + lineId + '"]');
+              if (info) {
+                info.textContent = 'profile contained an unknown ' + field.replace('Override', '') + ' value (' + value + ') — dropped';
+                setTimeout(() => { if (info && info.textContent.startsWith('profile contained')) info.textContent = ''; }, 4000);
+              }
             } else {
+              // Preset value or blank — straight assignment.
               s.value = value;
               if (cell) cell.classList.remove('dn-cell--custom-open');
               if (customInput) customInput.value = "";
