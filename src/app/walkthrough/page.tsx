@@ -8,7 +8,7 @@ export default function WalkthroughPage() {
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l5.447 2.724A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
           </svg>
         </div>
-        <h1 className="text-3xl md:text-4xl font-bold text-zinc-100 tracking-tight">
+        <h1 className="text-2xl font-cinzel uppercase tracking-[0.18em] text-zinc-100">
           How It All Works
         </h1>
         <p className="text-zinc-400 mt-3 max-w-2xl mx-auto text-lg">
