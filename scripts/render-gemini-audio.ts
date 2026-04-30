@@ -15,6 +15,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import * as crypto from "node:crypto";
 import { spawn } from "node:child_process";
+import { parseBuffer } from "music-metadata";
 
 // ============================================================
 // Config
@@ -142,6 +143,15 @@ export interface RenderOptions {
   onProgress?: (event: RenderProgress) => void;
   /** Quota-exhaustion handler. Default: sleep until midnight PT. */
   onAllModelsExhausted?: () => Promise<void>;
+  /**
+   * Optional generationConfig.temperature passed to Gemini. Range 0.0-2.0
+   * with API default ~1.0. Lower = more deterministic, higher = more
+   * varied across rolls. Including this in the cache key (when set) so
+   * different temps don't collide on the same (text, style, voice, model)
+   * tuple. Leaving it undefined preserves cache compatibility with prior
+   * un-templeratured renders.
+   */
+  temperature?: number;
 }
 
 export interface RenderProgress {
@@ -187,12 +197,13 @@ export async function renderLineAudio(
   // loop writes under the actually-used model's key.
   const models = options.models ?? readModelsFromEnv() ?? DEFAULT_MODELS;
   const waitHandler = options.onAllModelsExhausted ?? sleepUntilMidnightPT;
+  const temperature = options.temperature;
 
   // Run legacy-cache migration once on the first cache read (AUTHOR-01 D-01).
   await migrateLegacyCacheIfNeeded(cacheDir);
 
   for (const probeModel of models) {
-    const probeKey = computeCacheKey(text, style, voice, probeModel, preamble);
+    const probeKey = computeCacheKey(text, style, voice, probeModel, preamble, temperature);
     const probePath = path.join(cacheDir, `${probeKey}.opus`);
     if (fs.existsSync(probePath)) {
       options.onProgress?.({ status: "cache-hit", cacheKey: probeKey });
@@ -203,6 +214,14 @@ export async function renderLineAudio(
 
   // Retry loop: try each model, on all-models-429 wait for quota reset
   // and go around again. Callers can cap this with their own timeout.
+  // Also tracks empty-audio retries — sometimes Gemini returns
+  // substantial PCM that encodes to 0ms Opus (deterministic-empty
+  // pattern observed on long compound sentences). callGeminiWithFallback
+  // rotates keys on EmptyAudioStreamError raised inside consumeSseToWav,
+  // but that catch can't fire if the SSE stream looks fine and only
+  // the encoded Opus is degraded — so we add an outer retry here.
+  let emptyRenderAttempts = 0;
+  const MAX_EMPTY_RENDER_RETRIES = 3;
   while (true) {
     try {
       const { wav, model } = await callGeminiWithFallback(
@@ -212,11 +231,42 @@ export async function renderLineAudio(
         models,
         options.apiKeys,
         preamble,
+        temperature,
       );
       const opus = await encodeWavToOpus(wav);
 
+      // Defensive Opus-duration check before caching. If duration is
+      // < 100ms AND byte count is also small (< 4KB ≈ 1s of 32kbps
+      // Opus), the response is degraded — retry up to
+      // MAX_EMPTY_RENDER_RETRIES times. If duration parses as 0 BUT
+      // byte count is substantial (>= 4KB), trust the bytes:
+      // music-metadata's Ogg-Opus parser fails on very long streams
+      // (>~12-15 seconds) and returns false-zero duration. The
+      // pcm-byte threshold inside consumeSseToWav already prevents
+      // truly empty stream from getting here.
+      let opusDurationMs: number;
+      try {
+        const opusMeta = await parseBuffer(opus, { mimeType: "audio/ogg" });
+        opusDurationMs = Math.round((opusMeta.format.duration ?? 0) * 1000);
+      } catch {
+        opusDurationMs = 0;
+      }
+      // Byte-based fallback: if parse said 0 but bytes are substantial,
+      // estimate from bytes (32kbps Opus ≈ 4000 bytes/sec → ms ≈ bytes/4).
+      if (opusDurationMs === 0 && opus.length > 4000) {
+        opusDurationMs = Math.round(opus.length / 4);
+      }
+      if (opusDurationMs < 100 && emptyRenderAttempts < MAX_EMPTY_RENDER_RETRIES) {
+        emptyRenderAttempts++;
+        process.stderr.write("\r" + " ".repeat(80) + "\r");
+        console.error(
+          `   ${model} produced ${opusDurationMs}ms Opus (attempt ${emptyRenderAttempts}/${MAX_EMPTY_RENDER_RETRIES} — retrying with fresh key rotation)...`,
+        );
+        continue; // retry the entire callGeminiWithFallback (rotates keys again)
+      }
+
       // Compute cache key under the model actually used (per D-02).
-      const cacheKey = computeCacheKey(text, style, voice, model, preamble);
+      const cacheKey = computeCacheKey(text, style, voice, model, preamble, temperature);
       const cachePath = path.join(cacheDir, `${cacheKey}.opus`);
 
       // Atomic write: stage to .tmp then rename. Prevents corrupt cache
@@ -239,7 +289,7 @@ export async function renderLineAudio(
         // — report the key under the preferred (first-chain) model for
         // progress observability. The final rendered key is emitted on
         // success above.
-        const pendingKey = computeCacheKey(text, style, voice, models[0], preamble);
+        const pendingKey = computeCacheKey(text, style, voice, models[0], preamble, temperature);
         options.onProgress?.({
           status: "waiting-for-quota-reset",
           cacheKey: pendingKey,
@@ -411,22 +461,27 @@ async function callGeminiWithFallback(
   models: string[],
   apiKeys: string[],
   preamble: string = "",
+  temperature?: number,
 ): Promise<{ wav: Buffer; model: string }> {
   if (apiKeys.length === 0) {
     throw new Error("callGeminiWithFallback: apiKeys is empty");
   }
   const inlineStyle = style ? `[${style}] ` : "";
   const prompt = `${preamble}${inlineStyle}${text}`;
-  const body = JSON.stringify({
-    contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: {
-      responseModalities: ["AUDIO"],
-      speechConfig: {
-        voiceConfig: {
-          prebuiltVoiceConfig: { voiceName: voice },
-        },
+  const generationConfig: Record<string, unknown> = {
+    responseModalities: ["AUDIO"],
+    speechConfig: {
+      voiceConfig: {
+        prebuiltVoiceConfig: { voiceName: voice },
       },
     },
+  };
+  if (temperature !== undefined) {
+    generationConfig.temperature = temperature;
+  }
+  const body = JSON.stringify({
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig,
   });
 
   const attempted: string[] = [];
@@ -514,6 +569,31 @@ async function callGeminiWithFallback(
               process.stderr.write("\r" + " ".repeat(80) + "\r");
               console.error(
                 `  ${model}${keyLabel} text-token regression (empty audio stream). Trying next key...`,
+              );
+            }
+            continue; // try next key
+          }
+          // Network-level timeouts and aborts — Gemini accepted the request
+          // (200 OK) but the SSE body stalled mid-stream. Common under
+          // heavy quota pressure when the server queues but doesn't process.
+          // Treat as transient: rotate to next key and retry.
+          const cause = (consumeErr as { cause?: { code?: string } })?.cause;
+          const code = cause?.code;
+          const msg = (consumeErr as Error)?.message ?? "";
+          const isNetworkTimeout =
+            code === "UND_ERR_BODY_TIMEOUT" ||
+            code === "UND_ERR_HEADERS_TIMEOUT" ||
+            code === "UND_ERR_SOCKET" ||
+            code === "ECONNRESET" ||
+            code === "ETIMEDOUT" ||
+            msg === "terminated" ||
+            msg.includes("fetch failed");
+          if (isNetworkTimeout) {
+            thisModelSawNonRegressionFailure = true;
+            if (apiKeys.length > 1) {
+              process.stderr.write("\r" + " ".repeat(80) + "\r");
+              console.error(
+                `  ${model}${keyLabel} network timeout (${code ?? msg}). Trying next key...`,
               );
             }
             continue; // try next key
@@ -609,8 +689,23 @@ async function consumeSseToWav(resp: Response): Promise<Buffer> {
     throw new EmptyAudioStreamError();
   }
 
+  // Catch effectively-empty responses too: Gemini sometimes returns a
+  // tiny PCM payload (a few hundred bytes ≈ <100ms of audio) for inputs
+  // it can't render properly. The SSE stream isn't empty so the stricter
+  // length === 0 check above doesn't fire, but the resulting Opus has
+  // 0ms duration after parse and triggers D-10 hard-fail. Treat those
+  // the same as EmptyAudioStreamError so the surrounding retry loop
+  // rotates keys instead of caching the defect.
   const pcm = Buffer.concat(pcmChunks);
   const sampleRate = parseSampleRate(mimeType);
+  // 100ms threshold: 24kHz mono 16-bit = 24000 samples/sec × 0.1 × 2 bytes
+  // ≈ 4800 bytes. Even the shortest legitimate Masonic line ("So mote it
+  // be" ≈ 800ms) produces ≥ 38400 bytes, so the threshold has 8× headroom.
+  const minBytes = Math.floor(sampleRate * 0.1 * 2);
+  if (pcm.length < minBytes) {
+    throw new EmptyAudioStreamError();
+  }
+
   const header = buildWavHeader(sampleRate, 1, 16, pcm.length);
   return Buffer.concat([header, pcm]);
 }
@@ -689,12 +784,19 @@ export function computeCacheKey(
   voice: string,
   modelId: string, // NEW (AUTHOR-01 D-02)
   preamble: string = "",
+  temperature?: number, // NEW (Tier 4 Director's Note temperature override)
 ): string {
-  // Key material order: version | text | style | voice | modelId | preamble.
+  // Key material order: version | text | style | voice | modelId | preamble [\x00 T<temp>]
   // modelId is between voice and preamble so voice+style+text equivalence alone
   // doesn't produce equal keys across different Gemini model revs.
-  const material =
+  // Temperature is appended ONLY when explicitly set, so unset temp produces
+  // the same key material as before — preserving cache hits for prior bakes
+  // that didn't pass a temperature override.
+  const baseMaterial =
     `${CACHE_KEY_VERSION}\x00${text}\x00${style ?? ""}\x00${voice}\x00${modelId}\x00${preamble}`;
+  const material = temperature !== undefined
+    ? `${baseMaterial}\x00T${temperature}`
+    : baseMaterial;
   return crypto.createHash("sha256").update(material).digest("hex");
 }
 

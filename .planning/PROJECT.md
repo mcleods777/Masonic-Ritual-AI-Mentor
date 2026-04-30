@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A private, invite-only web app that helps Masonic officers memorize and rehearse their ritual parts with an AI practice partner. A user unlocks their lodge's encrypted ritual file, takes any officer role, and practices — the app voices the other officers with TTS, listens while they speak via STT, scores accuracy with a word-level diff against the authoritative text, and returns coaching feedback from an LLM. It is built for Shannon's lodge plus a small number of invited lodges who want to adopt it.
+A private, invite-only web app that helps Masonic officers memorize and rehearse their ritual parts with an AI practice partner. A user unlocks their lodge's encrypted ritual file, takes any officer role, and practices — the app voices the other officers with TTS, listens while they speak via STT, and scores accuracy with a word-level diff against the authoritative text. The candidate's relationship is with the ritual text itself: the diff is the feedback. It is built for Shannon's lodge plus a small number of invited lodges who want to adopt it.
 
 ## Core Value
 
@@ -21,7 +21,7 @@ A Masonic officer can reliably rehearse their ritual parts — at any hour, with
 - ✓ **Listen-through mode** — Full-ceremony playback using pre-baked audio when available, live TTS otherwise — existing
 - ✓ **Multi-engine TTS (Gemini default)** — Dispatcher in `src/lib/text-to-speech.ts` across Gemini (3-model fallback chain), Google Cloud TTS, ElevenLabs, Deepgram, Kokoro, Voxtral, browser — existing
 - ✓ **STT via Groq Whisper + Web Speech** — Unified `STTEngine` interface; `api/transcribe/route.ts` proxies Groq with Masonic vocabulary prompt — existing
-- ✓ **Rehearsal coaching LLM** — `api/rehearsal-feedback/route.ts` calls Groq Llama with Mistral fallback and a roast-style persona — existing (quality gap — see Active)
+- ✗ **Rehearsal coaching LLM** — *removed in PR #69 (commit d660c98)*. Original `/api/rehearsal-feedback` route + roast-persona feedback flow deleted. Replacement direction: STT Quality Pipeline (see Active). The candidate's relationship is with the ritual text (diff), not with an AI commentator.
 - ✓ **Pilot authentication** — magic-link sign-in via Resend, 30-day session JWT in httpOnly cookie, `LODGE_ALLOWLIST` gate, shared-secret header on `/api/*` — existing
 - ✓ **Offline authoring pipeline** — dev-only `/author` UI + `scripts/build-mram-from-dialogue.ts --with-audio` bakes `{slug}-dialogue.md` pairs into Gemini-voiced `.mram` files — existing
 - ✓ **Performance tracking** — per-session IndexedDB history with trend analysis at `/progress` — existing
@@ -38,7 +38,7 @@ A Masonic officer can reliably rehearse their ritual parts — at any hour, with
 - [ ] **Craft degree content complete** — EA, FC, and MM degree rituals fully baked (text + cipher + Gemini audio) in Shannon's lodge's working
 - [ ] **Installation ceremony baked** — Annual officer installation ritual available for practice in Shannon's lodge's working
 - [ ] **Officer lectures / charges baked** — Individual lectures and charges (WM, SW, JW duties, etc.) available as standalone practice units
-- [ ] **LLM feedback quality lifted** — Rehearsal feedback from the coaching LLM is specific to what actually went wrong in the stumble, avoids generic/condescending output, and is something Shannon would stake his name on when inviting another lodge's officers
+- [ ] **STT Quality Pipeline** — Replaces deleted Phase 5 (Coach Quality Lift, removed PR #69). Make the upstream STT signal trustworthy so the existing diff-based scoring doesn't need an LLM commentator: (1) preview-bake REPL with autoplay + per-line notes/flag/approve state + hash-invalidation on regen, (2) Whisper `verbose_json` confidence filter, (3) Masonic-vocabulary prompt biasing (base + per-degree sidecar), (4) optional LLM post-correction with a "preserve stumbles" prompt + 20-recording validation gate, (5) A/B harness comparing Groq Whisper variants. Strategic detail: `~/.gstack/projects/Masonic-Ritual-AI-Mentor/ceo-plans/2026-04-26-stt-quality-pipeline.md`
 - [ ] **Cost safeguards** — Pre-baked-audio-first defaults, per-user/per-day caps on paid AI routes, budget alerting so a runaway loop or curious user can't produce a surprise bill
 - [ ] **Abuse safeguards** — Per-invited-user rate limits (not just IP), monitoring/visibility for unusual usage spikes, and auth hardening so the shared-secret header isn't the only gate on `/api/*`
 - [ ] **Invite-friendly onboarding polish** — The existing magic-link + lodge-passphrase flow works reliably end-to-end for an outside lodge's officer on first contact (no hand-holding required, but staying in the current architecture)
@@ -62,7 +62,7 @@ A Masonic officer can reliably rehearse their ritual parts — at any hour, with
 - Deployed on Vercel Fluid Compute at `masonic-ritual-ai-mentor.vercel.app`.
 - Browser-owned data plane: Web Crypto (AES-GCM) + IndexedDB + Web Speech API + MediaRecorder.
 - Seven TTS engines wired; Gemini is the default with a three-preview-model fallback chain.
-- Paid AI surface: Gemini TTS, Google Cloud TTS, ElevenLabs, Deepgram, Kokoro (self-host), Voxtral (Mistral), Groq Whisper STT, Groq Llama / Mistral (feedback LLM), Anthropic + `@ai-sdk/*` SDKs listed in `package.json` but currently unused.
+- Paid AI surface: Gemini TTS, Google Cloud TTS, ElevenLabs, Deepgram, Kokoro (self-host), Voxtral (Mistral), Groq Whisper STT. Groq Llama / Mistral are still SDK-installed but no longer wired (the rehearsal-feedback route was removed in PR #69). Phase 5 STT pipeline may re-enable Groq Llama in the post-correction pass — gated by validation set.
 
 **Prior exploration and incidents (from memory):**
 - Prior CSO audit remediated unauthenticated API proxy risk, CORS, secrets exposure, Next.js CVEs; layered-defenses instincts come from there.
@@ -74,7 +74,7 @@ A Masonic officer can reliably rehearse their ritual parts — at any hour, with
 - `TTSEngineSelector.tsx` and `GeminiPreloadPanel.tsx` are currently unmounted (Gemini-default flow bypasses them) — if ever remounted, behavior needs re-verification.
 - `@ai-sdk/anthropic`, `@ai-sdk/react`, `ai`, `natural`, `uuid` in `package.json` are dead weight; cleanup candidate.
 - Rate limiter is in-memory per Vercel instance — fine for pilot but a known upgrade path.
-- LLM feedback quality is the headline pilot complaint and the primary coach-quality gap.
+- ~~LLM feedback quality is the headline pilot complaint~~ — Coach feature was removed in PR #69. Replacement direction (per 2026-04-26 CEO review) is the STT Quality Pipeline: make the upstream signal trustworthy so the diff is feedback enough.
 
 **Users:**
 - v0/pilot user is Shannon (WM/officer in his lodge).
@@ -99,9 +99,10 @@ A Masonic officer can reliably rehearse their ritual parts — at any hour, with
 | v1 covers Shannon's lodge's working only | Avoids premature multi-working content architecture; one good working beats three mediocre ones | — Pending |
 | Solo authoring only; `/author` stays dev-only | Author quality is critical; shared authoring needs copyright + review tooling not in scope | — Pending |
 | Native mobile deferred to post-v1 | PWA + wake-lock covers the "officer with phone on the rail" use case | — Pending |
-| LLM feedback quality is the coach-quality investment; TTS/STT/diff judged good enough | User testimony: only feedback layer bugs Shannon when he personally uses the app | — Pending |
-| Cost/abuse safeguards layered (pre-bake + per-user caps + monitoring + auth hardening) | Three equal-weight fears: surprise bill, invited-user misuse, shared-secret exfiltration | — Pending |
+| ~~LLM feedback quality is the coach-quality investment; TTS/STT/diff judged good enough~~ → Reversed 2026-04-26 | Coach feature deleted in PR #69. New direction: invest in STT quality so the diff itself becomes trustworthy. Candidate's relationship is with the ritual text, not with an AI commentator. | Validated 2026-04-26 (CEO review) |
+| Cost/abuse safeguards layered (pre-bake + per-user caps + monitoring + auth hardening) | Three equal-weight fears: surprise bill, invited-user misuse, shared-secret exfiltration | Validated (Phase 2 shipped) |
 | Stay on Vercel Fluid Compute + in-memory rate limit | Pilot scale (≤10 lodges) doesn't justify Redis/Upstash migration yet | — Pending |
+| Phase 5 reframed: Coach Quality Lift → STT Quality Pipeline (2026-04-26) | Better product position: a faithful mirror of the ritual text beats an AI grader for the devotional/memorization use case. Lower latency, lower cost, no hallucination risk. See ceo-plans/2026-04-26-stt-quality-pipeline.md | Validated 2026-04-26 |
 
 ## Evolution
 
@@ -121,4 +122,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-23 after Phase 3 (Authoring Throughput) execution — bake cache + orchestrator + validators + preview server now enable Phase 4 content work.*
+*Last updated: 2026-04-26 after CEO review reframed Phase 5 from Coach Quality Lift → STT Quality Pipeline. Coach feature was already removed in PR #69; the new direction makes the upstream STT signal trustworthy rather than rebuilding an LLM commentator.*

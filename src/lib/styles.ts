@@ -129,11 +129,16 @@ export interface StylesFile {
  *
  * Rejects content that would break prompt structure: newlines, null
  * bytes, square brackets (reserved for style tags), triple backticks.
- * Caps length at 200 chars to keep the prompt focused.
+ * Caps length at 1500 chars: the original 200-char limit was set for
+ * the cipher-letter use case (instructional prefix + ~5-letter target,
+ * <100 chars). Full-sentence ritual content with an instructional
+ * prefix reaches ~250-300 chars (e.g., long officer-duty enumerations);
+ * 1500 keeps prompt-bloat / token-cost bounded while accommodating
+ * the broader use case.
  */
 export function isValidSpeakAs(text: unknown): text is string {
   if (typeof text !== "string") return false;
-  if (text.length < 1 || text.length > 200) return false;
+  if (text.length < 1 || text.length > 1500) return false;
   if (/[\n\r\0\[\]]/.test(text)) return false;
   if (text.includes("```")) return false;
   return true;

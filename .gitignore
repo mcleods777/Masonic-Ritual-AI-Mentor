@@ -43,12 +43,18 @@ next-env.d.ts
 # ritual files (lodge-specific, should not be committed)
 # only encrypted .mram may exist in the rituals dir; plaintext is local-only
 *.mram
+*.mram.backup-*
 rituals/*.md
 rituals/*.txt
 rituals/*.json
 rituals/*.jsonl
 rituals/*.yaml
 rituals/*.yml
+# any local backup files in rituals/ (sanitization, hand-edits, recovery)
+rituals/*.backup
+rituals/*.backup-*
+rituals/*-backup
+rituals/*.pre-*-backup
 
 # credentials — never commit
 gitkey
@@ -71,3 +77,8 @@ files/
 # bake cache — AUTHOR-01 D-01 (content-addressed Opus cache)
 rituals/_bake-cache/*
 !rituals/_bake-cache/.gitignore
+# Preview-bake parallel-bake sessions — per-developer experimental .mram
+# copies. Cache is shared across sessions; the dirs themselves are
+# entirely user-personal state.
+rituals/_sessions/
+rituals/*.scene-prose-backup

@@ -1,0 +1,1 @@
+/home/mcleods777/Masonic-Ritual-AI-Mentor/.claude/skills/gstack/open-gstack-browser/SKILL.md

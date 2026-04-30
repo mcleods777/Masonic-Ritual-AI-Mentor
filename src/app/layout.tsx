@@ -1,9 +1,12 @@
 import type { Metadata, Viewport } from "next";
-import { Cinzel, Lato } from "next/font/google";
+import { Cinzel, Lato, Geist } from "next/font/google";
 import "./globals.css";
 import Navigation from "@/components/Navigation";
 import PilotBanner from "@/components/PilotBanner";
 import DegradedModeBanner from "@/components/DegradedModeBanner";
+import { cn } from "@/lib/utils";
+
+const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
 const cinzel = Cinzel({
   subsets: ["latin"],
@@ -40,7 +43,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" className={cn("dark", "font-sans", geist.variable)}>
       <body className={`antialiased min-h-screen ${cinzel.variable} ${lato.variable}`}>
         <PilotBanner />
         <DegradedModeBanner />

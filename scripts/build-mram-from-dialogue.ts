@@ -44,6 +44,7 @@
  */
 
 import * as fs from "node:fs";
+import * as path from "node:path";
 import * as crypto from "node:crypto";
 import { parseBuffer } from "music-metadata";
 import { parseDialogue } from "../src/lib/dialogue-format";
@@ -157,7 +158,7 @@ export function encryptMRAMNode(doc: MRAMDocument, passphrase: string): Buffer {
 async function googleTtsBakeCall(
   text: string,
   voiceName: string,
-  languageCode: string = "en-US",
+  languageCode?: string,
 ): Promise<{ opusBytes: Buffer; durationMs: number }> {
   const apiKey = process.env.GOOGLE_CLOUD_TTS_API_KEY;
   if (!apiKey) {
@@ -167,6 +168,16 @@ async function googleTtsBakeCall(
         "route (will re-introduce the pre-Phase-3 hard-skip behavior).",
     );
   }
+  // Derive languageCode from voiceName when not explicitly provided.
+  // Google voice names follow the pattern "<lang>-<region>-<variant>-<id>"
+  // (e.g. "en-US-Neural2-D", "en-GB-Neural2-B"). The first two hyphen-
+  // separated parts form the BCP-47 language tag the API requires;
+  // mismatches between voice and languageCode return a 400.
+  const derivedLanguageCode = (() => {
+    if (languageCode) return languageCode;
+    const m = /^([A-Za-z]{2}-[A-Za-z]{2})/.exec(voiceName);
+    return m ? m[1] : "en-US";
+  })();
   const res = await fetch(
     `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`,
     {
@@ -174,7 +185,7 @@ async function googleTtsBakeCall(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         input: { text }, // text only; NO preamble, NO style (Pitfall 4)
-        voice: { languageCode, name: voiceName },
+        voice: { languageCode: derivedLanguageCode, name: voiceName },
         audioConfig: { audioEncoding: "OGG_OPUS" },
       }),
     },
@@ -190,9 +201,38 @@ async function googleTtsBakeCall(
   }
   const json = (await res.json()) as { audioContent: string };
   const opusBytes = Buffer.from(json.audioContent, "base64");
-  const meta = await parseBuffer(opusBytes, { mimeType: "audio/ogg" });
-  const durationMs = Math.round((meta.format.duration ?? 0) * 1000);
+  const durationMs = await readOpusDurationRobust(opusBytes);
   return { opusBytes, durationMs };
+}
+
+/**
+ * Read Opus audio duration with a byte-based fallback for very long
+ * streams. music-metadata's Ogg-Opus parser fails to read the granule
+ * position from streams above ~12-15 seconds, returning 0ms even when
+ * the audio is intact. Confirmed with Google TTS responses for line
+ * 94 of ea-closing (452-char JW passage producing ~22s of valid Opus,
+ * 99KB, parsed as 0ms by music-metadata).
+ *
+ * Strategy: trust music-metadata if it returns a positive duration.
+ * If it returns 0 AND the byte count is substantial (>4KB ≈ 1s of
+ * 32kbps Opus), estimate duration from bytes (~4000 bytes/sec for
+ * our 32kbps mono encode). If bytes are also small, treat as truly
+ * empty.
+ */
+async function readOpusDurationRobust(opusBytes: Buffer): Promise<number> {
+  try {
+    const meta = await parseBuffer(opusBytes, { mimeType: "audio/ogg" });
+    const parsedMs = Math.round((meta.format.duration ?? 0) * 1000);
+    if (parsedMs > 0) return parsedMs;
+  } catch {
+    // Fall through to byte-based estimate
+  }
+  // music-metadata returned 0 or threw. Use byte-based estimate for
+  // anything substantial. 32kbps Opus = 4000 bytes/sec; 4KB ≈ 1 sec.
+  if (opusBytes.length > 4000) {
+    return Math.round(opusBytes.length / 4); // ms ≈ bytes / 4 for 32kbps
+  }
+  return 0;
 }
 
 // ============================================================
@@ -710,6 +750,32 @@ async function main() {
   console.error("Encrypting...");
   const encrypted = encryptMRAMNode(doc, passphrase);
 
+  // Auto-backup on overwrite: if outputPath exists, rotate it to a
+  // timestamped sibling before writing the new version. Keeps the most
+  // recent 3 backups per ritual (.mram.backup-<ts> files) so a bad bake
+  // can be recovered even though rituals/*.mram is gitignored. Ordered
+  // BEFORE the tmp+rename so the new output still lands atomically.
+  if (fs.existsSync(outputPath)) {
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    const backupPath = `${outputPath}.backup-${ts}`;
+    fs.renameSync(outputPath, backupPath);
+    console.error(`Backed up existing output → ${backupPath}`);
+    const backupDir = path.dirname(outputPath);
+    const base = path.basename(outputPath);
+    const existing = fs
+      .readdirSync(backupDir)
+      .filter((f) => f.startsWith(`${base}.backup-`))
+      .sort()
+      .reverse();
+    for (const stale of existing.slice(3)) {
+      try {
+        fs.unlinkSync(path.join(backupDir, stale));
+      } catch {
+        // Best-effort cleanup — failing to prune an old backup is not fatal.
+      }
+    }
+  }
+
   // Atomic write: stage to a temp file, then rename. Prevents a corrupt
   // output if the process is killed mid-write (Ctrl-C, OOM, disk full).
   // POSIX rename within the same filesystem is atomic.
@@ -1208,16 +1274,109 @@ async function bakeAudioIntoDoc(
       // parseBuffer decodes the Ogg container header for the duration
       // without transcoding. First 30 samples per ritual skip the check
       // (Pitfall 6 — median unstable below that threshold).
-      const geminiMeta = await parseBuffer(opus, { mimeType: "audio/ogg" });
-      const geminiDurationMs = Math.round(
-        (geminiMeta.format.duration ?? 0) * 1000,
-      );
-      addAndCheckAnomaly(
-        anomalyState,
-        line.id,
-        geminiDurationMs,
-        cleanText.length,
-      );
+      // Skip the check entirely for lines with a speakAs override: the
+      // prompt is instructional ("Say only X: <target>"), so cleanText
+      // length doesn't correspond to spoken-output length and the ratio
+      // calculation produces false positives. The user has taken
+      // explicit responsibility for these lines via speakAs; rely on
+      // preview-bake scrubbing for quality verification instead.
+      const geminiDurationMs = await readOpusDurationRobust(opus);
+      // D-10 anomaly check. For speakAs lines we skip the *ratio* check
+      // (instructional-prompt char count doesn't match spoken-output
+      // length, produces false positives), but we still hard-fail on
+      // outright empty audio (durationMs === 0) — that's never correct,
+      // regardless of whether the line uses voice-cast preamble or
+      // speakAs. The retry loop in renderLineAudio is supposed to
+      // prevent 0ms from being cached, but if it gets through, this
+      // check is the last line of defense before silent quality loss.
+      const speakAs = hasSpeakAs(line.id);
+      const cleanedKey = thisLineCacheKey;
+      const failWithCleanup = (err: unknown): never => {
+        if (cleanedKey) {
+          const removed = deleteCacheEntry(cleanedKey);
+          if (removed) {
+            process.stderr.write("\r" + " ".repeat(80) + "\r");
+            console.error(
+              `   Auto-removed cached defect for line ${line.id} (${cleanedKey.slice(0, 12)}…) — resume will re-render.`,
+            );
+          }
+        }
+        throw err;
+      };
+      if (geminiDurationMs === 0) {
+        // Gemini returned 0ms audio after renderLineAudio's retry loop
+        // (3× key rotation) exhausted. This is the deterministic-empty
+        // failure mode observed on long compound sentences (e.g.
+        // ea-closing officer-duties enumerations). Rather than fail the
+        // whole bake or silently ship empty audio, fall back to Google
+        // Cloud TTS for this single line. Google TTS uses a different
+        // engine (no preamble bleed-through, deterministic output) and
+        // reliably produces non-empty audio for content Gemini chokes
+        // on. The voice will sound different from Gemini for this line,
+        // which Shannon should scrub via preview-bake before shipping.
+        process.stderr.write("\r" + " ".repeat(80) + "\r");
+        console.error(
+          `   ⚠ Line ${line.id} (role ${line.role}) returned 0ms from Gemini after retries. Falling back to Google Cloud TTS.`,
+        );
+        try {
+          const googleVoice = getGoogleVoiceForRole(line.role);
+          // For speakAs lines, send the original line.plain to Google TTS,
+          // not the instructional prompt — Google would speak "Speak this..."
+          // verbatim otherwise. For non-speakAs lines, cleanText IS line.plain.
+          const fallbackText = speakAs ? line.plain : cleanText;
+          const { opusBytes, durationMs: googleDurationMs } = await googleTtsBakeCall(
+            fallbackText,
+            googleVoice.name,
+          );
+          if (googleDurationMs === 0) {
+            // Google also failed — give up
+            failWithCleanup(
+              new Error(
+                `[AUTHOR-06] line ${line.id} (role ${line.role}) returned 0ms from BOTH Gemini and Google Cloud TTS. ` +
+                  `Manual intervention required: inspect dialogue text or split the line.`,
+              ),
+            );
+          }
+          // Replace the bad Gemini cache entry with Google's audio so
+          // subsequent --resume runs pick up the good bytes.
+          if (cleanedKey) {
+            const cachePath = path.join(
+              path.resolve("rituals/_bake-cache"),
+              `${cleanedKey}.opus`,
+            );
+            const tmpPath = `${cachePath}.tmp`;
+            fs.writeFileSync(tmpPath, opusBytes);
+            fs.renameSync(tmpPath, cachePath);
+          }
+          line.audio = opusBytes.toString("base64");
+          totalBytes += opusBytes.length;
+          modelTally["google-cloud-tts"] =
+            (modelTally["google-cloud-tts"] ?? 0) + 1;
+          console.error(
+            `   ✓ Line ${line.id} rendered via Google Cloud TTS (${googleDurationMs}ms, ${opusBytes.length} bytes).`,
+          );
+          // Skip the rest of the per-line Gemini-output processing since
+          // we replaced the audio. The for-loop continues to the next line.
+          rendered++;
+          markLineCompleted(lineIdStr);
+          continue;
+        } catch (googleErr) {
+          // Wrap so failWithCleanup can identify a downstream defect
+          failWithCleanup(googleErr);
+        }
+      }
+      if (!speakAs) {
+        try {
+          addAndCheckAnomaly(
+            anomalyState,
+            line.id,
+            geminiDurationMs,
+            cleanText.length,
+          );
+        } catch (anomalyErr) {
+          failWithCleanup(anomalyErr);
+        }
+      }
 
       // AUTHOR-07 D-11: optional STT round-trip. Warn-only: errors and
       // mismatches never hard-fail the bake; roll-up printed at the end.

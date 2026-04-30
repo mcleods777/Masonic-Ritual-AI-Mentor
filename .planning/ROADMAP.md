@@ -15,7 +15,7 @@ Ship the invited-lodge v1: the pilot, hardened and extended so Shannon can perso
 - [ ] **Phase 2: Safety Floor (cost, abuse, auth hardening)** — Per-user rate limits, budget caps, audit log, client-token, kill switch — the layered defense against the three equal-weight fears
 - [ ] **Phase 3: Authoring Throughput** — Bake cache, orchestrator, validators, preview server — Shannon-hours reduction so content work doesn't dominate calendar time
 - [ ] **Phase 4: Content Coverage** — Bake EA, FC, MM, Installation, and officer lectures in Shannon's lodge's working, with per-line Opus verified
-- [ ] **Phase 5: Coach Quality Lift** — Structured, diff-grounded feedback with hallucination filter, gold eval set, dev-only eval UI — the headline pilot complaint addressed
+- [ ] **Phase 5: STT Quality Pipeline** — Replaces deleted Phase 5 Coach Quality Lift (PR #69). Make the upstream STT signal trustworthy so the existing diff is enough: preview-bake REPL, verbose_json filter, prompt biasing, LLM post-correction with validation gate, A/B harness
 - [ ] **Phase 6: Admin Substrate & Distribution** — Admin dashboard, invite management, stateful revocation, stale-version banner — connective tissue for what Phases 2, 4, 5 emit
 - [ ] **Phase 7: Onboarding Polish** — First-run walkthrough, mic check, bug-report, revoked-state UI, session persistence — the first-60-seconds experience for an invited WM
 
@@ -103,8 +103,8 @@ Plans:
   5. Every shipped `.mram` passes the cipher/plain parity validator before being committed — no phantom scoring failures from cipher-only edits reach users
 **Plans**: 8 plans
 Plans:
-- [ ] 04-01-verifier-release-gate-PLAN.md — CONTENT-06, CONTENT-07: extend verify-mram with --check-audio-coverage + build verify-content release gate (Wave 0, engineering)
-- [ ] 04-02-content-checklist-PLAN.md — create 04-CONTENT-CHECKLIST.md ritual-readiness ledger + parseable-markdown shape test (Wave 0, tracking)
+- [x] 04-01-verifier-release-gate-PLAN.md — CONTENT-06, CONTENT-07: extend verify-mram with --check-audio-coverage + build verify-content release gate (Wave 0, engineering) (2026-04-23, commits 87e7415 + 65b8172)
+- [x] 04-02-content-checklist-PLAN.md — create 04-CONTENT-CHECKLIST.md ritual-readiness ledger + parseable-markdown shape test (Wave 0, tracking) (2026-04-23, commits a8f3412 + 4d121a1)
 - [ ] 04-03-ea-rebake-PLAN.md — CONTENT-01: re-bake 4 existing EA rituals under v3 cache (Wave 1, content-labor)
 - [ ] 04-04-fc-authoring-bake-PLAN.md — CONTENT-02: author + bake 4 fresh FC rituals (opening, passing, middle-chamber-lecture, closing) (Wave 1, content-labor)
 - [ ] 04-05-mm-authoring-bake-PLAN.md — CONTENT-03: author + bake 4 fresh MM rituals (opening, raising, hiramic-legend, closing) (Wave 1, content-labor)
@@ -113,29 +113,29 @@ Plans:
 - [ ] 04-08-phase-release-verification-PLAN.md — aggregate verify-content + dogfood on masonicmentor.app + mark CONTENT-01..07 complete (Wave 2, release)
 **UI hint**: no
 
-### Phase 5: Coach Quality Lift
-**Goal**: An invited lodge's Past Master reads feedback the app produced about his Brother's stumble and cannot find it generic, condescending, or contradictory to the authoritative working — something Shannon will stake his name on
-**Depends on**: Phase 2 (rate limits must exist before eval harness hammers the feedback route), Phase 3 (AUTHOR-10 idb-schema must ship before COACH-06 feedbackTraces store lands)
-**Requirements**: COACH-01, COACH-02, COACH-03, COACH-04, COACH-05, COACH-06, COACH-07, COACH-08, COACH-09, COACH-10, COACH-11, COACH-12
+### Phase 5: STT Quality Pipeline
+**Goal**: An invited candidate sees a transcript of his stumble that is faithful to what he actually said. The diff against the authoritative ritual text becomes trustworthy on its own — no LLM commentator needed. Replaces the deleted Coach Quality Lift (PR #69, commit d660c98).
+**Depends on**: Phase 3 (preview-bake.ts dev server primitive from AUTHOR-08 is the substrate for the REPL); Phase 4 (preview-bake REPL accelerates content scrubbing for the remaining rituals — recommended ordering: ship REPL Steps 1-2 before authoring FC/MM/Installation/lectures)
+**Requirements**: STT-01, STT-02, STT-03, STT-04, STT-05, STT-06, STT-07
 **Success Criteria** (what must be TRUE):
-  1. `RehearsalMode.tsx` is split into setup, advance, and STT-lifecycle submodules before the feedback route is rewritten — the existing auto-advance flow passes tests after the split
-  2. Feedback prompt assembly lives in `src/lib/feedback-prompt.ts` client-side; the `/api/rehearsal-feedback` route receives `{variantId, prompt, promptHash}` and nothing else that could reconstruct more than 1-2 expected words
-  3. Every successful feedback response conforms to the `{missed_words, substituted_words, inserted_words, suggested_drill, confidence}` schema — the LLM cannot free-form into ritual explanation
-  4. An attempt to make the LLM respond with a capitalized word not in the reference line, user attempt, or coaching allowlist is caught by the post-hoc filter and replaced with a diff-derived static message
-  5. The `mentor-v1` variant is what invited users see; `roast-v1`/`terse-v1`/`coach-v1` are reachable only inside `/dev/feedback-eval` with the author guard enforced
-  6. Shannon's curated gold eval set of ≥50 stumbles passes its release-blocking rubric when run through `scripts/feedback-eval.ts`; regressions block release
-  7. Every feedback render shows a "this feedback seems wrong" button that, when tapped, records a rating in the audit log and opens a prefilled mailto to Shannon
-  8. When the TTS engine falls back to a non-default engine, the user sees a small banner in Rehearsal/Listen mode indicating degraded playback
-**Plans**: TBD
+  1. The preview-bake page autoplays a sequence of lines, supports per-line notes, and lets Shannon mark each line as `unmarked` / `flagged-review` / `flagged-regen` / `approved` via keyboard shortcuts
+  2. When a line's audio is regenerated, its prior `approved` state automatically downgrades to `unmarked` because the audio sha256 no longer matches the saved hash
+  3. `verify-content --require-approval` refuses to release a ritual unless every line is `approved`
+  4. Whisper STT calls send a `prompt` parameter assembled from a base Masonic vocabulary plus a per-degree vocabulary stored in `rituals/{slug}-vocabulary.json`; the prompt is observable in dev logs
+  5. Whisper STT calls request `verbose_json` and drop segments where `no_speech_prob > 0.6` or `compression_ratio > 2.4`; segments with `avg_logprob < -1.0` are flagged but not dropped
+  6. Optional LLM post-correction (Llama 3.3 70B on Groq) is gated by a 20-recording validation set with a stumble-preservation rate ≥95% before being enabled in production
+  7. A dev-only `/dev/whisper-eval` route runs both Groq Whisper variants (large-v3 and distil-large-v3-en) on every practice utterance, presents blind A/B labels with vote-later sidebar, and persists `{audio, reference, transcripts, vote, category}` to JSONL with category breakdowns
+  8. When the TTS engine falls back to a non-default engine, the user sees a small banner in Rehearsal/Listen mode indicating degraded playback (carried forward from deleted COACH-12)
+**Plans**: TBD (see ceo-plans/2026-04-26-stt-quality-pipeline.md for sequencing — REPL first, then verbose_json, then prompt biasing, then LLM correction with validation, then A/B harness)
 **UI hint**: yes
 
 ### Phase 6: Admin Substrate & Distribution
 **Goal**: Shannon has a single Shannon-only dashboard that answers "is lodge X active, who is near their cap, which rituals are on stale builds, can I revoke this user right now" — and invited users see a graceful stale-version banner when their `.mram` is out of date
-**Depends on**: Phase 2 (audit log is the dashboard's data source), Phase 4 (per-ritual build hashes need content to hash), Phase 5 (feedback-rating aggregation needs ratings)
+**Depends on**: Phase 2 (audit log is the dashboard's data source), Phase 4 (per-ritual build hashes need content to hash). *Note: prior dependency on Phase 5 feedback-rating aggregation is dropped — coach feature was removed in PR #69 and Phase 5 is now STT Quality Pipeline.*
 **Requirements**: ADMIN-01, ADMIN-02, ADMIN-03, ADMIN-04, ADMIN-05, ADMIN-06, ADMIN-07
 **Success Criteria** (what must be TRUE):
   1. A Shannon-only `/admin` route, gated by magic-link + session JWT + admin allowlist, renders without being discoverable from a non-admin session
-  2. The dashboard shows anonymized telemetry: sign-ins by hashed user, paid-route usage, error counts, feedback rating aggregates, spend by route
+  2. The dashboard shows anonymized telemetry: sign-ins by hashed user, paid-route usage, error counts, STT-quality signals (low-confidence segment counts, prompt-bias hit rate), spend by route
   3. Shannon can view, add, and remove `LODGE_ALLOWLIST` entries from the dashboard, with last-sign-in timestamp and per-user usage summary visible per email
   4. Removing a user from the allowlist causes their next authenticated request to fail within the same request cycle (stateful revocation, not waiting for a 30-day cookie)
   5. A client that holds an `.mram` whose hash no longer matches `/api/content/latest-hashes` sees a "your ritual has been updated" banner on next load
@@ -164,15 +164,15 @@ Plans:
 | 1. Pre-invite Hygiene | 7/7 | Complete (UAT pending) | 2026-04-21 |
 | 2. Safety Floor | 9/9 | Complete (merged to main PR #68) | 2026-04-22 |
 | 3. Authoring Throughput | 8/8 | Execution complete (merge PR pending) | 2026-04-23 |
-| 4. Content Coverage | 0/8 | Planned | - |
-| 5. Coach Quality Lift | 0/0 | Not started | - |
+| 4. Content Coverage | 2/8 | Executing | - |
+| 5. STT Quality Pipeline | 0/0 | Not started (replaces deleted Coach Quality Lift; see ceo-plans/2026-04-26-stt-quality-pipeline.md) | - |
 | 6. Admin Substrate & Distribution | 0/0 | Not started | - |
 | 7. Onboarding Polish | 0/0 | Not started | - |
 
 ## Coverage
 
-**v1 requirements:** 57 total
-**Mapped to phases:** 57 (100%)
+**v1 requirements:** 52 total (was 57; COACH-01..12 retired and replaced by STT-01..07 — see 2026-04-26 CEO review)
+**Mapped to phases:** 52 (100%)
 **Orphaned:** 0
 
 | Category | Count | Phase |
@@ -181,19 +181,22 @@ Plans:
 | SAFETY (01-09) | 9 | Phase 2 |
 | AUTHOR (01-10) | 10 | Phase 3 |
 | CONTENT (01-07) | 7 | Phase 4 |
-| COACH (01-12) | 12 | Phase 5 |
+| STT (01-07) | 7 | Phase 5 |
 | ADMIN (01-07) | 7 | Phase 6 |
 | ONBOARD (01-05) | 5 | Phase 7 |
+| ~~COACH (01-12)~~ | ~~12~~ | Obsolete (coach feature deleted PR #69, replaced by STT) |
 
 ## Notes
 
 - **Brownfield milestone** — the pilot already ships the full rehearsal loop. No phase re-builds existing capability; every phase is a delta.
-- **Parallelism opportunity** — Phase 3 (authoring throughput tooling) and Phase 2 (safety floor) touch disjoint files and can run in parallel on calendar time. The dependency from Phase 5 → Phase 3 is narrow (just AUTHOR-10 idb-schema extract → COACH-06 feedbackTraces store).
+- **Parallelism opportunity** — Phase 3 (authoring throughput tooling) and Phase 2 (safety floor) touch disjoint files and can run in parallel on calendar time.
 - **Phase 4 is Shannon-labor-dominated** — once the tooling in Phase 3 lands, Phase 4 is primarily content baking (ceremony-by-ceremony) rather than engineering work.
 - **Phase 4 plan structure** — Wave 0 (engineering + tracking: 04-01, 04-02) → Wave 1 (content labor: 04-03..07, independent, Shannon-picked order) → Wave 2 (release verification: 04-08). Only 04-01, 04-02, 04-08 are fully autonomous; 04-03 through 04-07 include human checkpoints for authoring + scrub judgment.
+- **Phase 5 reframed (2026-04-26)** — Coach Quality Lift was removed in PR #69 (commit d660c98). Replaced with STT Quality Pipeline: invest in upstream signal so the existing diff is enough. Recommended sequencing puts the preview-bake REPL FIRST because it accelerates Phase 4 content scrubbing — consider running REPL Steps 1-2 in parallel with Phase 4 Wave 1 content labor. See `~/.gstack/projects/Masonic-Ritual-AI-Mentor/ceo-plans/2026-04-26-stt-quality-pipeline.md`.
 - **Success criteria for each phase are observable user or system behaviors**, not task completion. Downstream `/gsd-plan-phase` derives must-haves from these criteria.
 
 ---
 *Roadmap created: 2026-04-20*
 *Granularity: standard*
 *Phase 4 planned: 2026-04-23*
+*Phase 5 reframed Coach Quality Lift → STT Quality Pipeline: 2026-04-26 (CEO review session)*
