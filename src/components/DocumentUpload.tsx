@@ -30,8 +30,28 @@ export default function DocumentUpload({ onDocumentSaved }: DocumentUploadProps)
 
         // Validate it's a .mram file
         if (!isMRAMFile(data)) {
+          const bytes = new Uint8Array(data);
+          const first4Hex = Array.from(bytes.slice(0, 4))
+            .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+            .join(" ");
+          const first4Ascii = Array.from(bytes.slice(0, 4))
+            .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : "·"))
+            .join("");
+
+          let hint = "";
+          if (first4Hex.startsWith("50 4B")) {
+            hint =
+              " It looks like you uploaded a .zip file. Tap the zip in Files first to extract it, then upload the .mram inside.";
+          } else if (first4Hex === "EF BB BF EF" || first4Hex.startsWith("EF BB BF")) {
+            hint =
+              " The file appears to have been opened and re-saved as text. Re-download the original .mram file without opening it first.";
+          } else if (bytes.length === 0) {
+            hint =
+              " The file is empty. If it's stored in iCloud, open Files and tap the file once to download it before uploading.";
+          }
+
           setError(
-            "This is not a valid .mram ritual file. Only encrypted ritual files from your lodge are accepted."
+            `This is not a valid .mram ritual file.${hint}\n\nFile: ${file.name} (${file.size} bytes)\nStarts with: ${first4Hex}  "${first4Ascii}"`
           );
           setStage("idle");
           setProgress(null);
@@ -266,7 +286,7 @@ export default function DocumentUpload({ onDocumentSaved }: DocumentUploadProps)
       )}
 
       {error && (
-        <div className="mt-4 p-3 bg-red-900/50 border border-red-700 rounded-lg text-red-300 text-sm">
+        <div className="mt-4 p-3 bg-red-900/50 border border-red-700 rounded-lg text-red-300 text-sm whitespace-pre-line text-left">
           {error}
         </div>
       )}
