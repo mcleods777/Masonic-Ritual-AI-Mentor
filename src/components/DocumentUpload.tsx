@@ -13,7 +13,7 @@ function isZip(data: ArrayBuffer): boolean {
   return b.length >= 4 && b[0] === 0x50 && b[1] === 0x4b && b[2] === 0x03 && b[3] === 0x04;
 }
 
-async function extractMRAMFromZip(data: ArrayBuffer): Promise<ArrayBuffer> {
+async function extractMRAMsFromZip(data: ArrayBuffer): Promise<ArrayBuffer[]> {
   const entries = await new Promise<Record<string, Uint8Array>>((resolve, reject) => {
     unzip(new Uint8Array(data), (err, result) => {
       if (err) reject(err);
@@ -21,26 +21,34 @@ async function extractMRAMFromZip(data: ArrayBuffer): Promise<ArrayBuffer> {
     });
   });
 
-  const mramEntry = Object.entries(entries).find(([name, bytes]) => {
-    if (!name.toLowerCase().endsWith(".mram")) return false;
-    if (name.startsWith("__MACOSX/") || name.includes("/._")) return false;
-    return bytes.length > 0;
-  });
+  const mramEntries = Object.entries(entries)
+    .filter(([name, bytes]) => {
+      if (!name.toLowerCase().endsWith(".mram")) return false;
+      if (name.startsWith("__MACOSX/") || name.includes("/._")) return false;
+      return bytes.length > 0;
+    })
+    .sort(([a], [b]) => a.localeCompare(b));
 
-  if (!mramEntry) {
+  if (mramEntries.length === 0) {
     throw new Error(
       "This zip file does not contain a .mram ritual file. Make sure you're uploading the zip from your lodge."
     );
   }
 
-  const [, bytes] = mramEntry;
-  const out = new ArrayBuffer(bytes.byteLength);
-  new Uint8Array(out).set(bytes);
-  return out;
+  return mramEntries.map(([, bytes]) => {
+    const out = new ArrayBuffer(bytes.byteLength);
+    new Uint8Array(out).set(bytes);
+    return out;
+  });
 }
 
 interface DocumentUploadProps {
-  onDocumentSaved: (docId: string, title: string, sectionCount: number) => void;
+  onDocumentSaved: (
+    docId: string,
+    title: string,
+    sectionCount: number,
+    batchCount?: number
+  ) => void;
 }
 
 type UploadStage = "idle" | "passphrase" | "processing";
@@ -52,7 +60,7 @@ export default function DocumentUpload({ onDocumentSaved }: DocumentUploadProps)
   const [progress, setProgress] = useState<string | null>(null);
   const [passphrase, setPassphrase] = useState("");
 
-  const fileDataRef = useRef<ArrayBuffer | null>(null);
+  const fileDataRef = useRef<ArrayBuffer[] | null>(null);
   const passphraseInputRef = useRef<HTMLInputElement>(null);
 
   const processFile = useCallback(
@@ -61,18 +69,23 @@ export default function DocumentUpload({ onDocumentSaved }: DocumentUploadProps)
       setProgress("Reading file...");
 
       try {
-        let data = await file.arrayBuffer();
+        const raw = await file.arrayBuffer();
 
         // iPhone users often pick the .zip we send instead of navigating into it.
-        // Auto-extract so they don't have to know the difference.
-        if (isZip(data)) {
+        // Auto-extract so they don't have to know the difference. A single zip
+        // may contain multiple .mram files (e.g. all 4 sections of a degree) —
+        // unlock once with the shared passphrase, decrypt them all.
+        let buffers: ArrayBuffer[];
+        if (isZip(raw)) {
           setProgress("Extracting zip...");
-          data = await extractMRAMFromZip(data);
+          buffers = await extractMRAMsFromZip(raw);
+        } else {
+          buffers = [raw];
         }
 
-        // Validate it's a .mram file
-        if (!isMRAMFile(data)) {
-          const bytes = new Uint8Array(data);
+        const firstInvalid = buffers.find((buf) => !isMRAMFile(buf));
+        if (firstInvalid) {
+          const bytes = new Uint8Array(firstInvalid);
           const first4Hex = Array.from(bytes.slice(0, 4))
             .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
             .join(" ");
@@ -83,7 +96,7 @@ export default function DocumentUpload({ onDocumentSaved }: DocumentUploadProps)
           let hint = "";
           if (first4Hex.startsWith("50 4B")) {
             hint =
-              " It looks like you uploaded a .zip file. Tap the zip in Files first to extract it, then upload the .mram inside.";
+              " It looks like you uploaded a nested .zip file. Tap the zip in Files first to extract it, then upload the .mram inside.";
           } else if (first4Hex === "EF BB BF EF" || first4Hex.startsWith("EF BB BF")) {
             hint =
               " The file appears to have been opened and re-saved as text. Re-download the original .mram file without opening it first.";
@@ -101,7 +114,7 @@ export default function DocumentUpload({ onDocumentSaved }: DocumentUploadProps)
         }
 
         // Store file data and prompt for passphrase
-        fileDataRef.current = data;
+        fileDataRef.current = buffers;
         setStage("passphrase");
         setProgress(null);
         // Focus passphrase input after render
@@ -120,27 +133,45 @@ export default function DocumentUpload({ onDocumentSaved }: DocumentUploadProps)
   );
 
   const handleDecrypt = useCallback(async () => {
-    if (!fileDataRef.current || !passphrase) return;
+    const buffers = fileDataRef.current;
+    if (!buffers || buffers.length === 0 || !passphrase) return;
 
     setStage("processing");
     setError(null);
-    setProgress("Decrypting ritual file...");
+
+    const total = buffers.length;
+    const isBatch = total > 1;
 
     try {
-      const mramDoc = await decryptMRAM(fileDataRef.current, passphrase);
+      const saved: { docId: string; title: string; sectionCount: number }[] = [];
 
-      setProgress(
-        `Found ${mramDoc.lines.length} lines in ${mramDoc.sections.length} sections. Encrypting and saving...`
-      );
+      for (let i = 0; i < total; i++) {
+        const label = isBatch ? `(${i + 1} of ${total}) ` : "";
+        setProgress(`${label}Decrypting ritual file...`);
 
-      const docId = await saveMRAMDocument(mramDoc);
-      const title = `${mramDoc.metadata.degree} - ${mramDoc.metadata.ceremony}`;
+        const mramDoc = await decryptMRAM(buffers[i], passphrase);
+
+        setProgress(
+          `${label}Found ${mramDoc.lines.length} lines. Encrypting and saving...`
+        );
+
+        const docId = await saveMRAMDocument(mramDoc);
+        const title = `${mramDoc.metadata.degree} - ${mramDoc.metadata.ceremony}`;
+        saved.push({ docId, title, sectionCount: mramDoc.lines.length });
+      }
 
       setProgress(null);
       setPassphrase("");
       fileDataRef.current = null;
       setStage("idle");
-      onDocumentSaved(docId, title, mramDoc.lines.length);
+
+      const first = saved[0];
+      onDocumentSaved(
+        first.docId,
+        isBatch ? `${total} rituals` : first.title,
+        isBatch ? saved.reduce((sum, d) => sum + d.sectionCount, 0) : first.sectionCount,
+        isBatch ? total : undefined
+      );
     } catch (err) {
       setError(
         err instanceof Error

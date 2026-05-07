@@ -13,18 +13,34 @@ export default function UploadPage() {
   const router = useRouter();
   const [documents, setDocuments] = useState<StoredDocument[]>([]);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [willRedirect, setWillRedirect] = useState(false);
 
   useEffect(() => {
     listDocuments().then(setDocuments).catch(console.error);
   }, []);
 
-  const handleDocumentSaved = (docId: string, title: string, sectionCount: number) => {
+  const handleDocumentSaved = (
+    docId: string,
+    title: string,
+    sectionCount: number,
+    batchCount?: number
+  ) => {
+    if (batchCount && batchCount > 1) {
+      setSuccessMessage(
+        `${batchCount} rituals uploaded successfully (${sectionCount} lines total). Tap Rehearse on any below to start practicing.`
+      );
+      setWillRedirect(false);
+      listDocuments().then(setDocuments);
+      return;
+    }
+
     setSuccessMessage(
       `"${title}" uploaded successfully with ${sectionCount} lines detected.`
     );
+    setWillRedirect(true);
     listDocuments().then(setDocuments);
 
-    // Auto-navigate to practice after 2 seconds
+    // Auto-navigate to practice after 2 seconds (single-ritual upload)
     setTimeout(() => {
       router.push(`/practice?doc=${docId}`);
     }, 2000);
@@ -50,9 +66,11 @@ export default function UploadPage() {
       {successMessage && (
         <div className="p-4 bg-green-900/30 border border-green-700/50 rounded-xl text-green-300">
           <p className="font-medium">{successMessage}</p>
-          <p className="text-sm text-green-400/70 mt-1">
-            Redirecting to practice mode...
-          </p>
+          {willRedirect && (
+            <p className="text-sm text-green-400/70 mt-1">
+              Redirecting to practice mode...
+            </p>
+          )}
         </div>
       )}
 
