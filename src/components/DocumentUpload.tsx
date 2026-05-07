@@ -1,8 +1,43 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
+import { unzip } from "fflate";
 import { decryptMRAM, isMRAMFile, MRAMExpiredError } from "@/lib/mram-format";
 import { saveMRAMDocument } from "@/lib/storage";
+
+// iOS Files lets users pick a .zip directly instead of navigating into it.
+// If the upload looks like a zip (PK header), unzip in-browser and pull the
+// first .mram entry out so the user doesn't have to extract on-device.
+function isZip(data: ArrayBuffer): boolean {
+  const b = new Uint8Array(data, 0, Math.min(4, data.byteLength));
+  return b.length >= 4 && b[0] === 0x50 && b[1] === 0x4b && b[2] === 0x03 && b[3] === 0x04;
+}
+
+async function extractMRAMFromZip(data: ArrayBuffer): Promise<ArrayBuffer> {
+  const entries = await new Promise<Record<string, Uint8Array>>((resolve, reject) => {
+    unzip(new Uint8Array(data), (err, result) => {
+      if (err) reject(err);
+      else resolve(result);
+    });
+  });
+
+  const mramEntry = Object.entries(entries).find(([name, bytes]) => {
+    if (!name.toLowerCase().endsWith(".mram")) return false;
+    if (name.startsWith("__MACOSX/") || name.includes("/._")) return false;
+    return bytes.length > 0;
+  });
+
+  if (!mramEntry) {
+    throw new Error(
+      "This zip file does not contain a .mram ritual file. Make sure you're uploading the zip from your lodge."
+    );
+  }
+
+  const [, bytes] = mramEntry;
+  const out = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(out).set(bytes);
+  return out;
+}
 
 interface DocumentUploadProps {
   onDocumentSaved: (docId: string, title: string, sectionCount: number) => void;
@@ -26,7 +61,14 @@ export default function DocumentUpload({ onDocumentSaved }: DocumentUploadProps)
       setProgress("Reading file...");
 
       try {
-        const data = await file.arrayBuffer();
+        let data = await file.arrayBuffer();
+
+        // iPhone users often pick the .zip we send instead of navigating into it.
+        // Auto-extract so they don't have to know the difference.
+        if (isZip(data)) {
+          setProgress("Extracting zip...");
+          data = await extractMRAMFromZip(data);
+        }
 
         // Validate it's a .mram file
         if (!isMRAMFile(data)) {
@@ -244,7 +286,7 @@ export default function DocumentUpload({ onDocumentSaved }: DocumentUploadProps)
         id="file-input"
         type="file"
         className="hidden"
-        accept=".mram"
+        accept=".mram,.zip,application/zip"
         onChange={handleFileInput}
       />
 
@@ -275,7 +317,7 @@ export default function DocumentUpload({ onDocumentSaved }: DocumentUploadProps)
               Drop your encrypted ritual file here
             </p>
             <p className="text-sm text-zinc-500 mt-1">
-              Accepts .mram files only
+              Accepts .mram files (or a .zip containing one)
             </p>
             <p className="text-xs text-zinc-600 mt-2">
               Your ritual file is decrypted and re-encrypted entirely on your device.
