@@ -11,6 +11,7 @@ import {
   createWhisperEngine,
   isWebSpeechAvailable,
   isMediaRecorderAvailable,
+  releaseSpeechResources,
   type STTEngine,
   type STTProvider,
 } from "@/lib/speech-to-text";
@@ -543,6 +544,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
       engineRef.current.stop();
       engineRef.current = null;
     }
+    releaseSpeechResources();
     setRehearsalState("setup");
     setCurrentIndex(0);
     setTranscript("");
@@ -717,6 +719,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
         engineRef.current.stop();
       }
       stopSpeaking();
+      releaseSpeechResources();
       void allowScreenSleep();
     };
   }, []);
@@ -732,6 +735,10 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
       void keepScreenAwake();
     } else {
       void allowScreenSleep();
+      // Rehearsal is no longer running — release the cached mic stream so
+      // the orange "in-use" indicator on iOS goes away. Re-acquired on the
+      // first line of the next rehearsal.
+      releaseSpeechResources();
     }
   }, [rehearsalState]);
 
