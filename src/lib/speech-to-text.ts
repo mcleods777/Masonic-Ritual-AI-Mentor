@@ -174,6 +174,32 @@ const VAD_SILENCE_DURATION_MS = 1800; // ms of silence before auto-stop
 const VAD_MIN_SPEECH_MS = 500; // ignore silence until user has spoken this long
 const VAD_POLL_INTERVAL_MS = 100; // how often we sample the audio level
 
+// Persistent mic stream shared across recordings. iOS Safari re-prompts for
+// mic permission on every getUserMedia() call once all tracks are stopped, so
+// we hold the stream open between lines and only release it when the consumer
+// explicitly calls releaseSpeechResources() (e.g. on unmount or stop).
+let cachedMicStream: MediaStream | null = null;
+
+async function acquireMicStream(): Promise<MediaStream> {
+  if (cachedMicStream && cachedMicStream.active) {
+    return cachedMicStream;
+  }
+  cachedMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  return cachedMicStream;
+}
+
+/**
+ * Release the cached mic stream. Call when voice rehearsal is fully done
+ * (unmount, stop rehearsal, switch away from voice mode). Next start() will
+ * re-acquire and re-prompt only if the browser has dropped the grant.
+ */
+export function releaseSpeechResources(): void {
+  if (cachedMicStream) {
+    cachedMicStream.getTracks().forEach((t) => t.stop());
+    cachedMicStream = null;
+  }
+}
+
 export function createWhisperEngine(): STTEngine {
   if (typeof window === "undefined") {
     throw new Error("Whisper engine is only available in the browser");
@@ -186,6 +212,9 @@ export function createWhisperEngine(): STTEngine {
   let listening = false;
   let mediaRecorder: MediaRecorder | null = null;
   let audioChunks: Blob[] = [];
+  // Note: the underlying MediaStream is owned by the module-level cache (see
+  // acquireMicStream / releaseSpeechResources). Do not stop tracks here — that
+  // would force iOS Safari to re-prompt for mic permission on the next line.
   let stream: MediaStream | null = null;
   let audioContext: AudioContext | null = null;
   let vadInterval: ReturnType<typeof setInterval> | null = null;
@@ -212,7 +241,7 @@ export function createWhisperEngine(): STTEngine {
       if (listening) return;
 
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream = await acquireMicStream();
 
         // Pick a supported MIME type
         const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
@@ -231,12 +260,9 @@ export function createWhisperEngine(): STTEngine {
         };
 
         mediaRecorder.onstop = async () => {
-          // Stop VAD monitoring
+          // Stop VAD monitoring (the AudioContext is per-recording; mic
+          // stream stays cached at module level for the next line).
           stopVAD();
-
-          // Release mic
-          stream?.getTracks().forEach((t) => t.stop());
-          stream = null;
 
           if (audioChunks.length === 0) {
             engine.onEnd?.();
@@ -284,8 +310,9 @@ export function createWhisperEngine(): STTEngine {
         mediaRecorder.onerror = () => {
           listening = false;
           stopVAD();
-          stream?.getTracks().forEach((t) => t.stop());
-          stream = null;
+          // Keep the cached mic stream alive — recording errors don't
+          // invalidate the permission grant, and dropping it would force
+          // iOS Safari to re-prompt on the next attempt.
           engine.onError?.("Recording failed");
           engine.onEnd?.();
         };
@@ -358,8 +385,10 @@ export function createWhisperEngine(): STTEngine {
       } catch (err) {
         listening = false;
         stopVAD();
-        stream?.getTracks().forEach((t) => t.stop());
-        stream = null;
+        // If acquireMicStream() threw (e.g. user denied), the cache was
+        // never populated. If a later step threw, the stream is still
+        // valid for the next attempt. Either way, do not stop tracks
+        // here — that's what releaseSpeechResources() is for.
         engine.onError?.(
           err instanceof Error ? err.message : "Failed to access microphone"
         );

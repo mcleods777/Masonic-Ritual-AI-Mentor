@@ -64,6 +64,7 @@ vi.mock("@/lib/speech-to-text", () => ({
   createWhisperEngine: vi.fn(),
   isWebSpeechAvailable: vi.fn(() => true),
   isMediaRecorderAvailable: vi.fn(() => true),
+  releaseSpeechResources: vi.fn(),
 }));
 
 import RehearsalMode, {
