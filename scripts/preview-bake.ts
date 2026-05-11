@@ -2451,6 +2451,16 @@ export function handleIndexRequest(res: http.ServerResponse): void {
       animation: none !important;
     }
   }
+  /* Rebake spinners are progress indicators, not decoration — exempt them
+     from the reduced-motion clamp so a pending operation stays visible.
+     This rule comes after both reduce-motion blocks so it wins on order.  */
+  @media (prefers-reduced-motion: reduce) {
+    .rebake-btn.rebaking::before,
+    .try-overrides-btn.rebaking::before,
+    .filter-shortcut.bulk-rebake.rebaking::before {
+      animation: rebake-spin 1s linear infinite !important;
+    }
+  }
   /* Bulk-rebake button in the status filter row — shape matches the
      bulk-approve button it sits next to. Uses amber-quiet (matches
      the per-line .rebake-btn hover) so the regenerate action reads
@@ -3408,6 +3418,12 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         // and persist to localStorage. We DO NOT auto-rebake — user clicks
         // Try when ready.
         const overrides = profileSettingsToOverrides(p);
+        // Merge: preserve any per-line speakAsOverride the user has written.
+        // profileSettingsToOverrides never includes speakAsOverride (correctly
+        // so — tagged spoken text is per-line, not part of a profile), but a
+        // plain replace would silently drop it. Merging keeps it intact.
+        const existingNote = readDirectorNote(state.activeSlug, lineId);
+        if (existingNote.speakAsOverride) overrides.speakAsOverride = existingNote.speakAsOverride;
         writeDirectorNote(state.activeSlug, lineId, overrides);
         if (det) {
           // Sync each cell to the loaded profile. Two flavors:
@@ -3562,10 +3578,11 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         if (sel.value === "__custom__") {
           if (cell) cell.classList.add('dn-cell--custom-open');
           if (customInput) {
-            // If the stored value is already a custom-prose override,
-            // keep it; otherwise start blank and let the user type.
-            const existing = stored[field] || "";
-            customInput.value = existing;
+            // Eagerly write the current input value to storage so "Try these
+            // settings" reads what is visible, not the stale preset that was
+            // stored before the user switched to custom mode.
+            stored[field] = customInput.value.trim() || undefined;
+            writeDirectorNote(state.activeSlug, lineId, stored);
             customInput.focus();
           }
         } else {
@@ -3842,6 +3859,15 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         if (det) {
           det.querySelectorAll('select[data-field]').forEach(s => { s.value = ""; });
           det.querySelectorAll('.director-note-prose[data-field]').forEach(inp => { inp.value = ""; });
+          // Re-fill speakAs with the original line text so "Clear overrides"
+          // leaves the panel in the same visible state as "Reset to original".
+          const speakAsTa = det.querySelector('textarea.director-note-speakas-textarea[data-line-id="' + lineId + '"]');
+          if (speakAsTa) {
+            const docLine = (state.activeDoc && state.activeDoc.lines)
+              ? state.activeDoc.lines.find(l => String(l.id) === String(lineId))
+              : null;
+            speakAsTa.value = (docLine && docLine.plain) || "";
+          }
           // Close any cells currently in custom-prose mode
           det.querySelectorAll('.dn-cell--custom-open').forEach(c => c.classList.remove('dn-cell--custom-open'));
           const slider = det.querySelector('.director-note-temp-slider');
@@ -3867,6 +3893,13 @@ export function handleIndexRequest(res: http.ServerResponse): void {
         // benefit from the role-card context, and overrides are
         // experimental anyway.
         const payload = { forcePreamble: true, ...stored };
+        if (new Blob([JSON.stringify(payload)]).size > 8192) {
+          if (info) {
+            info.textContent = "speakAs too large for the API — shorten or remove non-ASCII";
+            setTimeout(() => { if (info) info.textContent = ''; }, 4000);
+          }
+          return;
+        }
         btn.disabled = true;
         btn.classList.add("rebaking");
         const original = btn.textContent;
