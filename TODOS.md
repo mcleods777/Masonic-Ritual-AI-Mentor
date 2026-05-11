@@ -221,6 +221,91 @@ investment is worth it.
 
 ---
 
+## Bake Preview Tool
+
+### Director's note panel — adversarial review LOW findings
+**Priority:** P3
+**What:** Five low-severity UX edges surfaced by the post-PR adversarial review
+on the Director's note redesign (PR #77, branch `redesign/bake-preview-gui`).
+The two MEDIUM findings (focus-visible specificity, voice-load desync) shipped
+in `ab9c00b`. These five remained as deferred polish.
+
+1. **Picking "(custom prose…)" doesn't eagerly clear the stored preset.** When
+   the user opens the custom-prose mode on a Style/Pace/Accent/Model cell, the
+   pre-filled preset value stays in `stored[field]` until the input handler
+   fires. If they pick `__custom__` then click Try without typing, the rebake
+   uses the OLD preset. Visible UI says custom mode; the network request
+   disagrees.
+   *Fix sketch:* in the select-change handler at `scripts/preview-bake.ts:3537`,
+   on `sel.value === '__custom__'`, eagerly write
+   `stored[field] = customInput.value.trim() || undefined` so the saved state
+   matches what's visible.
+
+2. **8 KB body cap is bytes; `maxlength` is chars.** The speakAs textarea
+   accepts up to 4000 chars per its `maxlength`. With multi-byte UTF-8 (CJK,
+   emoji), 4000 chars can balloon to 12-16 KB and silently 413 against the
+   server's `total > 8192` guard at `scripts/preview-bake.ts:1083`. The client
+   surfaces only a generic "rebake failed."
+   *Fix sketch:* compute `new Blob([JSON.stringify(payload)]).size` client-side
+   before POST; if over 8 KB, surface "speakAs too large for the API — shorten
+   or remove non-ASCII." Or raise the cap.
+
+3. **Reduced-motion kills the rebake spinner globally.** The Phase-3 global
+   `prefers-reduced-motion: reduce` rule clamps every animation duration to
+   0.01 ms — including `.rebake-btn.rebaking::before`. Users with reduced-motion
+   enabled see no spinner during a 5-15 s rebake; only the button-text swap to
+   "Rebaking…" indicates progress. Bulk rebakes have a counter ("Rebaking 3/12…")
+   so they're fine, but the per-line button could feel frozen.
+   *Fix sketch:* add seconds-elapsed text to the per-line rebake button while
+   `.rebaking` is set, OR exempt `.rebake-spin` from the reduced-motion clamp
+   (it's a progress indicator, not decorative motion).
+
+4. **"Clear overrides" wipes speakAs differently from "Reset to original."**
+   "Clear overrides" sets every `.director-note-prose` input to `""`, including
+   the speakAs textarea. "Reset to original" restores it to `l.plain`. Storage
+   ends up correct in both cases (empty = no override = server uses `line.plain`),
+   but the visible state diverges — two related buttons leave the panel in
+   different shapes.
+   *Fix sketch:* after the clear loop at `scripts/preview-bake.ts:3742`,
+   re-fill the speakAs textarea with `docLine.plain` so both reset paths leave
+   the same visible state.
+
+5. **Profile-load wipes speakAsOverride silently.** `writeDirectorNote(slug,
+   lineId, overrides)` at `scripts/preview-bake.ts:3406` REPLACES the whole
+   storage object. `profileSettingsToOverrides()` deliberately omits
+   `speakAsOverride` (correctly — tagged spoken text is per-line), so loading
+   a profile silently drops the user's per-line tagged text without warning.
+   The Phase-1 redesign elevated speakAs to "the hero" of the panel, so losing
+   it on a profile pick is more surprising now than it was.
+   *Fix sketch:* merge instead of replace —
+   `writeDirectorNote(slug, lineId, { ...overrides, speakAsOverride: existing.speakAsOverride })`.
+   Or surface a warning in the info-line text ("Loaded profile X — note: your
+   tagged spoken text was preserved" / "...was cleared").
+
+**Why:** None of these break correctness. They're UX edges that surface in
+specific flows — combined, they round out the redesign so behavior matches
+intent across every interaction path. Each is a localized one-file change.
+
+**Pros:** Knocks down the trailing five issues from the adversarial review so
+the bake tool's behavior is internally consistent (storage matches UI, related
+buttons leave the panel in the same state, expensive operations have a visible
+progress signal even with reduced motion).
+
+**Cons:** Low-frequency edges. None block normal workflows. P3 because the
+combined effort is ~30-60 min CC time and the user impact is "occasional
+confusion" not "data loss" or "broken feature."
+
+**Context:** Adversarial review by Claude subagent on commit `7d6413f` of
+`redesign/bake-preview-gui`. Findings 1, 3, 4, 5 are clearly localized to
+specific file:line references in `scripts/preview-bake.ts`. Finding 2 is an
+HTTP boundary issue and may want a project-wide convention (compute byte size
+client-side for any payload near the cap).
+
+**Depends on / blocked by:** nothing — PR #77 is independent and these can
+ship as a follow-up commit on the same branch or a fresh one.
+
+---
+
 ## Auth & Distribution
 
 ### Stateful one-time-use magic links
