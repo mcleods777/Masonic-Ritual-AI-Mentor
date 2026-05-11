@@ -306,3 +306,30 @@ relay and real address on the allowlist.
 ## Completed
 
 <!-- Items completed will be moved here with version and date. -->
+
+### Director's note panel — adversarial review LOW findings (Bake Preview Tool)
+**Completed:** 2026-05-11
+**Was:** P3 — five UX edges from the post-PR #77 adversarial review deferred to follow-up.
+
+All five findings shipped in `fix/bake-preview-p3-followups`:
+
+1. **Eager clear on `__custom__` pick** — select-change handler now writes
+   `stored[field] = customInput.value.trim() || undefined` immediately when the
+   user picks `(custom prose…)`, so "Try these settings" never sends the stale
+   preset value.
+2. **Client-side 8 KB guard** — `try-overrides` handler computes
+   `new Blob([JSON.stringify(payload)]).size` before POST and surfaces a
+   friendly inline error if over 8 KB, preventing silent 413s from multi-byte
+   UTF-8 content.
+3. **Spinner exempted from reduced-motion** — a third `@media
+   (prefers-reduced-motion: reduce)` block placed after both clamp blocks
+   restores `animation: rebake-spin 1s linear infinite` on all three spinner
+   targets (`.rebake-btn`, `.try-overrides-btn`, `.filter-shortcut.bulk-rebake`
+   `::before`), keeping the progress indicator visible.
+4. **"Clear overrides" aligned with "Reset to original"** — after the
+   `.director-note-prose` wipe loop, the handler now re-fills the speakAs
+   textarea with `docLine.plain`, so both reset paths leave the same visible
+   state.
+5. **Profile-load preserves speakAsOverride** — profile handler reads existing
+   note before writing, then merges `speakAsOverride` back if present, so
+   per-line tagged text survives a profile pick.
