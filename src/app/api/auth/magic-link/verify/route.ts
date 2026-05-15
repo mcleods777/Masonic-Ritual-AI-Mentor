@@ -19,6 +19,7 @@ import {
   signSessionToken,
   verifyMagicLinkToken,
 } from "@/lib/auth";
+import { recordLogin } from "@/lib/login-tracking";
 
 export const runtime = "nodejs";
 
@@ -32,6 +33,8 @@ export async function GET(req: NextRequest) {
 
   const payload = await verifyMagicLinkToken(token);
   if (!payload) return failureRedirect();
+
+  await recordLogin(payload.email);
 
   const sessionToken = await signSessionToken(payload.email);
 
