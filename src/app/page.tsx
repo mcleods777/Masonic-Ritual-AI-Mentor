@@ -26,7 +26,7 @@ export default function HomePage() {
             <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
           </svg>
         </div>
-        <h1 className="text-3xl md:text-5xl font-bold text-zinc-100 tracking-tight">
+        <h1 className="text-2xl font-cinzel uppercase tracking-[0.18em] text-zinc-100">
           Masonic Ritual Mentor
         </h1>
         <p className="text-base md:text-lg text-zinc-400 mt-3 md:mt-4 max-w-2xl mx-auto">
