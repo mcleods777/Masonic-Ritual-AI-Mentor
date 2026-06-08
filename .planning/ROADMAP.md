@@ -79,7 +79,16 @@ Plans:
   5. Bake-time audio-duration anomaly detector flags any baked line whose duration is >3× the ritual's median for its character count
   6. `src/lib/idb-schema.ts` is the single `onupgradeneeded` source of truth, imported by both `storage.ts` and `voice-storage.ts`; a dual-open test confirms all stores exist regardless of which module opens first
   7. Shannon can scrub baked lines in a browser against `localhost:8883` before re-encrypting a `.mram`
-**Plans**: TBD
+**Plans**: 8 plans
+Plans:
+- [x] 03-01-deps-and-scaffolding-PLAN.md — wave 0: install p-limit/music-metadata/fake-indexeddb + gitignore + wave-0 test scaffolds (2026-04-23, commits 77c07c0 + 73e350c)
+- [x] 03-02-idb-schema-PLAN.md — AUTHOR-10: extract idb-schema.ts single source of truth + feedbackTraces store + dual-open test (2026-04-23, commits 43774bd + a90ffe2)
+- [x] 03-03-dev-guard-PLAN.md — D-15: extract shared dev-guard.ts + refactor /author/page.tsx to use isDev()
+- [x] 03-04-author-validation-PLAN.md — AUTHOR-05 D-08: add bake-band word-ratio hard-fail to cipher/plain parity validator (2026-04-23, commit 76c565f)
+- [x] 03-05-cache-migration-PLAN.md — AUTHOR-01 + AUTHOR-03: bump cache key to v3, add modelId, move cache to rituals/_bake-cache/, one-shot migration, lock DEFAULT_MODELS order (2026-04-23, commits 0b0c4ea + 5e32cb9)
+- [x] 03-06-bake-integration-PLAN.md — AUTHOR-02/04/05/06/07: wire validator gate + short-line Google TTS + duration-anomaly detector + --verify-audio + line-level _RESUME.json writes (D-06) into build-mram-from-dialogue.ts; new scripts/lib/resume-state.ts + scripts/lib/bake-math.ts (2026-04-23, commits 43209d2 + 332b483 + 04bb0e6)
+- [x] 03-07-bake-all-orchestrator-PLAN.md — AUTHOR-02/09: scripts/bake-all.ts with --since/--dry-run/--resume/--parallel + p-limit + _RESUME.json read-side + validator gate + build-mram spawn-arg plumbing + 27 unit tests (2026-04-23, commits 54e7ed5 + 61277b1)
+- [x] 03-08-preview-bake-PLAN.md — AUTHOR-08: scripts/preview-bake.ts localhost-only cache scrubber with dev-guard + loopback-only bind + defense-in-depth path-traversal safety (regex gate + path.resolve + fs.realpathSync containment for symlink-escape) + RFC 7233 Range streaming + 20 unit tests (2026-04-23, commits a679360 + 643baf7)
 **UI hint**: no
 
 ### Phase 4: Content Coverage
@@ -92,7 +101,16 @@ Plans:
   3. WM charge, SW duties, JW duties, and any other lodge-designated lectures exist as standalone `.mram` practice units
   4. A verifier script confirms every shipped `.mram` has per-line Opus embedded (no line falls through to live TTS on a first-time rehearsal)
   5. Every shipped `.mram` passes the cipher/plain parity validator before being committed — no phantom scoring failures from cipher-only edits reach users
-**Plans**: TBD
+**Plans**: 8 plans
+Plans:
+- [ ] 04-01-verifier-release-gate-PLAN.md — CONTENT-06, CONTENT-07: extend verify-mram with --check-audio-coverage + build verify-content release gate (Wave 0, engineering)
+- [ ] 04-02-content-checklist-PLAN.md — create 04-CONTENT-CHECKLIST.md ritual-readiness ledger + parseable-markdown shape test (Wave 0, tracking)
+- [ ] 04-03-ea-rebake-PLAN.md — CONTENT-01: re-bake 4 existing EA rituals under v3 cache (Wave 1, content-labor)
+- [ ] 04-04-fc-authoring-bake-PLAN.md — CONTENT-02: author + bake 4 fresh FC rituals (opening, passing, middle-chamber-lecture, closing) (Wave 1, content-labor)
+- [ ] 04-05-mm-authoring-bake-PLAN.md — CONTENT-03: author + bake 4 fresh MM rituals (opening, raising, hiramic-legend, closing) (Wave 1, content-labor)
+- [ ] 04-06-installation-authoring-bake-PLAN.md — CONTENT-04: author + bake annual officer installation as single long ritual (Wave 1, content-labor)
+- [ ] 04-07-lectures-authoring-bake-PLAN.md — CONTENT-05: author + bake 5-9 officer lectures/charges as standalone practice units (Wave 1, content-labor)
+- [ ] 04-08-phase-release-verification-PLAN.md — aggregate verify-content + dogfood on masonicmentor.app + mark CONTENT-01..07 complete (Wave 2, release)
 **UI hint**: no
 
 ### Phase 5: Coach Quality Lift
@@ -144,9 +162,9 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Pre-invite Hygiene | 7/7 | Complete (UAT pending) | 2026-04-21 |
-| 2. Safety Floor | 0/9 | Not started | - |
-| 3. Authoring Throughput | 0/0 | Not started | - |
-| 4. Content Coverage | 0/0 | Not started | - |
+| 2. Safety Floor | 9/9 | Complete (merged to main PR #68) | 2026-04-22 |
+| 3. Authoring Throughput | 8/8 | Execution complete (merge PR pending) | 2026-04-23 |
+| 4. Content Coverage | 0/8 | Planned | - |
 | 5. Coach Quality Lift | 0/0 | Not started | - |
 | 6. Admin Substrate & Distribution | 0/0 | Not started | - |
 | 7. Onboarding Polish | 0/0 | Not started | - |
@@ -172,8 +190,10 @@ Plans:
 - **Brownfield milestone** — the pilot already ships the full rehearsal loop. No phase re-builds existing capability; every phase is a delta.
 - **Parallelism opportunity** — Phase 3 (authoring throughput tooling) and Phase 2 (safety floor) touch disjoint files and can run in parallel on calendar time. The dependency from Phase 5 → Phase 3 is narrow (just AUTHOR-10 idb-schema extract → COACH-06 feedbackTraces store).
 - **Phase 4 is Shannon-labor-dominated** — once the tooling in Phase 3 lands, Phase 4 is primarily content baking (ceremony-by-ceremony) rather than engineering work.
+- **Phase 4 plan structure** — Wave 0 (engineering + tracking: 04-01, 04-02) → Wave 1 (content labor: 04-03..07, independent, Shannon-picked order) → Wave 2 (release verification: 04-08). Only 04-01, 04-02, 04-08 are fully autonomous; 04-03 through 04-07 include human checkpoints for authoring + scrub judgment.
 - **Success criteria for each phase are observable user or system behaviors**, not task completion. Downstream `/gsd-plan-phase` derives must-haves from these criteria.
 
 ---
 *Roadmap created: 2026-04-20*
 *Granularity: standard*
+*Phase 4 planned: 2026-04-23*

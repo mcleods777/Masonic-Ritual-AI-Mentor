@@ -32,14 +32,19 @@
 import * as fs from "node:fs";
 import { parseDialogue } from "../src/lib/dialogue-format";
 import { buildFromDialogue } from "../src/lib/dialogue-to-mram";
-import { computeCacheKey, deleteCacheEntry } from "./render-gemini-audio";
+import {
+  CACHE_DIR,
+  DEFAULT_MODELS,
+  computeCacheKey,
+  deleteCacheEntry,
+} from "./render-gemini-audio";
 import {
   buildPreamble,
   validateVoiceCast,
   type VoiceCastFile,
 } from "../src/lib/voice-cast";
 import { getGeminiVoiceForRole } from "../src/lib/tts-cloud";
-import type { StylesFile } from "../src/lib/styles";
+import { hashLineText, isValidSpeakAs, type StylesFile } from "../src/lib/styles";
 
 // Must stay in sync with build-mram-from-dialogue.ts defaults.
 const MIN_PREAMBLE_LINE_CHARS = Number(
@@ -59,33 +64,45 @@ function parseArgs(argv: string[]): ParsedArgs {
   const positional = argv.filter((a) => !a.startsWith("--"));
   const yes = argv.includes("--yes");
 
+  // ME-03: collect IDs from both --lines=X and --lines Y forms, then
+  // dedupe via Set so passing both forms (or two equals-forms) doesn't
+  // double-attempt deletion and inflate the "deleted" count.
+  const rawIds: number[] = [];
   const linesFlag = argv.find((a) => a.startsWith("--lines="));
-  const lineIds = linesFlag
-    ? linesFlag
+  if (linesFlag) {
+    rawIds.push(
+      ...linesFlag
         .slice("--lines=".length)
-        .split(",")
-        .map((s) => Number(s.trim()))
-        .filter((n) => Number.isFinite(n))
-    : [];
-
-  // Also accept --lines 66,67 (space-separated value) for muscle-memory
-  // parity with other CLI tools.
-  const linesIdx = argv.indexOf("--lines");
-  if (linesIdx >= 0 && argv[linesIdx + 1] && !argv[linesIdx + 1].startsWith("--")) {
-    lineIds.push(
-      ...argv[linesIdx + 1]
         .split(",")
         .map((s) => Number(s.trim()))
         .filter((n) => Number.isFinite(n)),
     );
   }
 
-  const roleFlag = argv.find((a) => a.startsWith("--role="));
-  const roles = roleFlag ? [roleFlag.slice("--role=".length)] : [];
-  const roleIdx = argv.indexOf("--role");
-  if (roleIdx >= 0 && argv[roleIdx + 1] && !argv[roleIdx + 1].startsWith("--")) {
-    roles.push(argv[roleIdx + 1]);
+  // Also accept --lines 66,67 (space-separated value) for muscle-memory
+  // parity with other CLI tools. Pull the next arg into a local so the
+  // guard is readable and the optional-undefined access isn't re-done.
+  const linesIdx = argv.indexOf("--lines");
+  const nextLinesArg = linesIdx >= 0 ? argv[linesIdx + 1] : undefined;
+  if (nextLinesArg && !nextLinesArg.startsWith("--")) {
+    rawIds.push(
+      ...nextLinesArg
+        .split(",")
+        .map((s) => Number(s.trim()))
+        .filter((n) => Number.isFinite(n)),
+    );
   }
+
+  const lineIds = Array.from(new Set(rawIds));
+
+  const roleFlag = argv.find((a) => a.startsWith("--role="));
+  const rawRoles: string[] = roleFlag ? [roleFlag.slice("--role=".length)] : [];
+  const roleIdx = argv.indexOf("--role");
+  const nextRoleArg = roleIdx >= 0 ? argv[roleIdx + 1] : undefined;
+  if (nextRoleArg && !nextRoleArg.startsWith("--")) {
+    rawRoles.push(nextRoleArg);
+  }
+  const roles = Array.from(new Set(rawRoles));
 
   if (positional.length < 1 || positional.length > 2) {
     throw new Error(
@@ -217,6 +234,27 @@ async function main() {
     }
   }
 
+  // Build speakAs-by-lineId map (same logic as bake script). Lines with
+  // a speakAs override compute their cache key against the override text
+  // (and skip the preamble), so invalidation must mirror that exactly.
+  const speakAsByLineId = new Map<number, string>();
+  if (stylesPayload) {
+    const speakAsByHash = new Map<string, string>();
+    for (const entry of stylesPayload.styles) {
+      if (entry.speakAs && isValidSpeakAs(entry.speakAs)) {
+        speakAsByHash.set(entry.lineHash, entry.speakAs);
+      }
+    }
+    if (speakAsByHash.size > 0) {
+      for (const line of doc.lines) {
+        if (!line.plain || !line.role) continue;
+        const hash = await hashLineText(line.plain);
+        const sa = speakAsByHash.get(hash);
+        if (sa) speakAsByLineId.set(line.id, sa);
+      }
+    }
+  }
+
   // Determine which lines to target. By id and/or by role.
   const idSet = new Set(args.lineIds);
   const roleSet = new Set(args.roles);
@@ -244,7 +282,8 @@ async function main() {
   let deleted = 0;
 
   for (const line of targeted) {
-    const cleanText = line.plain.trim();
+    const speakAs = speakAsByLineId.get(line.id);
+    const cleanText = (speakAs ?? line.plain).trim();
     const voice = getGeminiVoiceForRole(line.role);
 
     // Two buckets of "unbakeable": hard-skipped (below MIN_BAKE_LINE_CHARS)
@@ -259,29 +298,21 @@ async function main() {
     }
 
     const preamble =
-      cleanText.length >= MIN_PREAMBLE_LINE_CHARS
+      !speakAs && cleanText.length >= MIN_PREAMBLE_LINE_CHARS
         ? preambleByRole[line.role] ?? ""
         : "";
 
-    const cacheKey = computeCacheKey(cleanText, line.style, voice, preamble);
+    // AUTHOR-01 D-02: cache keys now include modelId. We don't know at
+    // invalidation time which model rendered the cached entry, so iterate
+    // the entire fallback chain and check each key. Any hit gets deleted.
+    const candidateKeys = DEFAULT_MODELS.map((modelId) =>
+      computeCacheKey(cleanText, line.style, voice, modelId, preamble),
+    );
+    const existingKeys = candidateKeys.filter((cacheKey) =>
+      fs.existsSync(`${CACHE_DIR}/${cacheKey}.opus`),
+    );
 
-    // Check if cached without touching the cache dir ourselves — defer
-    // to the deleteCacheEntry helper so we reuse its logic.
-    // Tactic: dry-run by checking existence via fs.existsSync in the
-    // invalidation helper's path. Since deleteCacheEntry only deletes
-    // if the file exists (returns boolean), we can use its return value
-    // to tell cache-hit vs cache-miss, but only after deciding to delete.
-    //
-    // For dry-run we need a separate existence check. Mirror the path
-    // computation from deleteCacheEntry: CACHE_DIR/{key}.opus
-    const cacheDir =
-      process.env.XDG_CACHE_HOME
-        ? `${process.env.XDG_CACHE_HOME}/masonic-mram-audio`
-        : `${process.env.HOME}/.cache/masonic-mram-audio`;
-    const cachePath = `${cacheDir}/${cacheKey}.opus`;
-    const exists = fs.existsSync(cachePath);
-
-    if (!exists) {
+    if (existingKeys.length === 0) {
       console.error(
         `  id=${line.id.toString().padStart(3)} ${line.role.padEnd(8)}  "${cleanText.slice(0, 40)}${cleanText.length > 40 ? "…" : ""}" — not cached`,
       );
@@ -289,17 +320,26 @@ async function main() {
       continue;
     }
 
-    foundInCache++;
+    foundInCache += existingKeys.length;
 
     if (args.yes) {
-      const actuallyDeleted = deleteCacheEntry(cacheKey);
-      if (actuallyDeleted) deleted++;
+      let anyDeleted = false;
+      for (const cacheKey of existingKeys) {
+        const actuallyDeleted = deleteCacheEntry(cacheKey);
+        if (actuallyDeleted) {
+          deleted++;
+          anyDeleted = true;
+        }
+      }
       console.error(
-        `  id=${line.id.toString().padStart(3)} ${line.role.padEnd(8)}  "${cleanText.slice(0, 40)}${cleanText.length > 40 ? "…" : ""}" — ${actuallyDeleted ? "DELETED" : "already gone"}`,
+        `  id=${line.id.toString().padStart(3)} ${line.role.padEnd(8)}  "${cleanText.slice(0, 40)}${cleanText.length > 40 ? "…" : ""}" — ${anyDeleted ? `DELETED (${existingKeys.length} entr${existingKeys.length === 1 ? "y" : "ies"} across model chain)` : "already gone"}`,
       );
     } else {
+      const keyPreview = existingKeys
+        .map((k) => k.slice(0, 12) + "…")
+        .join(", ");
       console.error(
-        `  id=${line.id.toString().padStart(3)} ${line.role.padEnd(8)}  "${cleanText.slice(0, 40)}${cleanText.length > 40 ? "…" : ""}" — would delete (cacheKey=${cacheKey.slice(0, 12)}…)`,
+        `  id=${line.id.toString().padStart(3)} ${line.role.padEnd(8)}  "${cleanText.slice(0, 40)}${cleanText.length > 40 ? "…" : ""}" — would delete ${existingKeys.length} entr${existingKeys.length === 1 ? "y" : "ies"} (cacheKey(s)=${keyPreview})`,
       );
     }
   }

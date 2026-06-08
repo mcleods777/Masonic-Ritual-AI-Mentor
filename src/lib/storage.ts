@@ -9,64 +9,21 @@
 
 import type { MRAMDocument, MRAMRitualSection } from "./mram-format";
 import { mramToSections, mramToPlainText } from "./mram-format";
-
-const DB_NAME = "masonic-ritual-mentor";
-// MUST stay in lockstep with src/lib/voice-storage.ts DB_VERSION — same
-// database, different modules that happen to own different object stores.
-// v3: adds voices store. v4: adds audioCache store for Gemini TTS output.
-const DB_VERSION = 4;
-const DOCUMENTS_STORE = "documents";
-const SECTIONS_STORE = "sections";
-const SETTINGS_STORE = "settings";
+import {
+  openDB,
+  DOCUMENTS_STORE,
+  SECTIONS_STORE,
+  SETTINGS_STORE,
+} from "./idb-schema";
 
 // ============================================================
 // IndexedDB helpers
 // ============================================================
-
-function openDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result);
-
-    request.onupgradeneeded = (event) => {
-      const db = (event.target as IDBOpenDBRequest).result;
-
-      if (!db.objectStoreNames.contains(DOCUMENTS_STORE)) {
-        db.createObjectStore(DOCUMENTS_STORE, { keyPath: "id" });
-      }
-
-      if (!db.objectStoreNames.contains(SECTIONS_STORE)) {
-        const sectionStore = db.createObjectStore(SECTIONS_STORE, {
-          keyPath: "id",
-        });
-        sectionStore.createIndex("documentId", "documentId", { unique: false });
-        sectionStore.createIndex("degree", "degree", { unique: false });
-      }
-
-      if (!db.objectStoreNames.contains(SETTINGS_STORE)) {
-        db.createObjectStore(SETTINGS_STORE, { keyPath: "key" });
-      }
-
-      // v3: voices store for local Voxtral voice samples
-      if (!db.objectStoreNames.contains("voices")) {
-        db.createObjectStore("voices", { keyPath: "id" });
-      }
-
-      // v4: audioCache for Gemini TTS output. Parallel definition to
-      // src/lib/voice-storage.ts — both modules need to create the store
-      // because either one might be the first to open the DB after an
-      // upgrade, and IndexedDB only fires onupgradeneeded once per version.
-      if (!db.objectStoreNames.contains("audioCache")) {
-        const cacheStore = db.createObjectStore("audioCache", {
-          keyPath: "key",
-        });
-        cacheStore.createIndex("createdAt", "createdAt", { unique: false });
-      }
-    };
-  });
-}
+//
+// The shared openDB() + store-name constants now live in src/lib/idb-schema.ts
+// (AUTHOR-10 D-16). This module no longer opens the database directly or
+// declares its own version constant — bumping the DB version is a single-file
+// edit in idb-schema.ts.
 
 // ============================================================
 // Web Crypto encryption for ritual text at rest
@@ -74,51 +31,62 @@ function openDB(): Promise<IDBDatabase> {
 
 async function getOrCreateKey(): Promise<CryptoKey> {
   const db = await openDB();
+  // ME-04: wrap in try/finally so any intermediate rejection (importKey,
+  // generateKey, exportKey, put) still releases the IDBDatabase handle.
+  // Chrome caps open handles and an unreleased one also blocks future
+  // versionchange events needed for the next schema bump.
+  try {
+    // Try to load existing key
+    const existingKey = await new Promise<CryptoKey | null>(
+      (resolve, reject) => {
+        const tx = db.transaction(SETTINGS_STORE, "readonly");
+        const store = tx.objectStore(SETTINGS_STORE);
+        const request = store.get("encryption-key");
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          if (request.result) {
+            crypto.subtle
+              .importKey(
+                "jwk",
+                request.result.value,
+                { name: "AES-GCM", length: 256 },
+                true,
+                ["encrypt", "decrypt"],
+              )
+              .then(resolve)
+              .catch(() => resolve(null));
+          } else {
+            resolve(null);
+          }
+        };
+      },
+    );
 
-  // Try to load existing key
-  const existingKey = await new Promise<CryptoKey | null>((resolve, reject) => {
-    const tx = db.transaction(SETTINGS_STORE, "readonly");
-    const store = tx.objectStore(SETTINGS_STORE);
-    const request = store.get("encryption-key");
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => {
-      if (request.result) {
-        crypto.subtle
-          .importKey("jwk", request.result.value, { name: "AES-GCM", length: 256 }, true, [
-            "encrypt",
-            "decrypt",
-          ])
-          .then(resolve)
-          .catch(() => resolve(null));
-      } else {
-        resolve(null);
-      }
-    };
-  });
+    if (existingKey) {
+      return existingKey;
+    }
 
-  if (existingKey) {
+    // Generate new key
+    const key = await crypto.subtle.generateKey(
+      { name: "AES-GCM", length: 256 },
+      true,
+      ["encrypt", "decrypt"],
+    );
+
+    // Store it
+    const jwk = await crypto.subtle.exportKey("jwk", key);
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(SETTINGS_STORE, "readwrite");
+      const store = tx.objectStore(SETTINGS_STORE);
+      const request = store.put({ key: "encryption-key", value: jwk });
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve();
+    });
+
+    return key;
+  } finally {
     db.close();
-    return existingKey;
   }
-
-  // Generate new key
-  const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, [
-    "encrypt",
-    "decrypt",
-  ]);
-
-  // Store it
-  const jwk = await crypto.subtle.exportKey("jwk", key);
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(SETTINGS_STORE, "readwrite");
-    const store = tx.objectStore(SETTINGS_STORE);
-    const request = store.put({ key: "encryption-key", value: jwk });
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve();
-  });
-
-  db.close();
-  return key;
 }
 
 async function encrypt(text: string): Promise<{ ciphertext: ArrayBuffer; iv: Uint8Array }> {
@@ -187,73 +155,77 @@ interface StoredSectionRecord {
 export async function saveMRAMDocument(mramDoc: MRAMDocument): Promise<string> {
   const id = crypto.randomUUID();
   const db = await openDB();
+  // ME-04: try/finally so any intermediate encrypt/put rejection still
+  // releases the IDBDatabase handle.
+  try {
+    // Build plain-text-only representation for AI context
+    const plainText = mramToPlainText(mramDoc);
+    const { ciphertext: rawTextCipher, iv: rawTextIv } = await encrypt(plainText);
 
-  // Build plain-text-only representation for AI context
-  const plainText = mramToPlainText(mramDoc);
-  const { ciphertext: rawTextCipher, iv: rawTextIv } = await encrypt(plainText);
+    const sections = mramToSections(mramDoc);
+    const title = `${mramDoc.metadata.degree} - ${mramDoc.metadata.ceremony}`;
 
-  const sections = mramToSections(mramDoc);
-  const title = `${mramDoc.metadata.degree} - ${mramDoc.metadata.ceremony}`;
-
-  // Save document record
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(DOCUMENTS_STORE, "readwrite");
-    const store = tx.objectStore(DOCUMENTS_STORE);
-    const request = store.put({
-      id,
-      title,
-      rawTextCipher,
-      rawTextIv,
-      createdAt: new Date().toISOString(),
-      sectionCount: sections.length,
-      isMRAM: true,
-    } as StoredDocumentRecord);
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve();
-  });
-
-  // Encrypt and save each section (cipher + plain separately)
-  for (const section of sections) {
-    const { ciphertext: textCipher, iv: textIv } = await encrypt(section.text);
-    const { ciphertext: cipherTextCipher, iv: cipherTextIv } = await encrypt(section.cipherText);
-
-    // Encrypt pre-rendered audio too if present. Audio bytes are already
-    // base64; we encrypt them at rest to maintain the "nothing sensitive
-    // sits in plain IndexedDB" invariant.
-    let audioCipher: ArrayBuffer | undefined;
-    let audioIv: Uint8Array | undefined;
-    if (section.audio) {
-      const encrypted = await encrypt(section.audio);
-      audioCipher = encrypted.ciphertext;
-      audioIv = encrypted.iv;
-    }
-
+    // Save document record
     await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(SECTIONS_STORE, "readwrite");
-      const store = tx.objectStore(SECTIONS_STORE);
+      const tx = db.transaction(DOCUMENTS_STORE, "readwrite");
+      const store = tx.objectStore(DOCUMENTS_STORE);
       const request = store.put({
-        id: `${id}-${section.id}`,
-        documentId: id,
-        degree: section.degree,
-        sectionName: section.sectionName,
-        speaker: section.speaker,
-        textCipher,
-        textIv,
-        cipherTextCipher,
-        cipherTextIv,
-        order: section.order,
-        gavels: section.gavels,
-        action: section.action,
-        ...(section.style ? { style: section.style } : {}),
-        ...(audioCipher && audioIv ? { audioCipher, audioIv } : {}),
-      } as StoredSectionRecord);
+        id,
+        title,
+        rawTextCipher,
+        rawTextIv,
+        createdAt: new Date().toISOString(),
+        sectionCount: sections.length,
+        isMRAM: true,
+      } as StoredDocumentRecord);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => resolve();
     });
-  }
 
-  db.close();
-  return id;
+    // Encrypt and save each section (cipher + plain separately)
+    for (const section of sections) {
+      const { ciphertext: textCipher, iv: textIv } = await encrypt(section.text);
+      const { ciphertext: cipherTextCipher, iv: cipherTextIv } = await encrypt(section.cipherText);
+
+      // Encrypt pre-rendered audio too if present. Audio bytes are already
+      // base64; we encrypt them at rest to maintain the "nothing sensitive
+      // sits in plain IndexedDB" invariant.
+      let audioCipher: ArrayBuffer | undefined;
+      let audioIv: Uint8Array | undefined;
+      if (section.audio) {
+        const encrypted = await encrypt(section.audio);
+        audioCipher = encrypted.ciphertext;
+        audioIv = encrypted.iv;
+      }
+
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(SECTIONS_STORE, "readwrite");
+        const store = tx.objectStore(SECTIONS_STORE);
+        const request = store.put({
+          id: `${id}-${section.id}`,
+          documentId: id,
+          degree: section.degree,
+          sectionName: section.sectionName,
+          speaker: section.speaker,
+          textCipher,
+          textIv,
+          cipherTextCipher,
+          cipherTextIv,
+          order: section.order,
+          gavels: section.gavels,
+          action: section.action,
+          ...(section.style ? { style: section.style } : {}),
+          ...(audioCipher && audioIv ? { audioCipher, audioIv } : {}),
+        } as StoredSectionRecord);
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve();
+      });
+    }
+
+    return id;
+  } finally {
+    db.close();
+  }
 }
 
 /**
@@ -282,25 +254,28 @@ export interface RitualSectionWithCipher {
  */
 export async function listDocuments(): Promise<StoredDocument[]> {
   const db = await openDB();
-  const docs = await new Promise<StoredDocument[]>((resolve, reject) => {
-    const tx = db.transaction(DOCUMENTS_STORE, "readonly");
-    const store = tx.objectStore(DOCUMENTS_STORE);
-    const request = store.getAll();
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => {
-      resolve(
-        (request.result as StoredDocumentRecord[]).map((d) => ({
-          id: d.id,
-          title: d.title,
-          createdAt: d.createdAt,
-          sectionCount: d.sectionCount,
-          isMRAM: d.isMRAM || false,
-        }))
-      );
-    };
-  });
-  db.close();
-  return docs;
+  // ME-04: try/finally so getAll rejection still closes the db handle.
+  try {
+    return await new Promise<StoredDocument[]>((resolve, reject) => {
+      const tx = db.transaction(DOCUMENTS_STORE, "readonly");
+      const store = tx.objectStore(DOCUMENTS_STORE);
+      const request = store.getAll();
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        resolve(
+          (request.result as StoredDocumentRecord[]).map((d) => ({
+            id: d.id,
+            title: d.title,
+            createdAt: d.createdAt,
+            sectionCount: d.sectionCount,
+            isMRAM: d.isMRAM || false,
+          }))
+        );
+      };
+    });
+  } finally {
+    db.close();
+  }
 }
 
 /**
@@ -308,15 +283,23 @@ export async function listDocuments(): Promise<StoredDocument[]> {
  */
 export async function getDocumentSections(documentId: string): Promise<RitualSectionWithCipher[]> {
   const db = await openDB();
-  const records = await new Promise<StoredSectionRecord[]>((resolve, reject) => {
-    const tx = db.transaction(SECTIONS_STORE, "readonly");
-    const store = tx.objectStore(SECTIONS_STORE);
-    const index = store.index("documentId");
-    const request = index.getAll(documentId);
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result as StoredSectionRecord[]);
-  });
-  db.close();
+  // ME-04: try/finally ensures the db handle is released even if the
+  // getAll request rejects. Decryption happens AFTER db.close() — each
+  // decrypt() call opens its own db via getOrCreateKey, so we don't
+  // want to hold this handle open across the decryption loop either.
+  let records: StoredSectionRecord[];
+  try {
+    records = await new Promise<StoredSectionRecord[]>((resolve, reject) => {
+      const tx = db.transaction(SECTIONS_STORE, "readonly");
+      const store = tx.objectStore(SECTIONS_STORE);
+      const index = store.index("documentId");
+      const request = index.getAll(documentId);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result as StoredSectionRecord[]);
+    });
+  } finally {
+    db.close();
+  }
 
   // Decrypt each section
   const sections: RitualSectionWithCipher[] = [];
@@ -359,14 +342,22 @@ export async function getDocumentSections(documentId: string): Promise<RitualSec
  */
 export async function getDocumentPlainText(documentId: string): Promise<string> {
   const db = await openDB();
-  const record = await new Promise<StoredDocumentRecord | undefined>((resolve, reject) => {
-    const tx = db.transaction(DOCUMENTS_STORE, "readonly");
-    const store = tx.objectStore(DOCUMENTS_STORE);
-    const request = store.get(documentId);
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result as StoredDocumentRecord | undefined);
-  });
-  db.close();
+  // ME-04: try/finally so store.get rejection still releases the db.
+  let record: StoredDocumentRecord | undefined;
+  try {
+    record = await new Promise<StoredDocumentRecord | undefined>(
+      (resolve, reject) => {
+        const tx = db.transaction(DOCUMENTS_STORE, "readonly");
+        const store = tx.objectStore(DOCUMENTS_STORE);
+        const request = store.get(documentId);
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () =>
+          resolve(request.result as StoredDocumentRecord | undefined);
+      },
+    );
+  } finally {
+    db.close();
+  }
 
   if (!record) throw new Error("Document not found");
   return decrypt(record.rawTextCipher, record.rawTextIv);
@@ -377,35 +368,41 @@ export async function getDocumentPlainText(documentId: string): Promise<string> 
  */
 export async function deleteDocument(documentId: string): Promise<void> {
   const db = await openDB();
-
-  // Delete document
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(DOCUMENTS_STORE, "readwrite");
-    const store = tx.objectStore(DOCUMENTS_STORE);
-    const request = store.delete(documentId);
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve();
-  });
-
-  // Delete sections
-  const sections = await new Promise<StoredSectionRecord[]>((resolve, reject) => {
-    const tx = db.transaction(SECTIONS_STORE, "readonly");
-    const store = tx.objectStore(SECTIONS_STORE);
-    const index = store.index("documentId");
-    const request = index.getAll(documentId);
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result as StoredSectionRecord[]);
-  });
-
-  for (const section of sections) {
+  // ME-04: try/finally so any intermediate delete/getAll rejection still
+  // releases the db handle.
+  try {
+    // Delete document
     await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(SECTIONS_STORE, "readwrite");
-      const store = tx.objectStore(SECTIONS_STORE);
-      const request = store.delete(section.id);
+      const tx = db.transaction(DOCUMENTS_STORE, "readwrite");
+      const store = tx.objectStore(DOCUMENTS_STORE);
+      const request = store.delete(documentId);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => resolve();
     });
-  }
 
-  db.close();
+    // Delete sections
+    const sections = await new Promise<StoredSectionRecord[]>(
+      (resolve, reject) => {
+        const tx = db.transaction(SECTIONS_STORE, "readonly");
+        const store = tx.objectStore(SECTIONS_STORE);
+        const index = store.index("documentId");
+        const request = index.getAll(documentId);
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () =>
+          resolve(request.result as StoredSectionRecord[]);
+      },
+    );
+
+    for (const section of sections) {
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(SECTIONS_STORE, "readwrite");
+        const store = tx.objectStore(SECTIONS_STORE);
+        const request = store.delete(section.id);
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve();
+      });
+    }
+  } finally {
+    db.close();
+  }
 }

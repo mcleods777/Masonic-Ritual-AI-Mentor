@@ -201,6 +201,31 @@ export function validateParsedPair(
                 : `cipher is much shorter than expected (${(ratio * 100).toFixed(0)}% of plain length)`,
           });
         }
+
+        // AUTHOR-05 D-08: bake-time word-count band check — harder threshold
+        // that hard-fails the bake. The character-ratio check above is the
+        // softer /author UI warning; this is the bake-stop gate. Word count
+        // better captures meaning-drift than character count (e.g., "B." (1
+        // word) for "Bone of my bone" (4 words) → ratio = 4, outside band).
+        // Band [0.5×, 2×]: wide enough for single-letter ciphers of short
+        // 3-4-word plain phrases (those DO trip, by design — Shannon must
+        // then decide if the cipher is legitimate ultra-abbreviation or
+        // drift); tight enough to catch "different sentence entirely" drift.
+        // Callers (build-mram-from-dialogue.ts, bake-all.ts) filter by
+        // severity === "error"; no separate kind needed.
+        const plainWords = p.text.trim().split(/\s+/).filter(Boolean).length;
+        const cipherWords = c.text.trim().split(/\s+/).filter(Boolean).length;
+        const wordRatio = plainWords / Math.max(cipherWords, 1);
+        if (cipherWords >= 1 && (wordRatio > 2.0 || wordRatio < 0.5)) {
+          lineIssues.push({
+            index: i,
+            severity: "error",
+            kind: "ratio-outlier",
+            message:
+              `[D-08 bake-band] plain/cipher word ratio out of [0.5×, 2×] band: ` +
+              `plain=${plainWords} words, cipher=${cipherWords} words, ratio=${wordRatio.toFixed(2)}×`,
+          });
+        }
       }
     }
   }

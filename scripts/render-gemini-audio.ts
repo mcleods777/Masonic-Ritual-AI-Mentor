@@ -21,10 +21,14 @@ import { spawn } from "node:child_process";
 // ============================================================
 
 /**
- * Models tried in order. Same chain as src/app/api/tts/gemini/route.ts.
- * Overridable via GEMINI_TTS_MODELS env var (comma-separated).
+ * Models tried in order. Pinned order (AUTHOR-03 D-12): 3.1-flash-tts-preview
+ * is the highest-quality preview as of 2026-04. Older 2.5-* previews retained
+ * as fallback for the quota-exhaustion wait path (per the
+ * gemini-tts-preview-quota-and-fallback-chain skill). Env-overridable via
+ * GEMINI_TTS_MODELS (comma-separated). Same chain as
+ * src/app/api/tts/gemini/route.ts.
  */
-const DEFAULT_MODELS = [
+export const DEFAULT_MODELS = [
   "gemini-3.1-flash-tts-preview",
   "gemini-2.5-flash-preview-tts",
   "gemini-2.5-pro-preview-tts",
@@ -33,21 +37,89 @@ const DEFAULT_MODELS = [
 /** Opus encoding target — 32 kbps mono is transparent for speech. */
 const OPUS_BITRATE = "32k";
 
-/** Cache directory. Honor XDG_CACHE_HOME if set. */
-const CACHE_DIR = path.join(
+/**
+ * Cache directory: per-repo, co-located with content (AUTHOR-01 D-01).
+ * Was ~/.cache/masonic-mram-audio/ pre-Phase-3; moved under the repo so
+ * the cache travels with the repo on machine moves. rituals/_bake-cache/
+ * is gitignored (see repo-root .gitignore + nested rituals/_bake-cache/.gitignore).
+ * Old location is retained as OLD_CACHE_DIR below; migrateLegacyCacheIfNeeded()
+ * copies (not moves) any existing entries on first run.
+ */
+export const OLD_CACHE_DIR = path.join(
   process.env.XDG_CACHE_HOME ?? path.join(os.homedir(), ".cache"),
   "masonic-mram-audio",
 );
+export const CACHE_DIR = path.resolve("rituals/_bake-cache");
 
-/** Cache format version. Bump when we change the Opus encoding params
- *  or the prompt-assembly rules so old cached entries miss instead of
- *  replaying stale audio.
- *  - v1: initial (text, style, voice) → [style] text
- *  - v2: adds optional director's-notes preamble in the prompt.
- *        Cache key incorporates the preamble so changes in the
- *        voice-cast sidecar invalidate just the affected lines.
+/**
+ * Cache format version. Bump when we change the Opus encoding params
+ * or the cache-key material so old cached entries miss instead of
+ * replaying stale audio.
+ *   - v1: initial (text, style, voice) → [style] text
+ *   - v2: adds optional director's-notes preamble in the prompt + key material.
+ *   - v3: adds modelId to key material (AUTHOR-01 D-02). Eliminates silent
+ *         stale hits where a v2-keyed entry rendered by gemini-2.5-pro gets
+ *         served to a run asking for gemini-3.1-flash. First run after this
+ *         bump re-bakes all entries.
  */
-const CACHE_KEY_VERSION = "v2";
+export const CACHE_KEY_VERSION = "v3";
+
+// ============================================================
+// Legacy-cache migration (AUTHOR-01 D-01)
+// ============================================================
+
+/**
+ * One-shot migration from OLD_CACHE_DIR (~/.cache/masonic-mram-audio/)
+ * into CACHE_DIR (rituals/_bake-cache/) — AUTHOR-01 D-01.
+ *
+ * fs.cp copies (does not move); old location preserved for rollback.
+ * One-shot: if NEW already has any .opus entry the migration is a no-op.
+ * Most migrated entries will miss on first lookup after the v3 bump
+ * (CACHE_KEY_VERSION = "v3") and get re-rendered anyway — the migration
+ * still saves any entry whose key happens to match under v3 (voice+style
+ * +text+modelId combo that was latently equivalent to a v3 key).
+ *
+ * The `oldDir` param defaults to OLD_CACHE_DIR but tests inject a tmp
+ * dir so they never touch the developer's real ~/.cache/masonic-mram-audio/.
+ */
+// One-shot guard implemented as a memoized promise rather than a boolean
+// (ME-01 in 03-REVIEW.md): a check-then-set boolean has a concurrency
+// race when renderLineAudio is called for two lines in parallel — both
+// could pass the guard before either has finished, producing partial
+// copies. A memoized Promise is re-entrant and concurrent-safe by
+// construction: the first caller starts the migration; all subsequent
+// callers (same tick OR later) await the SAME promise.
+let migrationPromise: Promise<void> | null = null;
+
+export function migrateLegacyCacheIfNeeded(
+  cacheDir: string,
+  oldDir: string = OLD_CACHE_DIR,
+): Promise<void> {
+  if (migrationPromise) return migrationPromise;
+  migrationPromise = (async () => {
+    if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
+    const hasAny = fs.readdirSync(cacheDir).some((f) => f.endsWith(".opus"));
+    if (hasAny) return;
+    if (!fs.existsSync(oldDir)) return;
+    const files = fs.readdirSync(oldDir).filter((f) => f.endsWith(".opus"));
+    if (files.length === 0) return;
+    console.error(
+      `[AUTHOR-01] migrating legacy cache ${oldDir} → ${cacheDir} ` +
+        `(${files.length} entries; old location preserved for rollback)`,
+    );
+    await fs.promises.cp(oldDir, cacheDir, {
+      recursive: true,
+      filter: (src) => src === oldDir || src.endsWith(".opus"),
+    });
+    console.error(`[AUTHOR-01] migrated ${files.length} entries.`);
+  })();
+  return migrationPromise;
+}
+
+/** Test-only hook: reset the one-shot guard between tests. */
+export function __resetMigrationFlagForTests(): void {
+  migrationPromise = null;
+}
 
 // ============================================================
 // Types
@@ -108,16 +180,26 @@ export async function renderLineAudio(
   const cacheDir = options.cacheDir ?? CACHE_DIR;
   fs.mkdirSync(cacheDir, { recursive: true });
 
-  const cacheKey = computeCacheKey(text, style, voice, preamble);
-  const cachePath = path.join(cacheDir, `${cacheKey}.opus`);
-
-  if (fs.existsSync(cachePath)) {
-    options.onProgress?.({ status: "cache-hit", cacheKey });
-    return fs.readFileSync(cachePath);
-  }
-
+  // AUTHOR-01 D-02: cache key now includes modelId. On lookup, probe each
+  // model in the fallback chain; any pre-existing hit (against any model in
+  // the chain) counts — we don't want to re-render just because a different
+  // model produced the same audio previously. On a full miss, the render
+  // loop writes under the actually-used model's key.
   const models = options.models ?? readModelsFromEnv() ?? DEFAULT_MODELS;
   const waitHandler = options.onAllModelsExhausted ?? sleepUntilMidnightPT;
+
+  // Run legacy-cache migration once on the first cache read (AUTHOR-01 D-01).
+  await migrateLegacyCacheIfNeeded(cacheDir);
+
+  for (const probeModel of models) {
+    const probeKey = computeCacheKey(text, style, voice, probeModel, preamble);
+    const probePath = path.join(cacheDir, `${probeKey}.opus`);
+    if (fs.existsSync(probePath)) {
+      options.onProgress?.({ status: "cache-hit", cacheKey: probeKey });
+      return fs.readFileSync(probePath);
+    }
+  }
+  // No hit across any model in the chain — fall through to render loop.
 
   // Retry loop: try each model, on all-models-429 wait for quota reset
   // and go around again. Callers can cap this with their own timeout.
@@ -132,6 +214,10 @@ export async function renderLineAudio(
         preamble,
       );
       const opus = await encodeWavToOpus(wav);
+
+      // Compute cache key under the model actually used (per D-02).
+      const cacheKey = computeCacheKey(text, style, voice, model, preamble);
+      const cachePath = path.join(cacheDir, `${cacheKey}.opus`);
 
       // Atomic write: stage to .tmp then rename. Prevents corrupt cache
       // entries if the script is killed mid-write.
@@ -149,9 +235,14 @@ export async function renderLineAudio(
     } catch (err) {
       if (err instanceof AllModelsQuotaExhausted) {
         const waitUntil = nextMidnightPT();
+        // The actual cacheKey isn't known yet (no model served this line)
+        // — report the key under the preferred (first-chain) model for
+        // progress observability. The final rendered key is emitted on
+        // success above.
+        const pendingKey = computeCacheKey(text, style, voice, models[0], preamble);
         options.onProgress?.({
           status: "waiting-for-quota-reset",
-          cacheKey,
+          cacheKey: pendingKey,
           waitUntil,
         });
         await waitHandler();
@@ -183,12 +274,15 @@ export function deleteCacheEntry(cacheKey: string, cacheDir?: string): boolean {
 
 /**
  * Check if a given line is already cached without triggering an API
- * call. Mirrors the cache key computation in renderLineAudio so the
- * pre-bake cache scan reports accurately. The `preamble` argument
- * must match what the bake will actually pass at render time —
- * typically the per-role voice-cast preamble when the line is long
- * enough to use it, or empty string when the line is short or the
- * voice-cast is missing.
+ * call. Mirrors the cache-lookup behavior in renderLineAudio (Option A):
+ * probe each model in the fallback chain and return true on any hit.
+ *
+ * The `preamble` argument must match what the bake will actually pass
+ * at render time — typically the per-role voice-cast preamble when the
+ * line is long enough to use it, or empty string when the line is short
+ * or the voice-cast is missing. Pre-Phase-3 this function took a single
+ * cacheKey; post-Phase-3 (AUTHOR-01 D-02) it iterates the model chain
+ * because the cache key includes modelId.
  */
 export function isLineCached(
   text: string,
@@ -196,11 +290,15 @@ export function isLineCached(
   voice: string,
   preamble: string = "",
   cacheDir?: string,
+  models: string[] = readModelsFromEnv() ?? DEFAULT_MODELS,
 ): boolean {
   const dir = cacheDir ?? CACHE_DIR;
-  const cacheKey = computeCacheKey(text, style, voice, preamble);
-  const cachePath = path.join(dir, `${cacheKey}.opus`);
-  return fs.existsSync(cachePath);
+  for (const modelId of models) {
+    const cacheKey = computeCacheKey(text, style, voice, modelId, preamble);
+    const cachePath = path.join(dir, `${cacheKey}.opus`);
+    if (fs.existsSync(cachePath)) return true;
+  }
+  return false;
 }
 
 // ============================================================
@@ -589,9 +687,14 @@ export function computeCacheKey(
   text: string,
   style: string | undefined,
   voice: string,
+  modelId: string, // NEW (AUTHOR-01 D-02)
   preamble: string = "",
 ): string {
-  const material = `${CACHE_KEY_VERSION}\x00${text}\x00${style ?? ""}\x00${voice}\x00${preamble}`;
+  // Key material order: version | text | style | voice | modelId | preamble.
+  // modelId is between voice and preamble so voice+style+text equivalence alone
+  // doesn't produce equal keys across different Gemini model revs.
+  const material =
+    `${CACHE_KEY_VERSION}\x00${text}\x00${style ?? ""}\x00${voice}\x00${modelId}\x00${preamble}`;
   return crypto.createHash("sha256").update(material).digest("hex");
 }
 

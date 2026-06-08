@@ -27,6 +27,7 @@ import {
   type PairValidationResult,
 } from "@/lib/author-validation";
 import { buildFromDialogue } from "@/lib/dialogue-to-mram";
+import { isDev } from "@/lib/dev-guard";
 import { encryptMRAM } from "@/lib/mram-format";
 
 interface PairListEntry {
@@ -217,9 +218,7 @@ export default function AuthorPage() {
     [parsedPlain, parsedCipher],
   );
 
-  const isProduction = process.env.NODE_ENV === "production";
-
-  if (isProduction) {
+  if (!isDev()) {
     return (
       <div className="rounded-lg border border-red-900/50 bg-red-950/20 p-6 text-red-200">
         <h1 className="text-xl font-semibold mb-2">Author tool disabled</h1>
