@@ -34,7 +34,7 @@ The "bake/preview page" referenced in design conversations is `src/app/upload/pa
 
 ### What exists in `src/app/globals.css`
 
-The theme uses neutral OKLCH grays (achromatic) for surfaces and zinc/amber Tailwind utilities for content. The `:root` and `.dark` blocks define `--background`, `--foreground`, `--card`, etc. as pure-gray OKLCH values; chroma is added at the component level via Tailwind utility classes.
+The page surface is **deep lapis charcoal** — `oklch(0.16 0.025 264)`, approximately `#0b0f19`. A small blue chroma so the surface reads hermetic-dark rather than pure black. Cards on top of that surface (`--card`, `--popover`) stay achromatic OKLCH grays so amber accents lead and the lapis sits as ground rather than competing with content. Zinc Tailwind utilities are used at the component level for content surfaces and text gradations.
 
 ### Use these patterns
 
@@ -46,7 +46,7 @@ The theme uses neutral OKLCH grays (achromatic) for surfaces and zinc/amber Tail
 
 ### Do NOT
 
-- Introduce lapis, royal, or Solomonic blue. The "Deep lapis/charcoal" comment in `globals.css` is aspirational — the codebase is achromatic + amber. If a future redesign adds blue, it must replace amber, not coexist with it.
+- Introduce a SECOND chromatic accent. The page background is lapis charcoal (canonical, set in the `.dark` block); amber is the only chromatic accent on top of it. Don't add royal blue, teal, etc. as additional accents — the lapis ground + amber CTA is the whole palette.
 - Use Tailwind `yellow-*`, `orange-*`, or `gold-*`. The accent is `amber`.
 - Add gradients on text or buttons. The existing aesthetic is flat color.
 - Introduce a light theme. The app is dark-only by design.

@@ -154,7 +154,12 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
+  /* Page background — deep lapis charcoal. A small blue chroma so the
+     surface reads "hermetic dark" rather than pure black. Approximates
+     #0b0f19, matching the internal bake-preview tool's surface. Keep
+     --card / --popover as achromatic dark grays so content cards on top
+     of this surface stay neutral and let amber accents lead. */
+  --background: oklch(0.16 0.025 264);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
   --card-foreground: oklch(0.985 0 0);
