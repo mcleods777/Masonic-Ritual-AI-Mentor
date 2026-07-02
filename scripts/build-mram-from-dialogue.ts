@@ -606,15 +606,42 @@ export async function renderNormalLineWithGates(opts: {
 // ============================================================
 
 /**
+ * Pure decision function (CR-01): choose where the passphrase comes from
+ * WITHOUT touching stdin/TTY state, so it's trivially unit-testable and so
+ * callers can make the decision exactly once, before any raw-mode setup.
+ *
+ * Rule order: a non-empty `envPass` string ALWAYS wins and is returned
+ * immediately, regardless of `isTTY` — this is what lets a spawned child
+ * honor MRAM_PASSPHRASE even when it inherits a TTY stdin (the CR-01
+ * defect this function closes). Only when there is no usable env value
+ * do we fall through to interactive TTY prompting, or finally an error
+ * when neither is available.
+ */
+export function choosePassphraseSource(
+  envPass: string | undefined,
+  isTTY: boolean,
+): { kind: "env"; value: string } | { kind: "tty" } | { kind: "error" } {
+  if (envPass) return { kind: "env", value: envPass };
+  if (isTTY) return { kind: "tty" };
+  return { kind: "error" };
+}
+
+/**
  * Read a passphrase from stdin without echoing it to the terminal.
- * Falls back to environment variable MRAM_PASSPHRASE if stdin is not a TTY
- * (e.g., in automation) so CI pipelines can still build without a TTY,
- * while interactive use never leaks the passphrase to scrollback or history.
+ * CR-01: consults MRAM_PASSPHRASE via choosePassphraseSource() FIRST,
+ * before ever inspecting process.stdin.isTTY or entering raw mode — this
+ * is what lets a spawned child honor an already-collected passphrase even
+ * when its stdin happens to be a TTY (e.g. inherited from a parent running
+ * interactively), instead of re-prompting on a shared raw-mode terminal
+ * and silently encrypting under a garbled passphrase.
  */
 async function promptPassphrase(): Promise<string> {
-  if (!process.stdin.isTTY) {
-    const envPass = process.env.MRAM_PASSPHRASE;
-    if (envPass) return envPass;
+  const source = choosePassphraseSource(
+    process.env.MRAM_PASSPHRASE,
+    !!process.stdin.isTTY,
+  );
+  if (source.kind === "env") return source.value;
+  if (source.kind === "error") {
     throw new Error(
       "stdin is not a TTY and MRAM_PASSPHRASE env var is not set. " +
         "Run interactively or set MRAM_PASSPHRASE.",

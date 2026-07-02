@@ -51,21 +51,28 @@
  *   coordination, --parallel > 1 simply requires --on-fallback=continue
  *   or --on-fallback=abort.
  *
- * Resume granularity: the abandoned branch's resume-state.ts (ported
- * verbatim in this plan, see scripts/lib/resume-state.ts) is a per-LINE
- * contract (ResumeState.completedLineIds names line IDs within a single
- * ritual) intended to be written by build-mram-from-dialogue.ts and read
- * here. As of this plan, current main's build-mram-from-dialogue.ts has
- * no --skip-line-ids / --resume-state-path flags (its argv contract is
- * still `<plain.md> <cipher.md> <output.mram> [--with-audio]
- * [--on-fallback=...]` — unchanged, per this plan's files_modified list
- * which does not include that file). So --resume here operates at RITUAL
- * granularity: this orchestrator writes its own ResumeState to the same
- * _RESUME.json path after each ritual completes, repurposing
- * `completedLineIds` to hold completed RITUAL SLUGS (not line IDs) and
- * `ritual` as a fixed marker string. A future plan that adds per-line
- * resume plumbing to build-mram-from-dialogue.ts can adopt the same file
- * without a breaking change to the ResumeState shape.
+ * Resume granularity (WR-02): TWO independent resume layers now compose.
+ *
+ *   1. RITUAL granularity (this orchestrator): scripts/lib/resume-state.ts's
+ *      ResumeState is repurposed here — `completedLineIds` holds completed
+ *      RITUAL SLUGS (not line IDs) and `ritual` is the fixed marker string
+ *      RESUME_MARKER. Written to rituals/_bake-cache/_RESUME.json
+ *      INCREMENTALLY and UNCONDITIONALLY after EVERY successful ritual
+ *      bake (not just when --resume is passed, and not only post-hoc at
+ *      the end of the run) — a crash mid-fan-out still leaves a resumable
+ *      record of every ritual that finished before the crash. `--resume`
+ *      only controls whether a prior run's completed slugs are read back
+ *      and skipped on this invocation; the write itself is unconditional.
+ *
+ *   2. Per-LINE granularity (the child, build-mram-from-dialogue.ts):
+ *      that script DOES have a --resume-state-path=<file> flag (see its
+ *      own module docstring) — it persists completedLineIds after every
+ *      line renders, atomically, via the SAME resume-state.ts contract.
+ *      buildMramSpawnArgs passes a PER-RITUAL file
+ *      (_bake-cache/_RESUME-<slug>.json, keyed by slug so cross-ritual
+ *      state can never collide) to every spawned child, so a bake
+ *      interrupted mid-ritual resumes from its interrupted LINE on the
+ *      next invocation, not from that ritual's first line.
  *
  * Passphrase: prompted ONCE here (same raw-stdin idiom as
  * scripts/bake-first-degree.ts's readPassphrase), then passed to every
@@ -90,6 +97,7 @@ import {
 } from "./lib/resume-state";
 import { getChangedRituals, recordBaked } from "./lib/cache-manifest";
 import { validateOrFail as validateOrFailShared } from "./lib/validate-or-fail";
+import { choosePassphraseSource } from "./build-mram-from-dialogue";
 
 // ============================================================
 // Constants
@@ -274,6 +282,24 @@ export function checkParallelFallbackConflict(
   return null;
 }
 
+/**
+ * CR-02 / T-03-14: resolve the two conflicting DEFAULTS (parallel=4,
+ * on-fallback="ask") to a SAFE effective parallel value instead of gating
+ * enforcement on flag-provenance. A completely bare invocation (neither
+ * --parallel nor --on-fallback touched) degrades to parallel=1, where
+ * "ask" is legal and safe — no forbidden combination can ever run by
+ * default. The moment the user engages EITHER flag explicitly, the
+ * degrade is skipped and the resolved value is whatever --parallel
+ * specified (clamped), so checkParallelFallbackConflict's refusal fires
+ * on it as expected.
+ */
+export function resolveEffectiveParallel(
+  flags: Pick<Flags, "parallel" | "parallelFlagPresent" | "onFallbackFlagPresent">,
+): number {
+  const bothDefault = !flags.parallelFlagPresent && !flags.onFallbackFlagPresent;
+  return bothDefault ? 1 : clampParallel(flags.parallel);
+}
+
 // ============================================================
 // Ritual discovery
 // ============================================================
@@ -362,10 +388,12 @@ export function runValidatorGate(
 // ============================================================
 // Build the spawn-argv for a build-mram-from-dialogue.ts sub-process.
 // Exported so tests can assert the arg list directly without spawning.
-// Matches CURRENT main's argv contract (positional plain/cipher/output +
-// --with-audio + --on-fallback=...) — NOT the abandoned branch's
-// --resume-state-path/--ritual-slug/--skip-line-ids flags, which do not
-// exist on scripts/build-mram-from-dialogue.ts as of this plan.
+// WR-02: also appends --resume-state-path=<per-ritual file>, keyed by
+// slug so the child's `loaded.ritual === ritualSlug` guard matches and
+// cross-ritual state can never collide — this is the per-LINE resume
+// layer (see the module docstring's "Resume granularity" note, layer 2).
+// build-mram-from-dialogue.ts DOES support --resume-state-path (see its
+// own module docstring); it is not the abandoned branch's flag set.
 // ============================================================
 export function buildMramSpawnArgs(
   slug: string,
@@ -375,6 +403,8 @@ export function buildMramSpawnArgs(
   const plainPath = path.join(ritualsDir, `${slug}-dialogue.md`);
   const cipherPath = path.join(ritualsDir, `${slug}-dialogue-cipher.md`);
   const outputPath = path.join(ritualsDir, `${slug}.mram`);
+  const cacheDir = path.join(ritualsDir, "_bake-cache");
+  const resumeStatePath = path.join(cacheDir, `_RESUME-${slug}.json`);
   return [
     "tsx",
     "scripts/build-mram-from-dialogue.ts",
@@ -383,6 +413,7 @@ export function buildMramSpawnArgs(
     outputPath,
     "--with-audio",
     `--on-fallback=${onFallback}`,
+    `--resume-state-path=${resumeStatePath}`,
   ];
 }
 
@@ -397,9 +428,18 @@ function bakeRitual(
   ritualsDir: string = RITUALS_DIR,
 ): Promise<void> {
   const args = buildMramSpawnArgs(slug, onFallback, ritualsDir);
+  // T-03-13 / T-03-CR01: with env-first passphrase resolution (CR-01) the
+  // child never needs stdin to obtain the passphrase — it reads
+  // MRAM_PASSPHRASE via choosePassphraseSource() before ever touching TTY
+  // state. Interactive stdin is only needed for the child's on-fallback
+  // ask/wait quota prompt, which is only reachable at parallel=1 (enforced
+  // by CR-02's resolveEffectiveParallel refusal, see Task 2) — closing the
+  // shared-raw-mode-TTY corruption path as defense-in-depth even
+  // independent of the child-side fix.
+  const childStdin = onFallback === "ask" || onFallback === "wait" ? "inherit" : "ignore";
   return new Promise((resolve, reject) => {
     const child = spawn("npx", args, {
-      stdio: ["inherit", "inherit", "inherit"],
+      stdio: [childStdin, "inherit", "inherit"],
       env: { ...process.env, MRAM_PASSPHRASE: passphrase },
     });
     child.on("exit", (code) => {
@@ -429,6 +469,18 @@ export interface BakeResult {
  * "not attempted" instead of spawning on top of a possibly-corrupted
  * state (halt-on-first-failure, adapted for bounded concurrency: tasks
  * already in flight when the failure lands are allowed to finish).
+ *
+ * WR-02: writes ritual-granularity resume state INCREMENTALLY and
+ * UNCONDITIONALLY — immediately after every successful ritual, not just
+ * post-hoc at the end of the run, and not gated on `--resume` having
+ * been passed. `initialCompleted` seeds the accumulator with any slugs
+ * already known complete from a prior interrupted run (so a --resume
+ * invocation's incremental writes still preserve that history instead
+ * of clobbering it with only this run's newly-baked slugs).
+ * writeResumeStateAtomic is synchronous, so the add+write pair for a
+ * given task never interleaves with a sibling p-limit task's own
+ * add+write — both run on the single Node event loop, and neither await
+ * point sits between the Set.add and the synchronous file write.
  */
 export async function bakeSelected(
   slugs: string[],
@@ -437,10 +489,14 @@ export async function bakeSelected(
   parallelN: number,
   ritualsDir: string = RITUALS_DIR,
   manifestPath: string = MANIFEST_PATH,
+  resumeFile: string = RESUME_FILE,
+  startedAt: number = Date.now(),
+  initialCompleted: Set<string> = new Set(),
 ): Promise<BakeResult[]> {
   const limit = pLimit(parallelN);
   let aborted = false;
   const results: BakeResult[] = [];
+  const completedThisRun = new Set<string>(initialCompleted);
 
   await Promise.all(
     slugs.map((slug) =>
@@ -457,6 +513,8 @@ export async function bakeSelected(
           console.log(`\n→ ${slug}`);
           await bakeRitual(slug, onFallback, passphrase, ritualsDir);
           recordBaked(manifestPath, slug);
+          completedThisRun.add(slug);
+          writeCompletedSlugs(completedThisRun, startedAt, resumeFile);
           console.log(`  ✓ ${slug} baked.`);
           results.push({ slug, ok: true });
         } catch (err) {
@@ -533,11 +591,18 @@ export async function dryRunForRitual(
 // ============================================================
 // Passphrase — prompted ONCE, passed to children via env only.
 // Same raw-stdin idiom as scripts/bake-first-degree.ts's readPassphrase.
+// CR-01: env-first via the shared choosePassphraseSource() decision
+// function (imported from build-mram-from-dialogue.ts) so the parent's
+// own resolution order matches the child's exactly — env always wins
+// over an interactive TTY.
 // ============================================================
 async function readPassphrase(): Promise<string> {
-  if (!process.stdin.isTTY) {
-    const env = process.env.MRAM_PASSPHRASE;
-    if (env) return env;
+  const source = choosePassphraseSource(
+    process.env.MRAM_PASSPHRASE,
+    !!process.stdin.isTTY,
+  );
+  if (source.kind === "env") return source.value;
+  if (source.kind === "error") {
     throw new Error(
       "stdin is not a TTY and MRAM_PASSPHRASE env var is not set. " +
         "Run interactively or set MRAM_PASSPHRASE.",
@@ -587,14 +652,21 @@ async function readPassphrase(): Promise<string> {
 // ============================================================
 async function main(): Promise<void> {
   const flags = parseFlags(process.argv);
-  const parallelN = clampParallel(flags.parallel);
+  // CR-02: resolve the conflicting defaults (parallel=4 + on-fallback=
+  // "ask") to a safe effective value BEFORE the conflict check — a bare
+  // invocation degrades to parallel=1 (ask is legal there); any explicit
+  // engagement of either flag resolves to the real --parallel value, so
+  // the refusal below is enforced unconditionally on the resolved number.
+  const parallelN = resolveEffectiveParallel(flags);
 
   // CONTEXT.md discretion (b) / T-03-14: interactive pause cannot
-  // compose with parallel workers.
+  // compose with parallel workers. Always enforced on the RESOLVED
+  // value — flag-provenance gating is no longer needed since
+  // resolveEffectiveParallel already encodes the safe-default behavior.
   const conflict = checkParallelFallbackConflict(
     parallelN,
     flags.onFallback,
-    flags.parallelFlagPresent || flags.onFallbackFlagPresent,
+    true,
   );
   if (conflict) {
     console.error(conflict);
@@ -643,17 +715,23 @@ async function main(): Promise<void> {
   }
 
   const startedAt = Date.now();
+  // WR-02: resume state is now written INCREMENTALLY and UNCONDITIONALLY
+  // inside bakeSelected itself (after every successful ritual), so no
+  // post-hoc write is needed here. `completed` (populated above only when
+  // --resume was passed) seeds the incremental writer so a --resume run's
+  // writes preserve prior-run history instead of clobbering it with only
+  // this run's newly-baked slugs.
   const results = await bakeSelected(
     selected,
     flags.onFallback,
     passphrase,
     parallelN,
+    RITUALS_DIR,
+    MANIFEST_PATH,
+    RESUME_FILE,
+    startedAt,
+    completed,
   );
-
-  if (flags.resume) {
-    for (const r of results) if (r.ok) completed.add(r.slug);
-    if (completed.size > 0) writeCompletedSlugs(completed, startedAt);
-  }
 
   const failures = results.filter((r) => !r.ok);
   if (failures.length > 0) {
