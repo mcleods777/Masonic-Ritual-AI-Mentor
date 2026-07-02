@@ -107,8 +107,8 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 03-06-PLAN.md — AUTHOR-02/09: bake-all orchestrator, content-hash --changed-only, resume, p-limit (Wave 3)
-- [ ] 03-07-PLAN.md — AUTHOR-08: preview-bake localhost:8883 scrubber, 3-layer containment (Wave 3)
+- [x] 03-06-PLAN.md — AUTHOR-02/09: bake-all orchestrator, content-hash --changed-only, resume, p-limit (Wave 3)
+- [x] 03-07-PLAN.md — AUTHOR-08: preview-bake localhost:8883 scrubber, 3-layer containment (Wave 3)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
@@ -191,7 +191,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. Pre-invite Hygiene | 7/7 | Complete (UAT pending) | 2026-04-21 |
 | 2. Safety Floor | 0/9 | Not started | - |
-| 3. Authoring Throughput | 5/8 | In Progress|  |
+| 3. Authoring Throughput | 7/8 | In Progress|  |
 | 4. Content Coverage | 0/0 | Not started | - |
 | 5. Coach Quality Lift | 0/0 | Not started | - |
 | 6. Admin Substrate & Distribution | 0/0 | Not started | - |
