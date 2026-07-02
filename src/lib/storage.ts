@@ -9,64 +9,12 @@
 
 import type { MRAMDocument, MRAMRitualSection } from "./mram-format";
 import { mramToSections, mramToPlainText } from "./mram-format";
-
-const DB_NAME = "masonic-ritual-mentor";
-// MUST stay in lockstep with src/lib/voice-storage.ts DB_VERSION — same
-// database, different modules that happen to own different object stores.
-// v3: adds voices store. v4: adds audioCache store for Gemini TTS output.
-const DB_VERSION = 4;
-const DOCUMENTS_STORE = "documents";
-const SECTIONS_STORE = "sections";
-const SETTINGS_STORE = "settings";
-
-// ============================================================
-// IndexedDB helpers
-// ============================================================
-
-function openDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result);
-
-    request.onupgradeneeded = (event) => {
-      const db = (event.target as IDBOpenDBRequest).result;
-
-      if (!db.objectStoreNames.contains(DOCUMENTS_STORE)) {
-        db.createObjectStore(DOCUMENTS_STORE, { keyPath: "id" });
-      }
-
-      if (!db.objectStoreNames.contains(SECTIONS_STORE)) {
-        const sectionStore = db.createObjectStore(SECTIONS_STORE, {
-          keyPath: "id",
-        });
-        sectionStore.createIndex("documentId", "documentId", { unique: false });
-        sectionStore.createIndex("degree", "degree", { unique: false });
-      }
-
-      if (!db.objectStoreNames.contains(SETTINGS_STORE)) {
-        db.createObjectStore(SETTINGS_STORE, { keyPath: "key" });
-      }
-
-      // v3: voices store for local Voxtral voice samples
-      if (!db.objectStoreNames.contains("voices")) {
-        db.createObjectStore("voices", { keyPath: "id" });
-      }
-
-      // v4: audioCache for Gemini TTS output. Parallel definition to
-      // src/lib/voice-storage.ts — both modules need to create the store
-      // because either one might be the first to open the DB after an
-      // upgrade, and IndexedDB only fires onupgradeneeded once per version.
-      if (!db.objectStoreNames.contains("audioCache")) {
-        const cacheStore = db.createObjectStore("audioCache", {
-          keyPath: "key",
-        });
-        cacheStore.createIndex("createdAt", "createdAt", { unique: false });
-      }
-    };
-  });
-}
+import {
+  openDB,
+  DOCUMENTS_STORE,
+  SECTIONS_STORE,
+  SETTINGS_STORE,
+} from "./idb-schema";
 
 // ============================================================
 // Web Crypto encryption for ritual text at rest
