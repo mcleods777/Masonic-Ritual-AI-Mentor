@@ -97,7 +97,7 @@ import {
 } from "./lib/resume-state";
 import { getChangedRituals, recordBaked } from "./lib/cache-manifest";
 import { validateOrFail as validateOrFailShared } from "./lib/validate-or-fail";
-import { choosePassphraseSource } from "./build-mram-from-dialogue";
+import { choosePassphraseSource, consolidateBakeIndex } from "./build-mram-from-dialogue";
 
 // ============================================================
 // Constants
@@ -740,6 +740,23 @@ async function main(): Promise<void> {
     );
     for (const f of failures) console.error(`  ${f.slug}: ${f.error ?? "unknown"}`);
     process.exit(1);
+  }
+
+  // CR-03: consolidate this wave's per-slug _INDEX.<slug>.json shards into
+  // the canonical _INDEX.json. Runs here, in the single PARENT process,
+  // strictly AFTER every child has exited (bakeSelected already resolved
+  // above with zero failures) — race-free by construction. Best-effort:
+  // if this throws (e.g. permissions), warn but do not fail the bake —
+  // the shards remain and readBakeIndex still merges them, so no D-08
+  // provenance is lost even when consolidation itself fails.
+  try {
+    consolidateBakeIndex(CACHE_DIR);
+  } catch (err) {
+    console.warn(
+      `  ! warning: bake-index consolidation failed (shards left in place, readers still merge them): ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
   }
 
   if (flags.resume) clearResumeStateFile();
