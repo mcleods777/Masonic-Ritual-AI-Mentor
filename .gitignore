@@ -50,6 +50,11 @@ rituals/*.jsonl
 rituals/*.yaml
 rituals/*.yml
 
+# bake cache (in-repo, transient, may contain audio + nested json) — never commit
+rituals/_bake-cache/*
+!rituals/_bake-cache/.gitignore
+rituals/**/*.json
+
 # credentials — never commit
 gitkey
 *.credentials
