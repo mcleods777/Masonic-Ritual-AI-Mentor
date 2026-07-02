@@ -26,6 +26,7 @@ import {
   parseFlags,
   clampParallel,
   checkParallelFallbackConflict,
+  resolveEffectiveParallel,
   getAllRituals,
   selectSlugs,
   sinceDeprecationWarning,
@@ -106,16 +107,60 @@ describe("bake-all: checkParallelFallbackConflict", () => {
     expect(checkParallelFallbackConflict(1, "ask")).toBeNull();
   });
 
-  it("skips the check when neither flag was explicitly passed (flagged=false)", () => {
-    // Both --parallel (default 4) and --on-fallback (default "ask") have
-    // conflicting defaults with each other; a bare invocation with no
-    // flags at all must not be refused just because of that default
-    // combination — see checkParallelFallbackConflict's docstring.
-    expect(checkParallelFallbackConflict(4, "ask", false)).toBeNull();
-  });
-
   it("enforces the check when flagged=true even with default-shaped values", () => {
     expect(checkParallelFallbackConflict(4, "ask", true)).not.toBeNull();
+  });
+});
+
+describe("bake-all: resolveEffectiveParallel (CR-02)", () => {
+  it("bare invocation (neither flag present) resolves to 1 — safe degrade so ask stays legal", () => {
+    expect(
+      resolveEffectiveParallel({
+        parallelFlagPresent: false,
+        onFallbackFlagPresent: false,
+        parallel: 4,
+      }),
+    ).toBe(1);
+  });
+
+  it("explicit --parallel is respected (clamped), even with on-fallback untouched", () => {
+    expect(
+      resolveEffectiveParallel({
+        parallelFlagPresent: true,
+        onFallbackFlagPresent: false,
+        parallel: 4,
+      }),
+    ).toBe(4);
+  });
+
+  it("touching --on-fallback alone opts out of the safe degrade", () => {
+    expect(
+      resolveEffectiveParallel({
+        parallelFlagPresent: false,
+        onFallbackFlagPresent: true,
+        parallel: 4,
+      }),
+    ).toBe(4);
+  });
+
+  it("composes with checkParallelFallbackConflict: bare invocation never trips the T-03-14 refusal", () => {
+    const bareFlags = parseFlags(["node", "bake-all.ts"]);
+    const resolved = resolveEffectiveParallel(bareFlags);
+    expect(resolved).toBe(1);
+    expect(checkParallelFallbackConflict(resolved, "ask", true)).toBeNull();
+  });
+
+  it("composes with checkParallelFallbackConflict: explicit --parallel 4 --on-fallback=ask IS refused", () => {
+    const explicitFlags = parseFlags([
+      "node",
+      "bake-all.ts",
+      "--parallel",
+      "4",
+      "--on-fallback=ask",
+    ]);
+    const resolved = resolveEffectiveParallel(explicitFlags);
+    expect(resolved).toBe(4);
+    expect(checkParallelFallbackConflict(resolved, "ask", true)).not.toBeNull();
   });
 });
 

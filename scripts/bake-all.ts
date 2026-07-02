@@ -275,6 +275,24 @@ export function checkParallelFallbackConflict(
   return null;
 }
 
+/**
+ * CR-02 / T-03-14: resolve the two conflicting DEFAULTS (parallel=4,
+ * on-fallback="ask") to a SAFE effective parallel value instead of gating
+ * enforcement on flag-provenance. A completely bare invocation (neither
+ * --parallel nor --on-fallback touched) degrades to parallel=1, where
+ * "ask" is legal and safe — no forbidden combination can ever run by
+ * default. The moment the user engages EITHER flag explicitly, the
+ * degrade is skipped and the resolved value is whatever --parallel
+ * specified (clamped), so checkParallelFallbackConflict's refusal fires
+ * on it as expected.
+ */
+export function resolveEffectiveParallel(
+  flags: Pick<Flags, "parallel" | "parallelFlagPresent" | "onFallbackFlagPresent">,
+): number {
+  const bothDefault = !flags.parallelFlagPresent && !flags.onFallbackFlagPresent;
+  return bothDefault ? 1 : clampParallel(flags.parallel);
+}
+
 // ============================================================
 // Ritual discovery
 // ============================================================
@@ -604,14 +622,21 @@ async function readPassphrase(): Promise<string> {
 // ============================================================
 async function main(): Promise<void> {
   const flags = parseFlags(process.argv);
-  const parallelN = clampParallel(flags.parallel);
+  // CR-02: resolve the conflicting defaults (parallel=4 + on-fallback=
+  // "ask") to a safe effective value BEFORE the conflict check — a bare
+  // invocation degrades to parallel=1 (ask is legal there); any explicit
+  // engagement of either flag resolves to the real --parallel value, so
+  // the refusal below is enforced unconditionally on the resolved number.
+  const parallelN = resolveEffectiveParallel(flags);
 
   // CONTEXT.md discretion (b) / T-03-14: interactive pause cannot
-  // compose with parallel workers.
+  // compose with parallel workers. Always enforced on the RESOLVED
+  // value — flag-provenance gating is no longer needed since
+  // resolveEffectiveParallel already encodes the safe-default behavior.
   const conflict = checkParallelFallbackConflict(
     parallelN,
     flags.onFallback,
-    flags.parallelFlagPresent || flags.onFallbackFlagPresent,
+    true,
   );
   if (conflict) {
     console.error(conflict);
