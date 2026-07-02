@@ -311,8 +311,39 @@ export interface BakeIndexEntry {
   tier: "premium" | "fallback";
 }
 
-export function readBakeIndex(cacheDir: string): BakeIndexEntry[] {
-  const indexPath = path.join(cacheDir, "_INDEX.json");
+/**
+ * CR-03: matches a per-slug index shard filename, e.g.
+ * `_INDEX.ea-opening.json`. Deliberately does NOT match the bare
+ * `_INDEX.json` (no slug segment to capture) or any `.tmp` in-flight
+ * write. The captured slug segment is restricted to the same
+ * filesystem-safe charset sanitizeIndexShardSlug() produces.
+ */
+const INDEX_SHARD_FILE_REGEX = /^_INDEX\.([a-z0-9-]+)\.json$/;
+
+/**
+ * Restrict a ritual slug to the filesystem-safe `[a-z0-9-]` charset before
+ * it becomes part of a shard filename (T-03-SC). bake-all.ts's SLUG_REGEX
+ * already enforces this for slugs discovered via getAllRituals(), but
+ * build-mram-from-dialogue.ts can also be invoked directly (not only via
+ * bake-all's spawn), so this sanitizer is a second, local guarantee rather
+ * than trusting the caller.
+ */
+function sanitizeIndexShardSlug(ritualSlug: string): string {
+  return ritualSlug.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+}
+
+/**
+ * CR-03: the exclusive per-slug index shard path a single build-mram
+ * child process owns. bake-all spawns exactly one child per ritual, so
+ * this is the SOLE writer of this file — no cross-process contention.
+ */
+export function bakeIndexShardPath(cacheDir: string, ritualSlug: string): string {
+  return path.join(cacheDir, `_INDEX.${sanitizeIndexShardSlug(ritualSlug)}.json`);
+}
+
+/** Read a single index file (legacy `_INDEX.json` or a per-slug shard),
+ * tolerating a missing or malformed file by returning []. */
+function readIndexFile(indexPath: string): BakeIndexEntry[] {
   if (!fs.existsSync(indexPath)) return [];
   try {
     const raw = JSON.parse(fs.readFileSync(indexPath, "utf8"));
@@ -322,21 +353,70 @@ export function readBakeIndex(cacheDir: string): BakeIndexEntry[] {
   }
 }
 
-function writeBakeIndexAtomic(cacheDir: string, entries: BakeIndexEntry[]): void {
-  fs.mkdirSync(cacheDir, { recursive: true });
-  const indexPath = path.join(cacheDir, "_INDEX.json");
+function writeIndexFileAtomic(indexPath: string, entries: BakeIndexEntry[]): void {
+  fs.mkdirSync(path.dirname(indexPath), { recursive: true });
   const tmp = `${indexPath}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(entries, null, 2));
   fs.renameSync(tmp, indexPath);
 }
 
+function bakeIndexEntryKey(e: BakeIndexEntry): string {
+  return `${e.ritualSlug}::${String(e.lineId)}::${e.cacheKey}`;
+}
+
 /**
- * Upsert a single bake-manifest entry keyed by (ritualSlug, lineId,
- * cacheKey). Re-reads + re-writes the whole file each call — fine at
- * ritual scale (hundreds of lines); atomic per write via tmp+rename.
+ * Merge a legacy/consolidated entry list with per-slug shard entries,
+ * deduping by (ritualSlug,lineId,cacheKey). Shard entries win over a
+ * same-key legacy entry — shards are always at least as fresh as a prior
+ * consolidation.
+ */
+function mergeBakeIndexEntries(
+  legacy: BakeIndexEntry[],
+  shardEntries: BakeIndexEntry[],
+): BakeIndexEntry[] {
+  const byKey = new Map<string, BakeIndexEntry>();
+  for (const e of legacy) byKey.set(bakeIndexEntryKey(e), e);
+  for (const e of shardEntries) byKey.set(bakeIndexEntryKey(e), e);
+  return Array.from(byKey.values());
+}
+
+/** List every `_INDEX.<slug>.json` shard file present in cacheDir
+ * (excludes the bare `_INDEX.json` and any `.tmp` in-flight write). */
+function listIndexShardFiles(cacheDir: string): string[] {
+  if (!fs.existsSync(cacheDir)) return [];
+  return fs.readdirSync(cacheDir).filter((f) => INDEX_SHARD_FILE_REGEX.test(f));
+}
+
+/**
+ * CR-03: readBakeIndex now returns the UNION of the legacy/consolidated
+ * `_INDEX.json` (if present) and every not-yet-consolidated per-slug
+ * `_INDEX.<slug>.json` shard, deduped by (ritualSlug,lineId,cacheKey)
+ * with shard entries taking precedence. This is what lets preview-bake
+ * and any other reader see a fallback-tier entry from a still-running or
+ * crashed parallel bake before bake-all's post-wave consolidation runs.
+ */
+export function readBakeIndex(cacheDir: string): BakeIndexEntry[] {
+  const legacy = readIndexFile(path.join(cacheDir, "_INDEX.json"));
+  const shardEntries: BakeIndexEntry[] = [];
+  for (const f of listIndexShardFiles(cacheDir)) {
+    shardEntries.push(...readIndexFile(path.join(cacheDir, f)));
+  }
+  return mergeBakeIndexEntries(legacy, shardEntries);
+}
+
+/**
+ * CR-03: upsert a single bake-manifest entry into ITS OWN per-slug shard
+ * (`_INDEX.<entry.ritualSlug>.json`), never the shared `_INDEX.json`.
+ * Because bake-all spawns exactly one child per ritual, each child is the
+ * sole writer of its slug's shard — the prior cross-process
+ * read-modify-write race on a single shared `_INDEX.json` is eliminated
+ * by construction, not by locking. Re-reads + re-writes the shard each
+ * call — fine at ritual scale (hundreds of lines); atomic per write via
+ * tmp+rename.
  */
 export function upsertBakeIndexEntry(cacheDir: string, entry: BakeIndexEntry): void {
-  const entries = readBakeIndex(cacheDir);
+  const shardPath = bakeIndexShardPath(cacheDir, entry.ritualSlug);
+  const entries = readIndexFile(shardPath);
   const idx = entries.findIndex(
     (e) =>
       e.ritualSlug === entry.ritualSlug &&
@@ -345,7 +425,24 @@ export function upsertBakeIndexEntry(cacheDir: string, entry: BakeIndexEntry): v
   );
   if (idx >= 0) entries[idx] = entry;
   else entries.push(entry);
-  writeBakeIndexAtomic(cacheDir, entries);
+  writeIndexFileAtomic(shardPath, entries);
+}
+
+/**
+ * CR-03: parent-owned, race-free consolidation. Called by bake-all.ts's
+ * main() AFTER bakeSelected resolves (all children have exited) and only
+ * when the wave had zero failures. Writes the merged view to the
+ * canonical `_INDEX.json` and removes every per-slug shard. If this
+ * throws (e.g. permissions), the CALLER should log a warning and continue
+ * — the shards remain on disk and readBakeIndex still merges them, so no
+ * provenance is lost even if consolidation itself fails.
+ */
+export function consolidateBakeIndex(cacheDir: string): void {
+  const merged = readBakeIndex(cacheDir);
+  writeIndexFileAtomic(path.join(cacheDir, "_INDEX.json"), merged);
+  for (const f of listIndexShardFiles(cacheDir)) {
+    fs.unlinkSync(path.join(cacheDir, f));
+  }
 }
 
 // ============================================================

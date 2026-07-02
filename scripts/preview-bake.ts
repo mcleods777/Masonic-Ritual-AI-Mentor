@@ -51,6 +51,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { assertDevOnly } from "../src/lib/dev-guard";
 import { CACHE_DIR } from "./render-gemini-audio";
+import { readBakeIndex } from "./build-mram-from-dialogue";
 
 // Module-load guard: fail fast in production.
 assertDevOnly();
@@ -387,60 +388,59 @@ function loadReviewFile(ritualsDir: string, slug: string): ReviewFile | null {
 }
 
 /**
- * Serve /api/index — reads rituals/_bake-cache/_INDEX.json if present
- * (D-08 shape: {cacheKey, model, ritualSlug, lineId, byteLen, durationMs,
- * createdAt, tier?}[]), else falls back to a directory listing of .opus
- * files so the preview still works before the index-writer (Wave 4,
- * 03-08) has run. When present, merges best-effort per-line review status
- * from rituals/{slug}-review.json.
+ * Serve /api/index — reads the MERGED bake index (CR-03: the legacy/
+ * consolidated rituals/_bake-cache/_INDEX.json UNIONED with every
+ * not-yet-consolidated per-slug `_INDEX.<slug>.json` shard, via
+ * build-mram-from-dialogue.ts's readBakeIndex) if any valid entries exist
+ * anywhere (D-08 shape: {cacheKey, model, ritualSlug, lineId, byteLen,
+ * durationMs, createdAt, tier?}[]), else falls back to a directory
+ * listing of .opus files so the preview still works before any index
+ * data exists. Reading the merge (rather than only the consolidated
+ * file) means a fallback-tier entry written by a still-running or
+ * crashed parallel bake is visible here even before bake-all's post-wave
+ * consolidation runs. When entries are found, merges best-effort
+ * per-line review status from rituals/{slug}-review.json.
  */
 export function handleIndexJson(
   res: http.ServerResponse,
   cacheDir: string,
   ritualsDir: string = path.dirname(cacheDir),
 ): void {
-  const indexPath = path.join(cacheDir, "_INDEX.json");
-  if (fs.existsSync(indexPath)) {
-    try {
-      const raw = JSON.parse(
-        fs.readFileSync(indexPath, "utf8"),
-      ) as BakeIndexEntry[];
-      // Group by ritualSlug for the browser UI.
-      const bySlug = new Map<string, BakeIndexEntry[]>();
-      for (const e of raw) {
-        const arr = bySlug.get(e.ritualSlug) ?? [];
-        arr.push(e);
-        bySlug.set(e.ritualSlug, arr);
-      }
-      const rituals = Array.from(bySlug.entries()).map(([slug, entries]) => {
-        // Best-effort review merge — absent/malformed review file simply
-        // means no `review` field is attached to any line in this ritual.
-        const reviewFile = loadReviewFile(ritualsDir, slug);
-        const sorted = entries.sort((a, b) =>
-          String(a.lineId).localeCompare(String(b.lineId)),
-        );
-        const lines = sorted.map((e) => {
-          const reviewEntry = reviewFile?.lines?.[String(e.lineId)];
-          return reviewEntry
-            ? {
-                ...e,
-                review: {
-                  status: reviewEntry.status,
-                  note: reviewEntry.note,
-                  approvedAt: reviewEntry.approvedAt ?? null,
-                  flaggedAt: reviewEntry.flaggedAt ?? null,
-                },
-              }
-            : e;
-        });
-        return { slug, lineCount: lines.length, lines };
-      });
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ rituals }, null, 2));
-      return;
-    } catch {
-      // Malformed _INDEX.json — fall through to directory listing.
+  const raw: BakeIndexEntry[] = readBakeIndex(cacheDir);
+  if (raw.length > 0) {
+    // Group by ritualSlug for the browser UI.
+    const bySlug = new Map<string, BakeIndexEntry[]>();
+    for (const e of raw) {
+      const arr = bySlug.get(e.ritualSlug) ?? [];
+      arr.push(e);
+      bySlug.set(e.ritualSlug, arr);
     }
+    const rituals = Array.from(bySlug.entries()).map(([slug, entries]) => {
+      // Best-effort review merge — absent/malformed review file simply
+      // means no `review` field is attached to any line in this ritual.
+      const reviewFile = loadReviewFile(ritualsDir, slug);
+      const sorted = entries.sort((a, b) =>
+        String(a.lineId).localeCompare(String(b.lineId)),
+      );
+      const lines = sorted.map((e) => {
+        const reviewEntry = reviewFile?.lines?.[String(e.lineId)];
+        return reviewEntry
+          ? {
+              ...e,
+              review: {
+                status: reviewEntry.status,
+                note: reviewEntry.note,
+                approvedAt: reviewEntry.approvedAt ?? null,
+                flaggedAt: reviewEntry.flaggedAt ?? null,
+              },
+            }
+          : e;
+      });
+      return { slug, lineCount: lines.length, lines };
+    });
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ rituals }, null, 2));
+    return;
   }
   if (!fs.existsSync(cacheDir)) {
     res.writeHead(200, { "Content-Type": "application/json" });

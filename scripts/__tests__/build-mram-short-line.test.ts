@@ -276,11 +276,12 @@ describe("readBakeIndex / upsertBakeIndexEntry (D-08 bake manifest)", () => {
     expect(readBakeIndex(tmpDir)).toHaveLength(2);
   });
 
-  it("writes atomically — no leftover .tmp file", () => {
+  it("writes atomically — no leftover .tmp file (CR-03: to a per-slug shard, not the shared _INDEX.json)", () => {
     upsertBakeIndexEntry(tmpDir, entry());
     const files = fs.readdirSync(tmpDir);
     expect(files.some((f) => f.endsWith(".tmp"))).toBe(false);
-    expect(files).toContain("_INDEX.json");
+    expect(files).toContain("_INDEX.ea-opening.json");
+    expect(files).not.toContain("_INDEX.json");
   });
 });
 
