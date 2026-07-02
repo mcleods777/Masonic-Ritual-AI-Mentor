@@ -13,7 +13,7 @@ Ship the invited-lodge v1: the pilot, hardened and extended so Shannon can perso
 
 - [x] **Phase 1: Pre-invite Hygiene** — Small, zero-risk cleanup that must land before outside lodges are invited (completed 2026-04-21; 2 manual UAT items tracked in 01-HUMAN-UAT.md)
 - [ ] **Phase 2: Safety Floor (cost, abuse, auth hardening)** — Per-user rate limits, budget caps, audit log, client-token, kill switch — the layered defense against the three equal-weight fears
-- [ ] **Phase 3: Authoring Throughput** — Bake cache, orchestrator, validators, preview server — Shannon-hours reduction so content work doesn't dominate calendar time
+- [x] **Phase 3: Authoring Throughput** — Bake cache, orchestrator, validators, preview server — Shannon-hours reduction so content work doesn't dominate calendar time (completed 2026-07-02)
 - [ ] **Phase 4: Content Coverage** — Bake EA, FC, MM, Installation, and officer lectures in Shannon's lodge's working, with per-line Opus verified
 - [ ] **Phase 5: Coach Quality Lift** — Structured, diff-grounded feedback with hallucination filter, gold eval set, dev-only eval UI — the headline pilot complaint addressed
 - [ ] **Phase 6: Admin Substrate & Distribution** — Admin dashboard, invite management, stateful revocation, stale-version banner — connective tissue for what Phases 2, 4, 5 emit
@@ -112,7 +112,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 03-08-PLAN.md — AUTHOR-01/04/05/06/07 wiring: hard-skip removal, short-line routing, gates, keep-and-upgrade, runbook (Wave 4)
+- [x] 03-08-PLAN.md — AUTHOR-01/04/05/06/07 wiring: hard-skip removal, short-line routing, gates, keep-and-upgrade, runbook (Wave 4)
 
 **UI hint**: no
 
@@ -191,7 +191,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. Pre-invite Hygiene | 7/7 | Complete (UAT pending) | 2026-04-21 |
 | 2. Safety Floor | 0/9 | Not started | - |
-| 3. Authoring Throughput | 7/8 | In Progress|  |
+| 3. Authoring Throughput | 8/8 | Complete   | 2026-07-02 |
 | 4. Content Coverage | 0/0 | Not started | - |
 | 5. Coach Quality Lift | 0/0 | Not started | - |
 | 6. Admin Substrate & Distribution | 0/0 | Not started | - |
