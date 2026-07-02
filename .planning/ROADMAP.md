@@ -116,8 +116,8 @@ Plans:
 
 **Gap closure** *(verification gaps CR-01/CR-02/CR-03/WR-02 from 03-VERIFICATION.md)*
 
-- [ ] 03-09-PLAN.md — AUTHOR-02/09 (gap): env-first passphrase (CR-01), resolve parallel/fallback default conflict (CR-02), incremental resume + --resume-state-path wiring (WR-02)
-- [ ] 03-10-PLAN.md — AUTHOR-06/09 (gap): per-slug _INDEX shard writes + merged reads + parent consolidation, closing the cross-process lost-update race (CR-03)
+- [x] 03-09-PLAN.md — AUTHOR-02/09 (gap): env-first passphrase (CR-01), resolve parallel/fallback default conflict (CR-02), incremental resume + --resume-state-path wiring (WR-02)
+- [x] 03-10-PLAN.md — AUTHOR-06/09 (gap): per-slug _INDEX shard writes + merged reads + parent consolidation, closing the cross-process lost-update race (CR-03)
 
 **UI hint**: no
 
@@ -196,7 +196,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. Pre-invite Hygiene | 7/7 | Complete (UAT pending) | 2026-04-21 |
 | 2. Safety Floor | 0/9 | Not started | - |
-| 3. Authoring Throughput | 8/8 | Complete   | 2026-07-02 |
+| 3. Authoring Throughput | 10/10 | Complete   | 2026-07-02 |
 | 4. Content Coverage | 0/0 | Not started | - |
 | 5. Coach Quality Lift | 0/0 | Not started | - |
 | 6. Admin Substrate & Distribution | 0/0 | Not started | - |
