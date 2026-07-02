@@ -15,7 +15,9 @@
  * Usage:
  *   npx tsx scripts/build-mram-from-dialogue.ts \
  *     <plain.md> <cipher.md> <output.mram> [--with-audio] \
- *     [--on-fallback=ask|continue|abort]
+ *     [--on-fallback=ask|continue|abort|wait] \
+ *     [--verify-audio] [--no-short-line-stt] \
+ *     [--resume-state-path=<file>]
  *
  * With --with-audio: render every spoken line to Opus via Gemini TTS
  * using the canonical GEMINI_ROLE_VOICES cast, embed the audio bytes
@@ -32,13 +34,35 @@
  *   continue — silently continue, just log a warning (good for CI)
  *   abort    — exit with code 2 on first fallback, cache preserved
  *
+ * D-01 (AUTHOR-04): every line gets baked audio — there is no more
+ * "hard-skip below N chars" bucket. Lines shorter than SHORT_LINE_MAX_CHARS
+ * (default 11) route through a Gemini instructional-padding prompt first
+ * (see the gemini-tts-speakas-short-line-instructional-prompt memory
+ * skill); if that padded render fails the D-03 validation gates
+ * (duration-anomaly + STT round-trip), it falls back to Google Cloud TTS
+ * with the raw line text (D-02). If BOTH engines fail, the bake REFUSES
+ * (non-zero exit, line identified) rather than silently dropping audio.
+ *
+ * --verify-audio: run the AUTHOR-07 STT round-trip gate on every
+ * freshly-rendered line (not just short ones). A failing line fails the
+ * bake. Short-line padded-Gemini renders always run this check
+ * regardless of --verify-audio (D-03) — pass --no-short-line-stt to
+ * disable that default (PROVISIONAL, see 03-08-SUMMARY.md).
+ *
+ * --resume-state-path=<file>: persist per-line completion progress so an
+ * interrupted bake can skip re-validating (though not re-caching — the
+ * content cache already does that for free) lines that already finished.
+ *
  * The passphrase is read interactively with echo disabled. It is NEVER
  * accepted on the command line (that would leak it to shell history and
  * `ps -ef` output).
  */
 
 import * as fs from "node:fs";
+import * as path from "node:path";
+import * as os from "node:os";
 import * as crypto from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { parseDialogue } from "../src/lib/dialogue-format";
 import { buildFromDialogue } from "../src/lib/dialogue-to-mram";
 import type { MRAMDocument } from "../src/lib/mram-format";
@@ -46,14 +70,29 @@ import { GEMINI_ROLE_VOICES, getGeminiVoiceForRole } from "../src/lib/tts-cloud"
 import {
   renderLineAudio,
   deleteCacheEntry,
-  isLineCached,
-  PersistentTextTokenRegression,
+  computeCacheKey,
+  CACHE_DIR,
+  DEFAULT_MODELS,
+  readModelsFromEnv,
 } from "./render-gemini-audio";
 import {
   buildPreamble,
   validateVoiceCast,
   type VoiceCastFile,
 } from "../src/lib/voice-cast";
+import { googleTtsBakeCall } from "./lib/google-tts";
+import { verifyLineAudio } from "./lib/stt-verify";
+import {
+  computeMedianSecPerChar,
+  isDurationAnomaly,
+  type DurationSample,
+} from "./lib/bake-math";
+import { validateOrFail } from "./lib/validate-or-fail";
+import {
+  readResumeState,
+  writeResumeStateAtomic,
+  type ResumeState,
+} from "./lib/resume-state";
 
 // ============================================================
 // Encryption (Node crypto — binary layout matches Web Crypto
@@ -105,6 +144,461 @@ export function encryptMRAMNode(doc: MRAMDocument, passphrase: string): Buffer {
     encrypted,
     authTag,
   ]);
+}
+
+// ============================================================
+// Short-line routing constants (AUTHOR-04, D-01/D-02/D-04)
+// ============================================================
+
+/**
+ * Lines strictly shorter than this many characters route through the
+ * D-02 Gemini-padded → Google-fallback path instead of a normal render.
+ * This REPLACES the old hard-skip-below-N-chars threshold (D-01 removed
+ * hard-skipping entirely — short lines still get baked audio, just via
+ * a different route). Tune via SHORT_LINE_MAX_CHARS env var.
+ */
+export const SHORT_LINE_MAX_CHARS = Number(
+  process.env.SHORT_LINE_MAX_CHARS ?? "11",
+);
+
+/**
+ * Documented default Google Cloud TTS voice for roles with no pinned
+ * VoiceCastRole.googleVoice (D-04). Flagged in bake output so Shannon
+ * can pin a closer per-role match later.
+ */
+export const GOOGLE_FALLBACK_DEFAULT_VOICE = "en-US-Neural2-D";
+
+/** AUTHOR-06 warm-up window (Pitfall 5) — see runDurationAnomalyGate. */
+export const ANOMALY_WARMUP_SAMPLES = 30;
+
+/**
+ * Build the Gemini instructional-padding prompt for a short line (D-02).
+ * Per the gemini-tts-speakas-short-line-instructional-prompt memory
+ * skill: the padding text is an INSTRUCTION, never additional speakable
+ * prose — Gemini's "Say only X: Y" framing constrains spoken output to
+ * just the target utterance while giving the model enough token length
+ * to avoid the text-token-regression failure mode short content triggers.
+ */
+export function buildShortLinePrompt(text: string): string {
+  return `Say only these exact words, nothing else: ${text}`;
+}
+
+/** premium = rendered on the preferred (first-choice) Gemini model.
+ *  Everything else — a lower Gemini tier OR the Google engine — is
+ *  "fallback" for the D-08 keep-and-upgrade bake manifest. */
+export function classifyTier(
+  model: string,
+  preferredModel: string,
+): "premium" | "fallback" {
+  return model === preferredModel ? "premium" : "fallback";
+}
+
+/** Resolve the Google Cloud TTS voice for a role: pinned sidecar value
+ *  (D-04) or the documented default (D-02). */
+export function resolveGoogleVoice(
+  voiceCast: VoiceCastFile | undefined,
+  role: string,
+): string {
+  return voiceCast?.roles[role]?.googleVoice ?? GOOGLE_FALLBACK_DEFAULT_VOICE;
+}
+
+// ============================================================
+// Duration measurement (AUTHOR-06) via ffprobe
+// ============================================================
+
+/**
+ * Compute the duration in milliseconds of an Opus/Ogg buffer via
+ * ffprobe — already a hard runtime dependency of this pipeline
+ * (encodeWavToOpus in render-gemini-audio.ts already shells out to
+ * ffmpeg). Applied uniformly to both Gemini-rendered and Google-rendered
+ * audio: render-gemini-audio.ts's public API returns only the final
+ * encoded Opus bytes, not the intermediate PCM sample count, and that
+ * module is out of this plan's files_modified scope — probing the
+ * already-encoded output avoids changing its contract.
+ */
+export function getOpusDurationMs(opusBuffer: Buffer): number {
+  const tmpPath = path.join(
+    os.tmpdir(),
+    `bake-duration-probe-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.opus`,
+  );
+  fs.writeFileSync(tmpPath, opusBuffer);
+  try {
+    const out = execFileSync(
+      "ffprobe",
+      [
+        "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        tmpPath,
+      ],
+      { encoding: "utf-8" },
+    );
+    const seconds = parseFloat(out.trim());
+    return Number.isFinite(seconds) ? Math.round(seconds * 1000) : 0;
+  } finally {
+    fs.unlinkSync(tmpPath);
+  }
+}
+
+/**
+ * AUTHOR-06 duration-anomaly gate. Judges `durationMs`/`charCount`
+ * against the median of samples collected so far THIS RUN — using the
+ * median as it stood BEFORE this line (Pitfall 5: a sample shouldn't be
+ * judged against a median that already includes itself). Requires at
+ * least ANOMALY_WARMUP_SAMPLES PRIOR samples before the check activates;
+ * during warm-up it logs and always passes. The current line's sample is
+ * always appended afterward so later lines benefit from it.
+ */
+export function runDurationAnomalyGate(
+  durationMs: number,
+  charCount: number,
+  durationSamples: DurationSample[],
+): { tripped: boolean; detail: string } {
+  const priorCount = durationSamples.length;
+  let tripped = false;
+  let detail = "";
+
+  if (priorCount >= ANOMALY_WARMUP_SAMPLES) {
+    const median = computeMedianSecPerChar(durationSamples);
+    if (isDurationAnomaly({ durationMs, charCount }, median)) {
+      tripped = true;
+      const secPerChar = charCount > 0 ? durationMs / 1000 / charCount : 0;
+      detail = `this line=${secPerChar.toFixed(4)}s/char vs ritual median=${median.toFixed(4)}s/char (band 0.3x-3.0x)`;
+    }
+  } else {
+    console.error(
+      `  [AUTHOR-06] sample too small — skipping anomaly check (${priorCount}/${ANOMALY_WARMUP_SAMPLES} warm-up samples)`,
+    );
+  }
+
+  durationSamples.push({ durationMs, charCount });
+  return { tripped, detail };
+}
+
+/**
+ * AUTHOR-07 STT round-trip gate. Policy: any missed/inserted word fails.
+ * No-ops (never trips) when `groqApiKey` is absent — the caller has
+ * already warned once at bake start that STT verification is
+ * unavailable.
+ */
+export async function runSttGate(
+  audio: Buffer,
+  expectedText: string,
+  groqApiKey: string | undefined,
+): Promise<{ tripped: boolean; detail: string }> {
+  if (!groqApiKey) return { tripped: false, detail: "" };
+  const verify = await verifyLineAudio({ audio, expectedText, apiKey: groqApiKey });
+  if (verify.ok) return { tripped: false, detail: "" };
+  return {
+    tripped: true,
+    detail: `STT round-trip mismatch: missed=[${verify.missed.join(", ")}] inserted=[${verify.inserted.join(", ")}] transcript="${verify.transcript}"`,
+  };
+}
+
+// ============================================================
+// Tier-aware bake manifest (D-08) — rituals/_bake-cache/_INDEX.json
+// ============================================================
+
+/** Shape consumed by scripts/preview-bake.ts's handleIndexJson. */
+export interface BakeIndexEntry {
+  cacheKey: string;
+  model: string;
+  ritualSlug: string;
+  lineId: string | number;
+  byteLen: number;
+  durationMs: number;
+  createdAt: string;
+  tier: "premium" | "fallback";
+}
+
+export function readBakeIndex(cacheDir: string): BakeIndexEntry[] {
+  const indexPath = path.join(cacheDir, "_INDEX.json");
+  if (!fs.existsSync(indexPath)) return [];
+  try {
+    const raw = JSON.parse(fs.readFileSync(indexPath, "utf8"));
+    return Array.isArray(raw) ? raw : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeBakeIndexAtomic(cacheDir: string, entries: BakeIndexEntry[]): void {
+  fs.mkdirSync(cacheDir, { recursive: true });
+  const indexPath = path.join(cacheDir, "_INDEX.json");
+  const tmp = `${indexPath}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(entries, null, 2));
+  fs.renameSync(tmp, indexPath);
+}
+
+/**
+ * Upsert a single bake-manifest entry keyed by (ritualSlug, lineId,
+ * cacheKey). Re-reads + re-writes the whole file each call — fine at
+ * ritual scale (hundreds of lines); atomic per write via tmp+rename.
+ */
+export function upsertBakeIndexEntry(cacheDir: string, entry: BakeIndexEntry): void {
+  const entries = readBakeIndex(cacheDir);
+  const idx = entries.findIndex(
+    (e) =>
+      e.ritualSlug === entry.ritualSlug &&
+      String(e.lineId) === String(entry.lineId) &&
+      e.cacheKey === entry.cacheKey,
+  );
+  if (idx >= 0) entries[idx] = entry;
+  else entries.push(entry);
+  writeBakeIndexAtomic(cacheDir, entries);
+}
+
+// ============================================================
+// Line render result + resume-state cache lookup
+// ============================================================
+
+export interface LineRenderResult {
+  opus: Buffer;
+  model: string; // Gemini model id, or "google:<voice>" (D-02 provenance)
+  cacheKey: string;
+  fromCache: boolean;
+  /** Present only when freshly rendered (gates already ran on it). */
+  durationMs?: number;
+}
+
+/**
+ * Direct on-disk cache lookup for a line already marked complete in a
+ * prior (interrupted) run's --resume-state-path file. Tries every model
+ * in the chain (covers a kept fallback-tier entry, D-08) and, for short
+ * lines, the Google-tier key too. Returns null if nothing is found on
+ * disk, in which case the caller falls through to a normal render (which
+ * re-runs the D-03/AUTHOR-06/07 gates — self-healing if the cache was
+ * cleared between runs).
+ */
+export function tryReadCompletedLineFromCache(opts: {
+  cacheDir: string;
+  isShort: boolean;
+  cleanText: string;
+  style: string | undefined;
+  voice: string;
+  preamble: string;
+  modelChain: string[];
+  googleVoice: string;
+}): { opus: Buffer; model: string; cacheKey: string } | null {
+  const text = opts.isShort ? buildShortLinePrompt(opts.cleanText) : opts.cleanText;
+  const style = opts.isShort ? undefined : opts.style;
+  const preamble = opts.isShort ? "" : opts.preamble;
+
+  for (const model of opts.modelChain) {
+    const cacheKey = computeCacheKey(text, style, opts.voice, model, preamble);
+    const p = path.join(opts.cacheDir, `${cacheKey}.opus`);
+    if (fs.existsSync(p)) {
+      return { opus: fs.readFileSync(p), model, cacheKey };
+    }
+  }
+
+  if (opts.isShort) {
+    const googleModel = `google:${opts.googleVoice}`;
+    const cacheKey = computeCacheKey(opts.cleanText, undefined, opts.googleVoice, googleModel, "");
+    const p = path.join(opts.cacheDir, `${cacheKey}.opus`);
+    if (fs.existsSync(p)) {
+      return { opus: fs.readFileSync(p), model: googleModel, cacheKey };
+    }
+  }
+
+  return null;
+}
+
+// ============================================================
+// Per-line render + gate pipelines
+// ============================================================
+
+/**
+ * Short-line (< SHORT_LINE_MAX_CHARS) render path (D-01/D-02/D-03).
+ * Tries Gemini via the instructional-padding prompt first. A fresh
+ * padded render is validated by the AUTHOR-06 duration-anomaly gate and
+ * (unless `noShortLineStt`) the AUTHOR-07 STT round-trip gate. On gate
+ * failure — or if Gemini couldn't produce audio at all — falls back to
+ * Google Cloud TTS with the RAW line text (no padding, no preamble;
+ * Pitfall 4). If Google also fails (or its key is absent), throws so the
+ * bake refuses rather than silently dropping the line (D-01).
+ */
+export async function renderShortLineWithGates(opts: {
+  cleanText: string;
+  voice: string;
+  googleVoice: string;
+  apiKeys: string[];
+  models: string[];
+  cacheDir: string;
+  groqApiKey: string | undefined;
+  googleApiKey: string | undefined;
+  noShortLineStt: boolean;
+  durationSamples: DurationSample[];
+}): Promise<LineRenderResult> {
+  const paddedText = buildShortLinePrompt(opts.cleanText);
+  let geminiError: Error | undefined;
+  let geminiHit: { opus: Buffer; model: string; cacheKey: string; fromCache: boolean } | null = null;
+
+  try {
+    let fromCache = false;
+    let capturedModel = "";
+    let capturedKey = "";
+    const opus = await renderLineAudio(
+      paddedText,
+      undefined,
+      opts.voice,
+      {
+        apiKeys: opts.apiKeys,
+        models: opts.models,
+        cacheDir: opts.cacheDir,
+        onProgress: (event) => {
+          if (event.status === "cache-hit") {
+            fromCache = true;
+            capturedKey = event.cacheKey;
+          } else if (event.status === "rendered") {
+            capturedModel = event.model ?? opts.models[0];
+            capturedKey = event.cacheKey;
+          }
+        },
+      },
+      "",
+    );
+    geminiHit = { opus, model: capturedModel || opts.models[0], cacheKey: capturedKey, fromCache };
+  } catch (err) {
+    geminiError = err as Error;
+  }
+
+  if (geminiHit) {
+    if (geminiHit.fromCache) {
+      // Cache only ever holds gate-passed padded-prompt audio — gate
+      // failures are deleted below before falling back to Google — so a
+      // cache hit here is trusted without re-running STT/duration.
+      return { ...geminiHit };
+    }
+
+    const durationMs = getOpusDurationMs(geminiHit.opus);
+    const durationGate = runDurationAnomalyGate(durationMs, opts.cleanText.length, opts.durationSamples);
+
+    let gateTripped = durationGate.tripped;
+    let gateDetail = durationGate.detail;
+
+    if (!gateTripped && !opts.noShortLineStt) {
+      const sttGate = await runSttGate(geminiHit.opus, opts.cleanText, opts.groqApiKey);
+      if (sttGate.tripped) {
+        gateTripped = true;
+        gateDetail = sttGate.detail;
+      }
+    }
+
+    if (!gateTripped) {
+      return { ...geminiHit, durationMs };
+    }
+
+    // Gate failure means WRONG content, not merely lower-quality content
+    // — unlike D-08 keep-and-upgrade (which never deletes a successful
+    // lower-tier render), this entry must be removed so a future run
+    // doesn't cache-hit invalid audio.
+    deleteCacheEntry(geminiHit.cacheKey, opts.cacheDir);
+    geminiError = new Error(`padded-Gemini render failed validation: ${gateDetail}`);
+  }
+
+  // D-02: Gemini path failed (render error or gate failure) — fall back
+  // to Google Cloud TTS with the RAW line text (no padding, no preamble).
+  if (!opts.googleApiKey) {
+    throw new Error(
+      `both engines unavailable for "${opts.cleanText}": Gemini failed (${geminiError?.message ?? "unknown error"}) and GOOGLE_CLOUD_TTS_API_KEY is not set for the D-02 fallback`,
+    );
+  }
+
+  let googleOpus: Buffer;
+  try {
+    googleOpus = await googleTtsBakeCall(opts.cleanText, opts.googleVoice, opts.googleApiKey);
+  } catch (googleErr) {
+    throw new Error(
+      `both engines failed for "${opts.cleanText}": Gemini (${geminiError?.message ?? "unknown error"}), Google (${(googleErr as Error).message})`,
+    );
+  }
+
+  const googleModel = `google:${opts.googleVoice}`;
+  const googleCacheKey = computeCacheKey(opts.cleanText, undefined, opts.googleVoice, googleModel, "");
+  fs.mkdirSync(opts.cacheDir, { recursive: true });
+  const googleCachePath = path.join(opts.cacheDir, `${googleCacheKey}.opus`);
+  const tmp = `${googleCachePath}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, googleOpus);
+  fs.renameSync(tmp, googleCachePath);
+
+  const googleDurationMs = getOpusDurationMs(googleOpus);
+  opts.durationSamples.push({ durationMs: googleDurationMs, charCount: opts.cleanText.length });
+
+  return {
+    opus: googleOpus,
+    model: googleModel,
+    cacheKey: googleCacheKey,
+    fromCache: false,
+    durationMs: googleDurationMs,
+  };
+}
+
+/**
+ * Normal-line (>= SHORT_LINE_MAX_CHARS) render path. Gated by
+ * AUTHOR-06 (duration anomaly, always) and AUTHOR-07 (--verify-audio,
+ * opt-in) on freshly-rendered lines only — cache hits were already
+ * validated when first rendered. No fallback engine exists for normal
+ * lines (D-02 only covers short lines): a gate failure here refuses the
+ * whole bake, naming the line, per D-01.
+ */
+export async function renderNormalLineWithGates(opts: {
+  cleanText: string;
+  style: string | undefined;
+  voice: string;
+  preamble: string;
+  apiKeys: string[];
+  models: string[];
+  cacheDir: string;
+  verifyAudio: boolean;
+  groqApiKey: string | undefined;
+  durationSamples: DurationSample[];
+}): Promise<LineRenderResult> {
+  let fromCache = false;
+  let capturedModel = "";
+  let capturedKey = "";
+  const opus = await renderLineAudio(
+    opts.cleanText,
+    opts.style,
+    opts.voice,
+    {
+      apiKeys: opts.apiKeys,
+      models: opts.models,
+      cacheDir: opts.cacheDir,
+      onProgress: (event) => {
+        if (event.status === "cache-hit") {
+          fromCache = true;
+          capturedKey = event.cacheKey;
+        } else if (event.status === "rendered") {
+          capturedModel = event.model ?? opts.models[0];
+          capturedKey = event.cacheKey;
+        }
+      },
+    },
+    opts.preamble,
+  );
+  capturedModel = capturedModel || opts.models[0];
+
+  if (fromCache) {
+    return { opus, model: capturedModel, cacheKey: capturedKey, fromCache: true };
+  }
+
+  const durationMs = getOpusDurationMs(opus);
+  const durationGate = runDurationAnomalyGate(durationMs, opts.cleanText.length, opts.durationSamples);
+  if (durationGate.tripped) {
+    throw new Error(
+      `duration-anomaly gate failed (AUTHOR-06): ${durationGate.detail}. No fallback engine exists for lines >= ${SHORT_LINE_MAX_CHARS} chars (D-01/D-02 only cover short lines) — fix the source line or investigate the render manually.`,
+    );
+  }
+
+  if (opts.verifyAudio) {
+    const sttGate = await runSttGate(opus, opts.cleanText, opts.groqApiKey);
+    if (sttGate.tripped) {
+      throw new Error(`--verify-audio gate failed (AUTHOR-07): ${sttGate.detail}`);
+    }
+  }
+
+  return { opus, model: capturedModel, cacheKey: capturedKey, fromCache: false, durationMs };
 }
 
 // ============================================================
@@ -187,17 +681,26 @@ function parseFallbackMode(args: string[]): FallbackMode {
   );
 }
 
+function parseResumeStatePath(args: string[]): string | undefined {
+  const flag = args.find((a) => a.startsWith("--resume-state-path="));
+  return flag ? flag.slice("--resume-state-path=".length) : undefined;
+}
+
 async function main() {
   const rawArgs = process.argv.slice(2);
   const withAudio = rawArgs.includes("--with-audio");
   const fallbackMode = parseFallbackMode(rawArgs);
+  const verifyAudio = rawArgs.includes("--verify-audio");
+  const noShortLineStt = rawArgs.includes("--no-short-line-stt");
+  const resumeStatePath = parseResumeStatePath(rawArgs);
   const positional = rawArgs.filter((a) => !a.startsWith("--"));
 
   if (positional.length !== 3) {
     console.error(
       "Usage: npx tsx scripts/build-mram-from-dialogue.ts " +
         "<plain.md> <cipher.md> <output.mram> [--with-audio] " +
-        "[--on-fallback=ask|continue|abort|wait]",
+        "[--on-fallback=ask|continue|abort|wait] [--verify-audio] " +
+        "[--no-short-line-stt] [--resume-state-path=<file>]",
     );
     console.error(
       "Passphrase is read interactively (no echo) or from MRAM_PASSPHRASE env var.",
@@ -207,6 +710,14 @@ async function main() {
     );
     console.error(
       "  Requires ffmpeg in PATH and GOOGLE_GEMINI_API_KEY env var.",
+    );
+    console.error(
+      "  Every line gets baked audio (D-01) — lines shorter than " +
+        `${SHORT_LINE_MAX_CHARS} chars route through a Gemini instructional-`,
+    );
+    console.error(
+      "  padding prompt first, falling back to Google Cloud TTS on gate " +
+        "failure (D-02). Requires GOOGLE_CLOUD_TTS_API_KEY for the fallback.",
     );
     console.error("--on-fallback modes:");
     console.error(
@@ -223,6 +734,27 @@ async function main() {
     );
     console.error(
       "        until midnight PT and auto-resume. Best for overnight bakes.",
+    );
+    console.error(
+      "--verify-audio: run an STT round-trip check (AUTHOR-07) on every " +
+        "freshly-rendered line; a mismatch fails the bake for that line.",
+    );
+    console.error(
+      "--no-short-line-stt: disable the DEFAULT-ON STT round-trip check " +
+        "that otherwise always runs on short-line (<" +
+        `${SHORT_LINE_MAX_CHARS} char) padded-Gemini renders (D-03,`,
+    );
+    console.error(
+      "  PROVISIONAL — Shannon was AFK when this default was set; this " +
+        "flag downgrades to duration-only validation for short lines).",
+    );
+    console.error(
+      "--resume-state-path=<file>: persist per-line bake progress so an " +
+        "interrupted run can skip re-validating already-completed lines.",
+    );
+    console.error(
+      "Requires GOOGLE_CLOUD_TTS_API_KEY (short-line fallback) and " +
+        "GROQ_API_KEY (STT verification) for a full-featured --with-audio bake.",
     );
     process.exit(1);
   }
@@ -248,6 +780,14 @@ async function main() {
     console.error(`Error: cipher file not found: ${cipherPath}`);
     process.exit(1);
   }
+
+  // AUTHOR-05 D-08: shared validator gate — refuse corrupted pairs before
+  // any further work (passphrase prompt, parsing, and definitely before
+  // any API call). Belt-and-suspenders with scripts/bake-all.ts's own
+  // pre-flight call to this SAME shared function (scripts/lib/
+  // validate-or-fail.ts) — the gate cannot silently drift between the
+  // orchestrator and this per-ritual sub-process.
+  validateOrFail(plainPath, cipherPath);
 
   const passphrase = await promptPassphrase();
   if (!passphrase) {
@@ -388,7 +928,13 @@ async function main() {
   console.error(`  Roles:    ${Object.keys(doc.roles).join(", ")}`);
 
   if (withAudio) {
-    await bakeAudioIntoDoc(doc, fallbackMode, voiceCast);
+    const ritualSlug = path.basename(plainPath).replace(/-dialogue\.md$/, "");
+    await bakeAudioIntoDoc(doc, fallbackMode, voiceCast, {
+      verifyAudio,
+      noShortLineStt,
+      resumeStatePath,
+      ritualSlug,
+    });
   }
 
   console.error("Encrypting...");
@@ -413,14 +959,22 @@ async function main() {
  * Render Opus audio for every spoken line in the doc and embed as
  * base64 on MRAMLine.audio. Captures the voice cast in metadata so
  * the client can match (role → voice) at playback time. Cached per-line
- * at ~/.cache/masonic-mram-audio so re-runs and resumed runs after quota
+ * at rituals/_bake-cache/ so re-runs and resumed runs after quota
  * hits don't re-burn API calls.
  */
 async function bakeAudioIntoDoc(
   doc: MRAMDocument,
   fallbackMode: FallbackMode,
   voiceCast: VoiceCastFile | undefined,
+  options: {
+    verifyAudio: boolean;
+    noShortLineStt: boolean;
+    resumeStatePath?: string;
+    ritualSlug: string;
+  },
 ): Promise<void> {
+  const { verifyAudio, noShortLineStt, resumeStatePath, ritualSlug } = options;
+
   // Pool of API keys. Prefer GOOGLE_GEMINI_API_KEYS (comma-separated)
   // when set — the render loop rotates through keys on 429, effectively
   // multiplying the daily preview-model quota by pool size. Falls back
@@ -445,6 +999,33 @@ async function bakeAudioIntoDoc(
       "No API key configured (set GOOGLE_GEMINI_API_KEY or GOOGLE_GEMINI_API_KEYS).",
     );
   })();
+
+  // D-02 fallback engine key. Absence doesn't fail the whole bake up
+  // front (a ritual with no short lines never needs it) but any short
+  // line whose Gemini padded render fails validation WILL refuse the
+  // bake without it — warn loudly now so that's not a surprise mid-run.
+  const googleApiKey = process.env.GOOGLE_CLOUD_TTS_API_KEY?.trim();
+  if (!googleApiKey) {
+    console.error(
+      `⚠  GOOGLE_CLOUD_TTS_API_KEY is not set. Short-line Google fallback (D-02) is unavailable —`,
+    );
+    console.error(
+      `   any line under ${SHORT_LINE_MAX_CHARS} chars whose Gemini padded render fails validation will refuse the bake.`,
+    );
+  }
+
+  // D-03 STT gate key. Absence doesn't fail the bake — the gate simply
+  // no-ops (duration-anomaly gate still runs) — but warn since D-03's
+  // default-on short-line STT check is silently skipped without it.
+  const groqApiKey = process.env.GROQ_API_KEY?.trim();
+  if (!groqApiKey) {
+    console.error(
+      `⚠  GROQ_API_KEY is not set. STT round-trip verification (AUTHOR-07, D-03) is unavailable —`,
+    );
+    console.error(
+      `   --verify-audio and the default-on short-line STT check will be skipped (duration-anomaly gate still runs).`,
+    );
+  }
 
   // Snapshot the canonical voice cast so playback knows exactly which
   // voices were used at bake time. If the app's GEMINI_ROLE_VOICES map
@@ -484,25 +1065,10 @@ async function bakeAudioIntoDoc(
   // Configurable via VOICE_CAST_MIN_LINE_CHARS env var so the user can
   // tune without a code change. Default 40 chars covers the catechism
   // section of Masonic rituals while keeping every full-sentence line
-  // on the premium preamble path.
+  // on the premium preamble path. UNCHANGED by D-01 — this is a
+  // different threshold than the short-line routing below.
   const MIN_PREAMBLE_LINE_CHARS = Number(
     process.env.VOICE_CAST_MIN_LINE_CHARS ?? "40",
-  );
-
-  // Hard-skip threshold: ultra-short lines ("B.", "O.", "A.") never
-  // generate reliable audio from Gemini TTS regardless of prompt shape.
-  // Rather than burn the full ~5-min retry budget per line just to
-  // conclude it can't be baked, skip them outright at pre-scan time.
-  // The .mram ships without embedded audio for these lines, and the
-  // runtime TTS path handles them at rehearsal (same behavior as every
-  // line had before bake-in existed). Cost: a handful of API calls per
-  // Brother per rehearsal, well within free-tier runtime budget.
-  //
-  // Tune via MIN_BAKE_LINE_CHARS env var (default 5 chars — catches
-  // single-letter spelling of Masonic passwords like "B.", "O.", "A."
-  // while still baking anything sentence-like including "Satisfied.").
-  const MIN_BAKE_LINE_CHARS = Number(
-    process.env.MIN_BAKE_LINE_CHARS ?? "5",
   );
 
   // Preferred model is the first entry of the fallback chain — either
@@ -523,12 +1089,13 @@ async function bakeAudioIntoDoc(
   // never degrading to the lower tier. Good for overnight bakes.
   const modelsForWaitMode: string[] | undefined =
     fallbackMode === "wait" ? [preferredModel] : undefined;
+  const modelChain = modelsForWaitMode ?? readModelsFromEnv() ?? DEFAULT_MODELS;
 
   const spokenLines = doc.lines.filter((l) => l.role && l.plain.trim().length > 0);
   const total = spokenLines.length;
 
   console.error(`\nBaking audio for ${total} spoken lines...`);
-  console.error(`  Cache: ~/.cache/masonic-mram-audio/ (safe to interrupt + resume)`);
+  console.error(`  Cache: ${CACHE_DIR} (safe to interrupt + resume)`);
   console.error(`  Preferred model: ${preferredModel}`);
   if (fallbackMode === "wait") {
     console.error(`  Fallback chain: NONE — wait mode locks to preferred only`);
@@ -580,49 +1147,73 @@ async function bakeAudioIntoDoc(
       `  Voice-cast: none (drop a {slug}-voice-cast.json next to the dialogue for richer delivery)`,
     );
   }
+  console.error(
+    `  Short lines (<${SHORT_LINE_MAX_CHARS} chars): Gemini instructional-padding first, Google Cloud TTS fallback on gate failure (D-01/D-02 — never skipped)`,
+  );
+  console.error(
+    verifyAudio
+      ? `  --verify-audio: ON — STT round-trip runs on every freshly-rendered line`
+      : `  --verify-audio: off (pass --verify-audio to gate every line, not just short ones)`,
+  );
+  console.error(
+    noShortLineStt
+      ? `  Short-line STT gate: DISABLED via --no-short-line-stt (duration-anomaly gate still runs)`
+      : `  Short-line STT gate: ON by default (D-03, PROVISIONAL)`,
+  );
 
-  // Pre-bake cache scan. Classify every spoken line into one of three
-  // buckets: already-cached, too-short-to-bake, or needs-fresh-render.
-  // Gives the user immediate resume visibility and flags lines that'll
-  // be hard-skipped up front rather than burning retries on them.
+  // Resume state (per-line progress, --resume-state-path). Reading is
+  // best-effort: a state file for a DIFFERENT ritual is ignored, not an
+  // error — guards against accidentally reusing another ritual's state.
+  let resumeState: ResumeState | null = null;
+  const completedLineIds = new Set<string>();
+  if (resumeStatePath) {
+    const loaded = readResumeState(resumeStatePath);
+    if (loaded && loaded.ritual === ritualSlug) {
+      resumeState = loaded;
+      for (const id of loaded.completedLineIds) completedLineIds.add(id);
+      console.error(
+        `  Resume state: ${completedLineIds.size} line(s) already completed in a prior run — cache-only lookup, gates skipped for those.`,
+      );
+    } else if (loaded) {
+      console.error(
+        `  Resume state at ${resumeStatePath} is for a different ritual ("${loaded.ritual}") — ignoring, starting fresh.`,
+      );
+    }
+  }
+  const persistResumeState = () => {
+    if (!resumeStatePath) return;
+    writeResumeStateAtomic(resumeStatePath, {
+      ritual: ritualSlug,
+      completedLineIds: Array.from(completedLineIds),
+      inFlightLineIds: [],
+      startedAt: resumeState?.startedAt ?? Date.now(),
+    });
+  };
+
+  // Pre-bake cache scan. D-01: no more "too-short" bucket — short lines
+  // are classified as cached/to-render against their PADDED Gemini
+  // prompt cache key, same as normal lines against their own key.
   let preCached = 0;
   let preToRender = 0;
-  const preSkipShort: { id: number; role: string; text: string }[] = [];
   for (const line of spokenLines) {
     const cleanText = line.plain.trim();
-    if (cleanText.length < MIN_BAKE_LINE_CHARS) {
-      preSkipShort.push({ id: line.id, role: line.role, text: cleanText });
-      continue;
-    }
+    const isShort = cleanText.length < SHORT_LINE_MAX_CHARS;
     const voice = getGeminiVoiceForRole(line.role);
-    const preamble =
-      cleanText.length >= MIN_PREAMBLE_LINE_CHARS
-        ? preambleByRole[line.role] ?? ""
-        : "";
-    if (isLineCached(cleanText, line.style, voice, preamble)) {
-      preCached++;
-    } else {
-      preToRender++;
-    }
+    const text = isShort ? buildShortLinePrompt(cleanText) : cleanText;
+    const style = isShort ? undefined : line.style;
+    const preamble = !isShort && cleanText.length >= MIN_PREAMBLE_LINE_CHARS
+      ? preambleByRole[line.role] ?? ""
+      : "";
+    const cacheKey = computeCacheKey(text, style, voice, modelChain[0], preamble);
+    const cached = fs.existsSync(path.join(CACHE_DIR, `${cacheKey}.opus`));
+    if (cached) preCached++;
+    else preToRender++;
   }
   const preCachedPct = total > 0 ? Math.round((preCached / total) * 100) : 0;
   console.error(
     `  Cache status: ${preCached}/${total} already cached (${preCachedPct}%), ${preToRender} to render fresh`,
   );
-  if (preSkipShort.length > 0) {
-    console.error(
-      `  Hard-skip (too short, <${MIN_BAKE_LINE_CHARS} chars): ${preSkipShort.length} line(s) — runtime TTS at rehearsal`,
-    );
-    for (const s of preSkipShort.slice(0, 5)) {
-      console.error(
-        `    id=${s.id} ${s.role}: "${s.text}" (${s.text.length} chars)`,
-      );
-    }
-    if (preSkipShort.length > 5) {
-      console.error(`    … and ${preSkipShort.length - 5} more`);
-    }
-  }
-  if (preCached > 0 && preToRender === 0 && preSkipShort.length === 0) {
+  if (preCached > 0 && preToRender === 0) {
     console.error(
       `  Fully cached — this bake will re-emit the same audio with zero API calls.`,
     );
@@ -632,114 +1223,138 @@ async function bakeAudioIntoDoc(
   const startTime = Date.now();
   let rendered = 0;
   let cacheHits = 0;
-  // Lines that text-token-regressed across every retry and every model
-  // in the chain. Not a bake-killing error — these stay un-embedded in
-  // the .mram, and the runtime TTS path handles them at rehearsal time.
-  const regressedLines: { id: number; role: string; text: string }[] = [];
   let totalBytes = 0;
-  // Tally of which models actually served each line. Populated only on
-  // `rendered` events (cache hits don't report a model since the cached
-  // file has no provenance). Prints at the end as a quality breakdown.
+  // Tally of which models/engines actually served each line. Populated
+  // only on fresh renders (cache hits don't report provenance). "google:
+  // <voice>" entries show up here alongside Gemini model ids (D-02
+  // provenance is honest per engine).
   const modelTally: Record<string, number> = {};
-  // Set once the user has made a go/no-go call on fallback, so we don't
-  // prompt (or log the warning banner) repeatedly for every subsequent
-  // fallback line. A single decision covers the rest of the run.
+  // Lines whose FINAL render used a non-preferred tier (a lower Gemini
+  // model OR the Google engine). Kept for the end-of-run summary. D-08:
+  // these stay cached, never deleted, for later premium upgrade.
+  const fallbackTierLines: { id: number; role: string; text: string; model: string }[] = [];
+  // Set once the user has made a go/no-go call on a GEMINI quality-tier
+  // drop, so we don't prompt (or log the warning banner) repeatedly.
+  // Google-engine (D-02) fallback lines never trigger this prompt — a
+  // non-Gemini voice on a short line is the documented worst case, not
+  // an unexpected quality regression needing a decision.
   let fallbackResolved = false;
 
-  // Lines pre-flagged as too-short-to-bake (from the pre-scan). They
-  // skip the API entirely — no attempt, no retry, no wait. Counted
-  // as "regressed" in the final summary since the effect at playback
-  // time is identical: no embedded audio, runtime TTS handles them.
-  // Add them to regressedLines up front so the summary is accurate
-  // whether we hit any mid-bake regressions or not.
-  const tooShortIds = new Set(preSkipShort.map((s) => s.id));
-  for (const s of preSkipShort) {
-    regressedLines.push(s);
-  }
+  // Rolling median duration-sample pool for AUTHOR-06's anomaly gate.
+  // Populated only from freshly-rendered lines this run (matches the
+  // plan's "collect DurationSample per rendered line" wording) — see
+  // runDurationAnomalyGate for the 30-sample warm-up window logic.
+  const durationSamples: DurationSample[] = [];
+
+  const warnedMissingGoogleVoice = new Set<string>();
 
   for (const line of spokenLines) {
-    const voice = getGeminiVoiceForRole(line.role);
     const cleanText = line.plain.trim();
-    let statusLabel = "";
-    let thisLineModel: string | undefined;
-    // Cache key for this line's render, captured from the onProgress
-    // event. Needed on the abort path: renderLineAudio has already
-    // written the fallback-tier bytes to disk by the time we detect
-    // the tier drop, so aborting without deleting this entry would
-    // leave a single degraded line cached that silently hits on re-run.
-    let thisLineCacheKey: string | undefined;
+    const isShort = cleanText.length < SHORT_LINE_MAX_CHARS;
+    const voice = getGeminiVoiceForRole(line.role);
+    const preamble = !isShort && cleanText.length >= MIN_PREAMBLE_LINE_CHARS
+      ? preambleByRole[line.role] ?? ""
+      : "";
+    const googleVoice = resolveGoogleVoice(voiceCast, line.role);
 
-    // Hard-skip: line was flagged too-short at pre-scan time. Don't
-    // touch the API. Progress bar still updates so the percentage
-    // moves forward.
-    if (tooShortIds.has(line.id)) {
-      const done = spokenLines.indexOf(line) + 1;
-      const pct = Math.floor((done / total) * 100);
-      process.stderr.write(
-        `\r  [${done.toString().padStart(3)}/${total}] ${pct.toString().padStart(3)}% ` +
-          `${line.role.padEnd(10)} (${"skip-too-short".padEnd(30)}) ` +
-          `                `,
+    if (
+      isShort &&
+      !voiceCast?.roles[line.role]?.googleVoice &&
+      !warnedMissingGoogleVoice.has(line.role)
+    ) {
+      warnedMissingGoogleVoice.add(line.role);
+      process.stderr.write("\r" + " ".repeat(80) + "\r");
+      console.error(
+        `  ⚠  role "${line.role}" has no pinned googleVoice in the voice-cast sidecar — Google fallback (if needed) uses the default (${GOOGLE_FALLBACK_DEFAULT_VOICE}).`,
       );
-      continue;
     }
 
-    // Skip the preamble for utterances too short to carry character
-    // direction — the preamble:content ratio confuses Gemini's
-    // classifier and causes empty-audio-stream regressions.
-    const preamble =
-      cleanText.length >= MIN_PREAMBLE_LINE_CHARS
-        ? preambleByRole[line.role] ?? ""
-        : "";
+    const done = spokenLines.indexOf(line) + 1;
+    const pct = Math.floor((done / total) * 100);
+    const alreadyCompleted = completedLineIds.has(String(line.id));
 
     try {
-      const opus = await renderLineAudio(
-        cleanText,
-        line.style,
-        voice,
-        {
-        apiKeys,
-        ...(modelsForWaitMode ? { models: modelsForWaitMode } : {}),
-        onProgress: (event) => {
-          if (event.status === "cache-hit") {
-            cacheHits++;
-            statusLabel = "cache";
-          } else if (event.status === "rendered") {
-            rendered++;
-            statusLabel = event.model ?? "rendered";
-            totalBytes += event.bytesOut ?? 0;
-            thisLineModel = event.model;
-            thisLineCacheKey = event.cacheKey;
-            const key = event.model ?? "unknown";
-            modelTally[key] = (modelTally[key] ?? 0) + 1;
-          } else if (event.status === "waiting-for-quota-reset") {
-            const waitHrs = event.waitUntil
-              ? Math.ceil((event.waitUntil.getTime() - Date.now()) / 3_600_000)
-              : 0;
-            // Clear the progress line before printing the multi-line
-            // banner so it doesn't get visually glued to the progress bar.
-            process.stderr.write("\r" + " ".repeat(80) + "\r");
-            console.error(
-              `\n⏸  All Gemini models quota-exhausted. Sleeping ~${waitHrs}h until midnight PT.`,
-            );
-            console.error(
-              `   Cache is preserved. You can Ctrl-C and restart later instead of waiting.\n`,
-            );
-          }
-        },
-      },
-        preamble,
-      );
+      let result: LineRenderResult | null = null;
 
-      line.audio = opus.toString("base64");
+      if (alreadyCompleted) {
+        const hit = tryReadCompletedLineFromCache({
+          cacheDir: CACHE_DIR,
+          isShort,
+          cleanText,
+          style: line.style,
+          voice,
+          preamble,
+          modelChain,
+          googleVoice,
+        });
+        if (hit) result = { ...hit, fromCache: true };
+      }
 
-      // Quality-drop detection: this line was served by something other
-      // than the preferred model. If we haven't already resolved the
-      // fallback decision for this run, do it now (log warning + maybe
-      // prompt). After resolution, subsequent fallback lines are silent
-      // — they still tally but don't interrupt the progress bar.
+      if (!result) {
+        result = isShort
+          ? await renderShortLineWithGates({
+              cleanText,
+              voice,
+              googleVoice,
+              apiKeys,
+              models: modelChain,
+              cacheDir: CACHE_DIR,
+              groqApiKey,
+              googleApiKey,
+              noShortLineStt,
+              durationSamples,
+            })
+          : await renderNormalLineWithGates({
+              cleanText,
+              style: line.style,
+              voice,
+              preamble,
+              apiKeys,
+              models: modelChain,
+              cacheDir: CACHE_DIR,
+              verifyAudio,
+              groqApiKey,
+              durationSamples,
+            });
+      }
+
+      line.audio = result.opus.toString("base64");
+      const statusLabel = result.fromCache ? "cache" : result.model;
+
+      if (result.fromCache) {
+        cacheHits++;
+      } else {
+        rendered++;
+        totalBytes += result.opus.length;
+        modelTally[result.model] = (modelTally[result.model] ?? 0) + 1;
+
+        upsertBakeIndexEntry(CACHE_DIR, {
+          cacheKey: result.cacheKey,
+          model: result.model,
+          ritualSlug,
+          lineId: line.id,
+          byteLen: result.opus.length,
+          durationMs: result.durationMs ?? getOpusDurationMs(result.opus),
+          createdAt: new Date().toISOString(),
+          tier: classifyTier(result.model, preferredModel),
+        });
+
+        if (result.model !== preferredModel) {
+          fallbackTierLines.push({ id: line.id, role: line.role, text: cleanText, model: result.model });
+        }
+      }
+
+      completedLineIds.add(String(line.id));
+      persistResumeState();
+
+      // Quality-tier drop detection (Gemini fallback models only — see
+      // fallbackResolved comment above). Google-engine lines (D-02) are
+      // excluded: that fallback is expected, documented behavior, not a
+      // decision point.
       if (
-        thisLineModel &&
-        thisLineModel !== preferredModel &&
+        !result.fromCache &&
+        result.model !== preferredModel &&
+        !result.model.startsWith("google:") &&
         !fallbackResolved
       ) {
         // Clear the in-progress line so the banner reads cleanly.
@@ -749,7 +1364,7 @@ async function bakeAudioIntoDoc(
           `⚠  Quality-tier drop detected at line ${line.id} (${line.role}).`,
         );
         console.error(`   Preferred: ${preferredModel}`);
-        console.error(`   Served by: ${thisLineModel}`);
+        console.error(`   Served by: ${result.model}`);
         console.error(
           `   The preferred model's daily quota is exhausted. Remaining lines`,
         );
@@ -759,12 +1374,12 @@ async function bakeAudioIntoDoc(
         console.error(`   midnight PT for a uniform premium bake.`);
         console.error("");
 
-        // Shared abort handler. Renders at the fallback tier have
-        // already been written to the cache by renderLineAudio — if we
-        // exit without deleting THIS line's entry, a re-run after quota
-        // reset will cache-hit the degraded bytes and never re-render
-        // on the preferred model. Delete it so the re-run produces a
-        // uniform premium bake.
+        // Shared abort handler. D-08 keep-and-upgrade: fallback-tier
+        // renders are NEVER deleted here — they stay cached under their
+        // own modelId-qualified key so a re-run after quota reset can
+        // upgrade just those lines to the preferred model (the preferred-
+        // model cache LOOKUP key is different, so it naturally misses and
+        // re-renders — no explicit deletion needed for that to work).
         const handleAbort = (reason: string) => {
           const renderedOnPremium = modelTally[preferredModel] ?? 0;
           // Cache hits may be either premium-tier entries from prior
@@ -772,15 +1387,7 @@ async function bakeAudioIntoDoc(
           // We count them separately so the user sees the total
           // preserved work, not just what rendered fresh this run.
           const preservedTotal = renderedOnPremium + cacheHits;
-          const deleted = thisLineCacheKey
-            ? deleteCacheEntry(thisLineCacheKey)
-            : false;
           console.error(reason);
-          if (deleted) {
-            console.error(
-              `   Removed the just-rendered fallback-tier cache entry for line ${line.id}.`,
-            );
-          }
           if (preservedTotal > 0) {
             const parts: string[] = [];
             if (renderedOnPremium > 0)
@@ -802,6 +1409,12 @@ async function bakeAudioIntoDoc(
               `   midnight PT to start fresh on the preferred model.`,
             );
           }
+          console.error(
+            `   (This run's fallback-tier render for line ${line.id} is KEPT (D-08 keep-`,
+          );
+          console.error(
+            `   and-upgrade) — a re-run on the preferred model upgrades it automatically.)`,
+          );
           console.error("");
           process.exit(2);
         };
@@ -821,12 +1434,11 @@ async function bakeAudioIntoDoc(
             `   Continuing with mixed-tier bake. Will not prompt again this run.`,
           );
           console.error(
-            `   (The fallback-tier cache entry for line ${line.id} is kept — re-runs`,
+            `   (The fallback-tier cache entry for line ${line.id} is kept (D-08) — a`,
           );
           console.error(
-            `   will cache-hit it. Delete ~/.cache/masonic-mram-audio/ to force full`,
+            `   later re-bake upgrades it to the preferred model automatically.)`,
           );
-          console.error(`   re-render later.)`);
           console.error("");
         } else {
           // continue mode
@@ -839,8 +1451,6 @@ async function bakeAudioIntoDoc(
         fallbackResolved = true;
       }
 
-      const done = spokenLines.indexOf(line) + 1;
-      const pct = Math.floor((done / total) * 100);
       const elapsed = (Date.now() - startTime) / 1000;
       const eta = elapsed > 0 && done > 0 ? Math.ceil((elapsed / done) * (total - done)) : 0;
       process.stderr.write(
@@ -849,30 +1459,13 @@ async function bakeAudioIntoDoc(
           `ETA ${etaFormat(eta)}       `,
       );
     } catch (err) {
-      // Text-token regression on a too-short line — don't bail the
-      // whole bake, just leave this line without embedded audio. The
-      // runtime TTS path will handle it per-rehearsal (which is what
-      // used to happen for EVERY line before bake-in existed). We
-      // track these so the final summary shows them, and the user can
-      // decide whether to edit the source line or accept the small
-      // runtime API cost.
-      if (err instanceof PersistentTextTokenRegression) {
-        process.stderr.write("\r" + " ".repeat(80) + "\r");
-        console.error(
-          `\n  ⚠  Line ${line.id} (${line.role}) "${cleanText.slice(0, 50)}${cleanText.length > 50 ? "…" : ""}"`,
-        );
-        console.error(
-          `     Gemini returned text tokens instead of audio across all retries.`,
-        );
-        console.error(
-          `     This line is too short for reliable generation (${cleanText.length} chars).`,
-        );
-        console.error(
-          `     Skipping bake for this line — runtime TTS will handle it at rehearsal.\n`,
-        );
-        regressedLines.push({ id: line.id, role: line.role, text: cleanText });
-        continue; // next line, don't set line.audio, don't re-throw
-      }
+      // D-01: no more catch-and-skip. Any render/gate failure that
+      // survives the short-line Google fallback (or, for normal lines,
+      // has no fallback available at all) is fatal — the bake refuses
+      // rather than silently dropping a line. Cache is preserved either
+      // way (successful renders that came before this line stay on
+      // disk), so a fixed re-run resumes cheaply.
+      process.stderr.write("\r" + " ".repeat(80) + "\r");
       console.error(
         `\n\nError rendering line ${line.id} (${line.role}): ${(err as Error).message}`,
       );
@@ -885,7 +1478,7 @@ async function bakeAudioIntoDoc(
   console.error("Audio bake complete:");
   console.error(`  Rendered via API:  ${rendered}`);
   if (Object.keys(modelTally).length > 0) {
-    console.error(`    Per-model breakdown:`);
+    console.error(`    Per-model/engine breakdown:`);
     const sorted = Object.entries(modelTally).sort((a, b) => b[1] - a[1]);
     for (const [model, count] of sorted) {
       const tier = model === preferredModel ? "(preferred)" : "(fallback)";
@@ -895,17 +1488,17 @@ async function bakeAudioIntoDoc(
     }
   }
   console.error(`  Cache hits:        ${cacheHits}`);
-  if (regressedLines.length > 0) {
+  if (fallbackTierLines.length > 0) {
     console.error(
-      `  Skipped (text-token regression, will hit runtime TTS): ${regressedLines.length} line(s)`,
+      `  Fallback-tier (kept, D-08 keep-and-upgrade): ${fallbackTierLines.length} line(s)`,
     );
-    for (const r of regressedLines.slice(0, 10)) {
+    for (const r of fallbackTierLines.slice(0, 10)) {
       console.error(
-        `    id=${r.id} ${r.role}: "${r.text.slice(0, 40)}${r.text.length > 40 ? "…" : ""}" (${r.text.length} chars)`,
+        `    id=${r.id} ${r.role}: "${r.text.slice(0, 40)}${r.text.length > 40 ? "…" : ""}" — ${r.model}`,
       );
     }
-    if (regressedLines.length > 10) {
-      console.error(`    … and ${regressedLines.length - 10} more`);
+    if (fallbackTierLines.length > 10) {
+      console.error(`    … and ${fallbackTierLines.length - 10} more`);
     }
   }
   console.error(

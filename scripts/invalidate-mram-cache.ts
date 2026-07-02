@@ -28,9 +28,13 @@
  * hardcodes the path itself, to stay drift-proof if the location ever
  * moves again.
  *
- * Hard-skipped lines (below MIN_BAKE_LINE_CHARS at bake time) have
- * no cache entries; the script reports them as "not cached" — no
- * action needed, those lines already fall through to runtime TTS.
+ * D-01: there is no more "hard-skip" bucket — every line gets baked
+ * audio. Short lines (below SHORT_LINE_MAX_CHARS, imported from
+ * build-mram-from-dialogue.ts so the two scripts can never drift) have
+ * TWO possible cache entries: the Gemini instructional-padded-prompt
+ * render, and (if that failed validation at bake time) the Google Cloud
+ * TTS fallback render under its own `google:<voice>` modelId. This
+ * script checks and can delete both.
  */
 
 import * as fs from "node:fs";
@@ -50,12 +54,16 @@ import {
 } from "../src/lib/voice-cast";
 import { getGeminiVoiceForRole } from "../src/lib/tts-cloud";
 import type { StylesFile } from "../src/lib/styles";
+import {
+  SHORT_LINE_MAX_CHARS,
+  GOOGLE_FALLBACK_DEFAULT_VOICE,
+  buildShortLinePrompt,
+} from "./build-mram-from-dialogue";
 
 // Must stay in sync with build-mram-from-dialogue.ts defaults.
 const MIN_PREAMBLE_LINE_CHARS = Number(
   process.env.VOICE_CAST_MIN_LINE_CHARS ?? "40",
 );
-const MIN_BAKE_LINE_CHARS = Number(process.env.MIN_BAKE_LINE_CHARS ?? "5");
 
 interface ParsedArgs {
   plainPath: string;
@@ -262,39 +270,45 @@ async function main() {
   for (const line of targeted) {
     const cleanText = line.plain.trim();
     const voice = getGeminiVoiceForRole(line.role);
+    const isShort = cleanText.length < SHORT_LINE_MAX_CHARS;
 
-    // Two buckets of "unbakeable": hard-skipped (below MIN_BAKE_LINE_CHARS)
-    // and auto-skipped at bake time due to persistent regression. Either
-    // way no cache entry exists. Flag these so the user knows they're
-    // no-ops, not suppressed failures.
-    if (cleanText.length < MIN_BAKE_LINE_CHARS) {
-      console.error(
-        `  id=${line.id.toString().padStart(3)} ${line.role.padEnd(8)}  "${cleanText.slice(0, 40)}" (${cleanText.length} chars) — hard-skipped at bake, no cache entry`,
-      );
-      continue;
+    // D-01: no more hard-skip bucket. Short lines have up to two
+    // candidate cache entries: the Gemini instructional-padded-prompt
+    // render (premium tier) and, if that failed validation at bake
+    // time, the Google Cloud TTS fallback render under its own
+    // `google:<voice>` modelId (D-02). Normal lines have exactly one.
+    const candidates: { label: string; cacheKey: string }[] = [];
+    if (isShort) {
+      const paddedText = buildShortLinePrompt(cleanText);
+      candidates.push({
+        label: modelId,
+        cacheKey: computeCacheKey(paddedText, undefined, voice, modelId, ""),
+      });
+      const googleVoice = voiceCast?.roles[line.role]?.googleVoice ?? GOOGLE_FALLBACK_DEFAULT_VOICE;
+      candidates.push({
+        label: `google:${googleVoice}`,
+        cacheKey: computeCacheKey(cleanText, undefined, googleVoice, `google:${googleVoice}`, ""),
+      });
+    } else {
+      const preamble =
+        cleanText.length >= MIN_PREAMBLE_LINE_CHARS
+          ? preambleByRole[line.role] ?? ""
+          : "";
+      candidates.push({
+        label: modelId,
+        cacheKey: computeCacheKey(cleanText, line.style, voice, modelId, preamble),
+      });
     }
 
-    const preamble =
-      cleanText.length >= MIN_PREAMBLE_LINE_CHARS
-        ? preambleByRole[line.role] ?? ""
-        : "";
+    // Check existence without touching the cache dir ourselves — defer
+    // to the deleteCacheEntry helper so we reuse its logic. Use the
+    // exported CACHE_DIR constant so this script can never drift from
+    // the bake path's actual cache location (D-06: rituals/_bake-cache/).
+    const existing = candidates
+      .map((c) => ({ ...c, path: `${CACHE_DIR}/${c.cacheKey}.opus` }))
+      .filter((c) => fs.existsSync(c.path));
 
-    const cacheKey = computeCacheKey(cleanText, line.style, voice, modelId, preamble);
-
-    // Check if cached without touching the cache dir ourselves — defer
-    // to the deleteCacheEntry helper so we reuse its logic.
-    // Tactic: dry-run by checking existence via fs.existsSync in the
-    // invalidation helper's path. Since deleteCacheEntry only deletes
-    // if the file exists (returns boolean), we can use its return value
-    // to tell cache-hit vs cache-miss, but only after deciding to delete.
-    //
-    // For dry-run we need a separate existence check. Use the exported
-    // CACHE_DIR constant so this script can never drift from the bake
-    // path's actual cache location (D-06: rituals/_bake-cache/).
-    const cachePath = `${CACHE_DIR}/${cacheKey}.opus`;
-    const exists = fs.existsSync(cachePath);
-
-    if (!exists) {
+    if (existing.length === 0) {
       console.error(
         `  id=${line.id.toString().padStart(3)} ${line.role.padEnd(8)}  "${cleanText.slice(0, 40)}${cleanText.length > 40 ? "…" : ""}" — not cached`,
       );
@@ -304,16 +318,18 @@ async function main() {
 
     foundInCache++;
 
-    if (args.yes) {
-      const actuallyDeleted = deleteCacheEntry(cacheKey);
-      if (actuallyDeleted) deleted++;
-      console.error(
-        `  id=${line.id.toString().padStart(3)} ${line.role.padEnd(8)}  "${cleanText.slice(0, 40)}${cleanText.length > 40 ? "…" : ""}" — ${actuallyDeleted ? "DELETED" : "already gone"}`,
-      );
-    } else {
-      console.error(
-        `  id=${line.id.toString().padStart(3)} ${line.role.padEnd(8)}  "${cleanText.slice(0, 40)}${cleanText.length > 40 ? "…" : ""}" — would delete (cacheKey=${cacheKey.slice(0, 12)}…)`,
-      );
+    for (const c of existing) {
+      if (args.yes) {
+        const actuallyDeleted = deleteCacheEntry(c.cacheKey);
+        if (actuallyDeleted) deleted++;
+        console.error(
+          `  id=${line.id.toString().padStart(3)} ${line.role.padEnd(8)}  "${cleanText.slice(0, 40)}${cleanText.length > 40 ? "…" : ""}" (${c.label}) — ${actuallyDeleted ? "DELETED" : "already gone"}`,
+        );
+      } else {
+        console.error(
+          `  id=${line.id.toString().padStart(3)} ${line.role.padEnd(8)}  "${cleanText.slice(0, 40)}${cleanText.length > 40 ? "…" : ""}" (${c.label}) — would delete (cacheKey=${c.cacheKey.slice(0, 12)}…)`,
+        );
+      }
     }
   }
 
