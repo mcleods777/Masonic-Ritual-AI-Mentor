@@ -2,12 +2,12 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: completed
-last_updated: "2026-07-02T03:57:56.404Z"
+status: executing
+last_updated: "2026-07-02T14:36:49.257Z"
 progress:
   total_phases: 7
   completed_phases: 2
-  total_plans: 16
+  total_plans: 24
   completed_plans: 16
   percent: 29
 ---
@@ -29,7 +29,7 @@ progress:
 **Milestone:** v1 invited-lodge
 **Phase:** Phase 2 SHIPPED (PR #68 open against `main`)
 **Plan:** 9/9 complete (all SUMMARYs landed)
-**Status:** Phase 2 code-complete + 4 UAT passed + 4 UAT blocked (real-use-pending); Phase 1 UAT: 2 items still deferred
+**Status:** Ready to execute
 **Progress:** 2/7 phases shipped (1 merged, 1 PR open)
 
 ```

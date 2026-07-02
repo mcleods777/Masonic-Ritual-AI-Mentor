@@ -590,9 +590,10 @@ export function openDB(): Promise<IDBDatabase> {
 
 **If this table is empty:** N/A — see entries above; all are LOW-to-MEDIUM risk with documented mitigations, none block planning.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should the planner attempt a git rebase/cherry-pick of the abandoned branch, or reimplement fresh using it as reference?**
+   - RESOLVED: Fresh files written from `git show 58eb551:<path>` references — no checkout/cherry-pick/merge. Recorded across all 8 plans; the two confirmed-broken patterns (`--since` git-diff, provenance-discarding migration) are explicitly marked do-not-port in 03-02 and 03-06.
    - What we know: The abandoned branch's core logic (validators, resume-state atomic writes, preview-server path-containment, idb-schema consolidation) is sound and 517-test-verified. Its `--since` and cache-migration logic are confirmed wrong/suboptimal relative to today's CONTEXT.md.
    - What's unclear: Whether a partial rebase (taking most files, rewriting two) is faster/safer than a fresh implementation informed by the reference, given main has only drifted 8 commits (low conflict risk) but some of that drift touches the same files (`src/app/upload/page.tsx`, `src/components/DocumentUpload.tsx` — unrelated Phase 3 changes vs. new upload/zip-import feature on main).
    - Recommendation: Planner's call. A cherry-pick-then-fix-two-files approach could save substantial time; a fresh build using the old branch purely as line-by-line reference (via `git show`) avoids merge-conflict risk entirely. Given this is a solo-author low-stakes-timeline project, either is viable — recommend the planner explicitly decide and record the choice, since it materially affects task breakdown either way.
@@ -601,11 +602,13 @@ export function openDB(): Promise<IDBDatabase> {
    - What we know: CONTEXT.md flags D-03 as provisional (user was AFK for that specific question) and explicitly invites downgrading to duration-only at plan review.
    - What's unclear: Whether Shannon has since confirmed a preference.
    - Recommendation: Surface this explicitly in plan review rather than silently defaulting either way.
+   - RESOLVED: 03-08 implements D-03 as specified (short-line STT verification default-on) with a documented `--no-short-line-stt` downgrade flag; surfaced for Shannon's confirmation in the 03-08 SUMMARY at plan review.
 
 3. **Does the `.gitignore` gap (Pitfall 1: `.opus`, `.mram.backup-*`, `.zip` not actually ignored) need a task in THIS phase, or is it adjacent cleanup Shannon should handle separately?**
    - What we know: AUTHOR-01/D-06 explicitly calls out verifying `.opus` coverage as in-scope ("verify .opus is covered and extend if needed"). The `.mram.backup-*` and `.zip` gaps are adjacent findings, not literally requested.
    - What's unclear: Whether fixing the adjacent gaps is worth a few minutes of scope creep given Shannon's stated preference (Deferred Ideas) that `.mram.backup-*` cleanup is a "nicety... not a requirement."
    - Recommendation: Fix the `.opus` gap (in-scope). Flag the `.mram.backup-*`/`.zip` gaps to Shannon as a one-line "found this while in the area" note rather than silently ignoring or silently fixing without mention — these are a light-but-real risk of accidentally committing plaintext-adjacent binary content.
+   - RESOLVED: 03-01 Task 1 fixes the `.opus` gap in-scope; the `.mram.backup-*`/`.zip` gaps are flag-only in the 03-01 SUMMARY per CONTEXT.md Deferred Ideas.
 
 ## Environment Availability
 
