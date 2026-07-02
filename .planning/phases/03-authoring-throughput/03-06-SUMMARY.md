@@ -131,3 +131,7 @@ None. `bake-all.ts` is fully wired against the real `validate-or-fail.ts`, `cach
 
 - A future plan that adds per-line resume plumbing to `build-mram-from-dialogue.ts` (`--resume-state-path`/`--skip-line-ids`) can upgrade `bake-all.ts`'s `--resume` from ritual granularity to per-line granularity by having the child process write the same `_RESUME.json` contract directly — `resume-state.ts`'s shape does not need to change.
 - Phase 4 (Content Coverage) is the first real consumer of `bake-all.ts` against actual ritual content; that will be the first end-to-end exercise of the real `spawn("npx", [...])` path (this plan's tests mock `node:child_process` throughout).
+
+## Self-Check: PASSED
+
+All 7 files created by this plan verified present on disk; all 5 commit hashes (`82cc4a5`, `dc62759`, `3265f0b`, `1d9b71c`, `b543e37`) verified present in `git log --oneline --all`.
