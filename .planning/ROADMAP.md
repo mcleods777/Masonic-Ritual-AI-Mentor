@@ -100,10 +100,10 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 03-02-PLAN.md — AUTHOR-01/03: cache relocation to rituals/_bake-cache, modelId v3 key, zero-cost migration (Wave 2)
-- [ ] 03-03-PLAN.md — AUTHOR-05: bake-band word-ratio hard-fail + shared validate-or-fail gate (Wave 2)
-- [ ] 03-04-PLAN.md — AUTHOR-10: idb-schema.ts extraction, DB_VERSION 5, feedbackTraces shell, dual-open test (Wave 2)
-- [ ] 03-05-PLAN.md — AUTHOR-04/07 helpers: googleVoice sidecar field, google-tts call, stt-verify round-trip (Wave 2)
+- [x] 03-02-PLAN.md — AUTHOR-01/03: cache relocation to rituals/_bake-cache, modelId v3 key, zero-cost migration (Wave 2)
+- [x] 03-03-PLAN.md — AUTHOR-05: bake-band word-ratio hard-fail + shared validate-or-fail gate (Wave 2)
+- [x] 03-04-PLAN.md — AUTHOR-10: idb-schema.ts extraction, DB_VERSION 5, feedbackTraces shell, dual-open test (Wave 2)
+- [x] 03-05-PLAN.md — AUTHOR-04/07 helpers: googleVoice sidecar field, google-tts call, stt-verify round-trip (Wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -191,7 +191,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. Pre-invite Hygiene | 7/7 | Complete (UAT pending) | 2026-04-21 |
 | 2. Safety Floor | 0/9 | Not started | - |
-| 3. Authoring Throughput | 1/8 | In Progress|  |
+| 3. Authoring Throughput | 5/8 | In Progress|  |
 | 4. Content Coverage | 0/0 | Not started | - |
 | 5. Coach Quality Lift | 0/0 | Not started | - |
 | 6. Admin Substrate & Distribution | 0/0 | Not started | - |
