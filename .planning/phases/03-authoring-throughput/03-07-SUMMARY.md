@@ -119,3 +119,12 @@ None — no external service configuration required. Manual UAT (starting the se
 ---
 *Phase: 03-authoring-throughput*
 *Completed: 2026-07-02*
+
+## Self-Check: PASSED
+
+- FOUND: scripts/preview-bake.ts
+- FOUND: scripts/__tests__/preview-bake.test.ts
+- FOUND: .planning/phases/03-authoring-throughput/03-07-SUMMARY.md
+- FOUND: 2a7fa62 (feat commit)
+- FOUND: afa54ae (test commit)
+- FOUND: ef27d4d (docs/SUMMARY commit)
