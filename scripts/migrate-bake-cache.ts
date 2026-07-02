@@ -77,7 +77,16 @@ import type { StylesFile } from "../src/lib/styles";
 const MIN_PREAMBLE_LINE_CHARS = Number(
   process.env.VOICE_CAST_MIN_LINE_CHARS ?? "40",
 );
-const MIN_BAKE_LINE_CHARS = Number(process.env.MIN_BAKE_LINE_CHARS ?? "5");
+// HISTORICAL constant only — this reconstructs the pre-Phase-3 hard-skip
+// threshold so this one-time migration can tell which lines had a cache
+// entry AT ALL under the old scheme (D-01 removed that hard-skip bucket
+// entirely from the live bake path; this script deliberately does NOT
+// import the removed constant from build-mram-from-dialogue.ts — it never
+// existed with a threshold-tuning env var read on this migration path,
+// since a one-time migration script has no legitimate reason to vary its
+// reconstruction of PAST behavior based on today's environment). Hardcoded
+// at the value that was always the shipped default in practice.
+const OLD_HARD_SKIP_THRESHOLD_CHARS = 5;
 
 /**
  * A1 provenance assumption (03-CONTEXT.md Assumptions Log): the current
@@ -318,8 +327,8 @@ async function main(): Promise<void> {
   let byteLengthMismatches = 0;
 
   for (const line of lines) {
-    if (line.text.length < MIN_BAKE_LINE_CHARS) {
-      // Hard-skipped at bake time (below MIN_BAKE_LINE_CHARS) — no
+    if (line.text.length < OLD_HARD_SKIP_THRESHOLD_CHARS) {
+      // Hard-skipped at bake time under the pre-Phase-3 threshold — no
       // cache entry ever existed for this line.
       skippedHardTooShort++;
       continue;
