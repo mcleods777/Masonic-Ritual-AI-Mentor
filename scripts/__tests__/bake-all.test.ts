@@ -390,7 +390,7 @@ describe("bake-all: --since deprecation warning", () => {
 });
 
 describe("bake-all: buildMramSpawnArgs", () => {
-  it("builds positional plain/cipher/output + --with-audio + --on-fallback=", () => {
+  it("builds positional plain/cipher/output + --with-audio + --on-fallback= + --resume-state-path=", () => {
     const args = buildMramSpawnArgs("ea-opening", "continue", "/r");
     expect(args).toEqual([
       "tsx",
@@ -400,6 +400,7 @@ describe("bake-all: buildMramSpawnArgs", () => {
       "/r/ea-opening.mram",
       "--with-audio",
       "--on-fallback=continue",
+      `--resume-state-path=${path.join("/r", "_bake-cache", "_RESUME-ea-opening.json")}`,
     ]);
   });
 
@@ -419,11 +420,13 @@ describe("bake-all: buildMramSpawnArgs", () => {
 describe("bake-all: validator gate runs before any spawn", () => {
   let ritualsDir: string;
   let manifestPath: string;
+  let resumeFile: string;
   let exitSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     ritualsDir = fs.mkdtempSync(path.join(os.tmpdir(), "bake-all-order-"));
     manifestPath = path.join(ritualsDir, "_bake-cache", "_manifest.json");
+    resumeFile = path.join(ritualsDir, "_bake-cache", "_RESUME.json");
     spawnMock.mockReset();
     validateOrFailSharedMock.mockReset();
     spawnMock.mockImplementation(() => makeFakeChild());
@@ -461,6 +464,7 @@ describe("bake-all: validator gate runs before any spawn", () => {
       4,
       ritualsDir,
       manifestPath,
+      resumeFile,
     );
     // Let the microtask queue drain so bakeRitual has called spawn.
     await new Promise((r) => setTimeout(r, 0));
@@ -490,10 +494,12 @@ describe("bake-all: validator gate runs before any spawn", () => {
 describe("bake-all: bakeSelected — spawn args, passphrase safety, manifest update", () => {
   let ritualsDir: string;
   let manifestPath: string;
+  let resumeFile: string;
 
   beforeEach(() => {
     ritualsDir = fs.mkdtempSync(path.join(os.tmpdir(), "bake-all-fanout-"));
     manifestPath = path.join(ritualsDir, "_bake-cache", "_manifest.json");
+    resumeFile = path.join(ritualsDir, "_bake-cache", "_RESUME.json");
     spawnMock.mockReset();
     spawnMock.mockImplementation(() => makeFakeChild());
     fs.writeFileSync(path.join(ritualsDir, "ea-opening-dialogue.md"), "p");
@@ -515,6 +521,7 @@ describe("bake-all: bakeSelected — spawn args, passphrase safety, manifest upd
       1,
       ritualsDir,
       manifestPath,
+      resumeFile,
     );
     await new Promise((r) => setTimeout(r, 0));
     const child = spawnMock.mock.results[0]!.value as ReturnType<
@@ -540,6 +547,7 @@ describe("bake-all: bakeSelected — spawn args, passphrase safety, manifest upd
       1,
       ritualsDir,
       manifestPath,
+      resumeFile,
     );
     await new Promise((r) => setTimeout(r, 0));
     const child = spawnMock.mock.results[0]!.value as ReturnType<
@@ -569,6 +577,7 @@ describe("bake-all: bakeSelected — spawn args, passphrase safety, manifest upd
       1,
       ritualsDir,
       manifestPath,
+      resumeFile,
     );
     await new Promise((r) => setTimeout(r, 0));
     const child = spawnMock.mock.results[0]!.value as ReturnType<
@@ -581,6 +590,73 @@ describe("bake-all: bakeSelected — spawn args, passphrase safety, manifest upd
     expect(fs.existsSync(manifestPath)).toBe(true);
     const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
     expect(manifest["ea-opening"]).toBeDefined();
+  });
+
+  it("writes ritual-granularity resume state incrementally and unconditionally (no --resume flag passed)", async () => {
+    const p = bakeSelected(
+      ["ea-opening"],
+      "continue",
+      "pw",
+      1,
+      ritualsDir,
+      manifestPath,
+      resumeFile,
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    const child = spawnMock.mock.results[0]!.value as ReturnType<
+      typeof makeFakeChild
+    >;
+    child.emit("exit", 0);
+    await p;
+
+    expect(fs.existsSync(resumeFile)).toBe(true);
+    expect(loadCompletedSlugs(resumeFile)).toEqual(new Set(["ea-opening"]));
+
+    // WR-02: the child receives a per-ritual --resume-state-path so a
+    // crash mid-ritual can resume from its interrupted line.
+    const [, args] = spawnMock.mock.calls[0]!;
+    expect((args as string[]).some((a) => a.startsWith("--resume-state-path=") && a.includes("_RESUME-ea-opening.json"))).toBe(true);
+  });
+
+  it("records both slugs incrementally when baking two rituals in sequence (a crash between them leaves the first recorded)", async () => {
+    fs.writeFileSync(path.join(ritualsDir, "ea-closing-dialogue.md"), "p");
+    fs.writeFileSync(
+      path.join(ritualsDir, "ea-closing-dialogue-cipher.md"),
+      "c",
+    );
+    const p = bakeSelected(
+      ["ea-opening", "ea-closing"],
+      "continue",
+      "pw",
+      1,
+      ritualsDir,
+      manifestPath,
+      resumeFile,
+    );
+    // Serial (parallelN=1): let the first child spawn and resolve before
+    // the second is created.
+    await new Promise((r) => setTimeout(r, 0));
+    const firstChild = spawnMock.mock.results[0]!.value as ReturnType<
+      typeof makeFakeChild
+    >;
+    firstChild.emit("exit", 0);
+
+    // Immediately after the first ritual completes (before the second
+    // spawns), the resume file already records it — proving the write
+    // is incremental, not batched at the end.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(loadCompletedSlugs(resumeFile)).toEqual(new Set(["ea-opening"]));
+
+    await new Promise((r) => setTimeout(r, 0));
+    const secondChild = spawnMock.mock.results[1]!.value as ReturnType<
+      typeof makeFakeChild
+    >;
+    secondChild.emit("exit", 0);
+    await p;
+
+    expect(loadCompletedSlugs(resumeFile)).toEqual(
+      new Set(["ea-opening", "ea-closing"]),
+    );
   });
 
   it("reports halt-on-first-failure: a failed slug's result carries the error", async () => {
@@ -596,6 +672,7 @@ describe("bake-all: bakeSelected — spawn args, passphrase safety, manifest upd
       1,
       ritualsDir,
       manifestPath,
+      resumeFile,
     );
     await new Promise((r) => setTimeout(r, 0));
     const child = spawnMock.mock.results[0]!.value as ReturnType<

@@ -51,21 +51,28 @@
  *   coordination, --parallel > 1 simply requires --on-fallback=continue
  *   or --on-fallback=abort.
  *
- * Resume granularity: the abandoned branch's resume-state.ts (ported
- * verbatim in this plan, see scripts/lib/resume-state.ts) is a per-LINE
- * contract (ResumeState.completedLineIds names line IDs within a single
- * ritual) intended to be written by build-mram-from-dialogue.ts and read
- * here. As of this plan, current main's build-mram-from-dialogue.ts has
- * no --skip-line-ids / --resume-state-path flags (its argv contract is
- * still `<plain.md> <cipher.md> <output.mram> [--with-audio]
- * [--on-fallback=...]` — unchanged, per this plan's files_modified list
- * which does not include that file). So --resume here operates at RITUAL
- * granularity: this orchestrator writes its own ResumeState to the same
- * _RESUME.json path after each ritual completes, repurposing
- * `completedLineIds` to hold completed RITUAL SLUGS (not line IDs) and
- * `ritual` as a fixed marker string. A future plan that adds per-line
- * resume plumbing to build-mram-from-dialogue.ts can adopt the same file
- * without a breaking change to the ResumeState shape.
+ * Resume granularity (WR-02): TWO independent resume layers now compose.
+ *
+ *   1. RITUAL granularity (this orchestrator): scripts/lib/resume-state.ts's
+ *      ResumeState is repurposed here — `completedLineIds` holds completed
+ *      RITUAL SLUGS (not line IDs) and `ritual` is the fixed marker string
+ *      RESUME_MARKER. Written to rituals/_bake-cache/_RESUME.json
+ *      INCREMENTALLY and UNCONDITIONALLY after EVERY successful ritual
+ *      bake (not just when --resume is passed, and not only post-hoc at
+ *      the end of the run) — a crash mid-fan-out still leaves a resumable
+ *      record of every ritual that finished before the crash. `--resume`
+ *      only controls whether a prior run's completed slugs are read back
+ *      and skipped on this invocation; the write itself is unconditional.
+ *
+ *   2. Per-LINE granularity (the child, build-mram-from-dialogue.ts):
+ *      that script DOES have a --resume-state-path=<file> flag (see its
+ *      own module docstring) — it persists completedLineIds after every
+ *      line renders, atomically, via the SAME resume-state.ts contract.
+ *      buildMramSpawnArgs passes a PER-RITUAL file
+ *      (_bake-cache/_RESUME-<slug>.json, keyed by slug so cross-ritual
+ *      state can never collide) to every spawned child, so a bake
+ *      interrupted mid-ritual resumes from its interrupted LINE on the
+ *      next invocation, not from that ritual's first line.
  *
  * Passphrase: prompted ONCE here (same raw-stdin idiom as
  * scripts/bake-first-degree.ts's readPassphrase), then passed to every
@@ -381,10 +388,12 @@ export function runValidatorGate(
 // ============================================================
 // Build the spawn-argv for a build-mram-from-dialogue.ts sub-process.
 // Exported so tests can assert the arg list directly without spawning.
-// Matches CURRENT main's argv contract (positional plain/cipher/output +
-// --with-audio + --on-fallback=...) — NOT the abandoned branch's
-// --resume-state-path/--ritual-slug/--skip-line-ids flags, which do not
-// exist on scripts/build-mram-from-dialogue.ts as of this plan.
+// WR-02: also appends --resume-state-path=<per-ritual file>, keyed by
+// slug so the child's `loaded.ritual === ritualSlug` guard matches and
+// cross-ritual state can never collide — this is the per-LINE resume
+// layer (see the module docstring's "Resume granularity" note, layer 2).
+// build-mram-from-dialogue.ts DOES support --resume-state-path (see its
+// own module docstring); it is not the abandoned branch's flag set.
 // ============================================================
 export function buildMramSpawnArgs(
   slug: string,
@@ -394,6 +403,8 @@ export function buildMramSpawnArgs(
   const plainPath = path.join(ritualsDir, `${slug}-dialogue.md`);
   const cipherPath = path.join(ritualsDir, `${slug}-dialogue-cipher.md`);
   const outputPath = path.join(ritualsDir, `${slug}.mram`);
+  const cacheDir = path.join(ritualsDir, "_bake-cache");
+  const resumeStatePath = path.join(cacheDir, `_RESUME-${slug}.json`);
   return [
     "tsx",
     "scripts/build-mram-from-dialogue.ts",
@@ -402,6 +413,7 @@ export function buildMramSpawnArgs(
     outputPath,
     "--with-audio",
     `--on-fallback=${onFallback}`,
+    `--resume-state-path=${resumeStatePath}`,
   ];
 }
 
@@ -457,6 +469,18 @@ export interface BakeResult {
  * "not attempted" instead of spawning on top of a possibly-corrupted
  * state (halt-on-first-failure, adapted for bounded concurrency: tasks
  * already in flight when the failure lands are allowed to finish).
+ *
+ * WR-02: writes ritual-granularity resume state INCREMENTALLY and
+ * UNCONDITIONALLY — immediately after every successful ritual, not just
+ * post-hoc at the end of the run, and not gated on `--resume` having
+ * been passed. `initialCompleted` seeds the accumulator with any slugs
+ * already known complete from a prior interrupted run (so a --resume
+ * invocation's incremental writes still preserve that history instead
+ * of clobbering it with only this run's newly-baked slugs).
+ * writeResumeStateAtomic is synchronous, so the add+write pair for a
+ * given task never interleaves with a sibling p-limit task's own
+ * add+write — both run on the single Node event loop, and neither await
+ * point sits between the Set.add and the synchronous file write.
  */
 export async function bakeSelected(
   slugs: string[],
@@ -465,10 +489,14 @@ export async function bakeSelected(
   parallelN: number,
   ritualsDir: string = RITUALS_DIR,
   manifestPath: string = MANIFEST_PATH,
+  resumeFile: string = RESUME_FILE,
+  startedAt: number = Date.now(),
+  initialCompleted: Set<string> = new Set(),
 ): Promise<BakeResult[]> {
   const limit = pLimit(parallelN);
   let aborted = false;
   const results: BakeResult[] = [];
+  const completedThisRun = new Set<string>(initialCompleted);
 
   await Promise.all(
     slugs.map((slug) =>
@@ -485,6 +513,8 @@ export async function bakeSelected(
           console.log(`\n→ ${slug}`);
           await bakeRitual(slug, onFallback, passphrase, ritualsDir);
           recordBaked(manifestPath, slug);
+          completedThisRun.add(slug);
+          writeCompletedSlugs(completedThisRun, startedAt, resumeFile);
           console.log(`  ✓ ${slug} baked.`);
           results.push({ slug, ok: true });
         } catch (err) {
@@ -685,17 +715,23 @@ async function main(): Promise<void> {
   }
 
   const startedAt = Date.now();
+  // WR-02: resume state is now written INCREMENTALLY and UNCONDITIONALLY
+  // inside bakeSelected itself (after every successful ritual), so no
+  // post-hoc write is needed here. `completed` (populated above only when
+  // --resume was passed) seeds the incremental writer so a --resume run's
+  // writes preserve prior-run history instead of clobbering it with only
+  // this run's newly-baked slugs.
   const results = await bakeSelected(
     selected,
     flags.onFallback,
     passphrase,
     parallelN,
+    RITUALS_DIR,
+    MANIFEST_PATH,
+    RESUME_FILE,
+    startedAt,
+    completed,
   );
-
-  if (flags.resume) {
-    for (const r of results) if (r.ok) completed.add(r.slug);
-    if (completed.size > 0) writeCompletedSlugs(completed, startedAt);
-  }
 
   const failures = results.filter((r) => !r.ok);
   if (failures.length > 0) {
