@@ -79,7 +79,16 @@ Plans:
   5. Bake-time audio-duration anomaly detector flags any baked line whose duration is >3× the ritual's median for its character count
   6. `src/lib/idb-schema.ts` is the single `onupgradeneeded` source of truth, imported by both `storage.ts` and `voice-storage.ts`; a dual-open test confirms all stores exist regardless of which module opens first
   7. Shannon can scrub baked lines in a browser against `localhost:8883` before re-encrypting a `.mram`
-**Plans**: TBD
+**Plans**: 8 plans
+Plans:
+- [ ] 03-01-PLAN.md — Foundation: deps (p-limit, fake-indexeddb), vitest scripts glob, .gitignore hardening, bake-math + dev-guard (Wave 1)
+- [ ] 03-02-PLAN.md — AUTHOR-01/03: cache relocation to rituals/_bake-cache, modelId v3 key, zero-cost migration (Wave 2)
+- [ ] 03-03-PLAN.md — AUTHOR-05: bake-band word-ratio hard-fail + shared validate-or-fail gate (Wave 2)
+- [ ] 03-04-PLAN.md — AUTHOR-10: idb-schema.ts extraction, DB_VERSION 5, feedbackTraces shell, dual-open test (Wave 2)
+- [ ] 03-05-PLAN.md — AUTHOR-04/07 helpers: googleVoice sidecar field, google-tts call, stt-verify round-trip (Wave 2)
+- [ ] 03-06-PLAN.md — AUTHOR-02/09: bake-all orchestrator, content-hash --changed-only, resume, p-limit (Wave 3)
+- [ ] 03-07-PLAN.md — AUTHOR-08: preview-bake localhost:8883 scrubber, 3-layer containment (Wave 3)
+- [ ] 03-08-PLAN.md — AUTHOR-01/04/05/06/07 wiring: hard-skip removal, short-line routing, gates, keep-and-upgrade, runbook (Wave 4)
 **UI hint**: no
 
 ### Phase 4: Content Coverage
@@ -145,7 +154,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. Pre-invite Hygiene | 7/7 | Complete (UAT pending) | 2026-04-21 |
 | 2. Safety Floor | 0/9 | Not started | - |
-| 3. Authoring Throughput | 0/0 | Not started | - |
+| 3. Authoring Throughput | 0/8 | Planned | - |
 | 4. Content Coverage | 0/0 | Not started | - |
 | 5. Coach Quality Lift | 0/0 | Not started | - |
 | 6. Admin Substrate & Distribution | 0/0 | Not started | - |
