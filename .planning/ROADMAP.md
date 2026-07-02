@@ -92,7 +92,7 @@ Plans:
   6. `src/lib/idb-schema.ts` is the single `onupgradeneeded` source of truth, imported by both `storage.ts` and `voice-storage.ts`; a dual-open test confirms all stores exist regardless of which module opens first
   7. Shannon can scrub baked lines in a browser against `localhost:8883` before re-encrypting a `.mram`
 
-**Plans**: 8 plans
+**Plans**: 10 plans (8 original + 2 gap-closure)
 Plans:
 **Wave 1**
 
@@ -113,6 +113,11 @@ Plans:
 **Wave 4** *(blocked on Wave 3 completion)*
 
 - [x] 03-08-PLAN.md — AUTHOR-01/04/05/06/07 wiring: hard-skip removal, short-line routing, gates, keep-and-upgrade, runbook (Wave 4)
+
+**Gap closure** *(verification gaps CR-01/CR-02/CR-03/WR-02 from 03-VERIFICATION.md)*
+
+- [ ] 03-09-PLAN.md — AUTHOR-02/09 (gap): env-first passphrase (CR-01), resolve parallel/fallback default conflict (CR-02), incremental resume + --resume-state-path wiring (WR-02)
+- [ ] 03-10-PLAN.md — AUTHOR-06/09 (gap): per-slug _INDEX shard writes + merged reads + parent consolidation, closing the cross-process lost-update race (CR-03)
 
 **UI hint**: no
 
