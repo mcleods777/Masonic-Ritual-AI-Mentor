@@ -123,3 +123,7 @@ None - no external service configuration required.
 ---
 *Phase: 03-authoring-throughput*
 *Completed: 2026-07-02*
+
+## Self-Check: PASSED
+
+All created/modified files verified present on disk (scripts/build-mram-from-dialogue.ts, scripts/bake-all.ts, scripts/preview-bake.ts, scripts/__tests__/build-mram-short-line.test.ts, scripts/__tests__/bake-index-shard.test.ts, this SUMMARY.md). All 3 commit hashes (f8a6adc, e9f4aa7, 95854d3) verified present in git log.
