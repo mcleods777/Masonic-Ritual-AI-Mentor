@@ -96,7 +96,7 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 03-01-PLAN.md — Foundation: deps (p-limit, fake-indexeddb), vitest scripts glob, .gitignore hardening, bake-math + dev-guard (Wave 1)
+- [x] 03-01-PLAN.md — Foundation: deps (p-limit, fake-indexeddb), vitest scripts glob, .gitignore hardening, bake-math + dev-guard (Wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -191,7 +191,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. Pre-invite Hygiene | 7/7 | Complete (UAT pending) | 2026-04-21 |
 | 2. Safety Floor | 0/9 | Not started | - |
-| 3. Authoring Throughput | 0/8 | Planned | - |
+| 3. Authoring Throughput | 1/8 | In Progress|  |
 | 4. Content Coverage | 0/0 | Not started | - |
 | 5. Coach Quality Lift | 0/0 | Not started | - |
 | 6. Admin Substrate & Distribution | 0/0 | Not started | - |
