@@ -90,6 +90,7 @@ import {
 } from "./lib/resume-state";
 import { getChangedRituals, recordBaked } from "./lib/cache-manifest";
 import { validateOrFail as validateOrFailShared } from "./lib/validate-or-fail";
+import { choosePassphraseSource } from "./build-mram-from-dialogue";
 
 // ============================================================
 // Constants
@@ -397,9 +398,18 @@ function bakeRitual(
   ritualsDir: string = RITUALS_DIR,
 ): Promise<void> {
   const args = buildMramSpawnArgs(slug, onFallback, ritualsDir);
+  // T-03-13 / T-03-CR01: with env-first passphrase resolution (CR-01) the
+  // child never needs stdin to obtain the passphrase — it reads
+  // MRAM_PASSPHRASE via choosePassphraseSource() before ever touching TTY
+  // state. Interactive stdin is only needed for the child's on-fallback
+  // ask/wait quota prompt, which is only reachable at parallel=1 (enforced
+  // by CR-02's resolveEffectiveParallel refusal, see Task 2) — closing the
+  // shared-raw-mode-TTY corruption path as defense-in-depth even
+  // independent of the child-side fix.
+  const childStdin = onFallback === "ask" || onFallback === "wait" ? "inherit" : "ignore";
   return new Promise((resolve, reject) => {
     const child = spawn("npx", args, {
-      stdio: ["inherit", "inherit", "inherit"],
+      stdio: [childStdin, "inherit", "inherit"],
       env: { ...process.env, MRAM_PASSPHRASE: passphrase },
     });
     child.on("exit", (code) => {
@@ -533,11 +543,18 @@ export async function dryRunForRitual(
 // ============================================================
 // Passphrase — prompted ONCE, passed to children via env only.
 // Same raw-stdin idiom as scripts/bake-first-degree.ts's readPassphrase.
+// CR-01: env-first via the shared choosePassphraseSource() decision
+// function (imported from build-mram-from-dialogue.ts) so the parent's
+// own resolution order matches the child's exactly — env always wins
+// over an interactive TTY.
 // ============================================================
 async function readPassphrase(): Promise<string> {
-  if (!process.stdin.isTTY) {
-    const env = process.env.MRAM_PASSPHRASE;
-    if (env) return env;
+  const source = choosePassphraseSource(
+    process.env.MRAM_PASSPHRASE,
+    !!process.stdin.isTTY,
+  );
+  if (source.kind === "env") return source.value;
+  if (source.kind === "error") {
     throw new Error(
       "stdin is not a TTY and MRAM_PASSPHRASE env var is not set. " +
         "Run interactively or set MRAM_PASSPHRASE.",

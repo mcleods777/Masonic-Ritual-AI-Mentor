@@ -39,6 +39,7 @@ import {
 } from "../bake-all";
 import { recordBaked } from "../lib/cache-manifest";
 import { writeResumeStateAtomic } from "../lib/resume-state";
+import { choosePassphraseSource } from "../build-mram-from-dialogue";
 
 function makeFakeChild() {
   const listeners: Record<string, ((...a: unknown[]) => void)[]> = {};
@@ -115,6 +116,36 @@ describe("bake-all: checkParallelFallbackConflict", () => {
 
   it("enforces the check when flagged=true even with default-shaped values", () => {
     expect(checkParallelFallbackConflict(4, "ask", true)).not.toBeNull();
+  });
+});
+
+describe("bake-all / build-mram-from-dialogue: choosePassphraseSource (CR-01)", () => {
+  it("env wins over an interactive TTY", () => {
+    expect(choosePassphraseSource("secret", true)).toEqual({
+      kind: "env",
+      value: "secret",
+    });
+  });
+
+  it("env wins when stdin is not a TTY too", () => {
+    expect(choosePassphraseSource("secret", false)).toEqual({
+      kind: "env",
+      value: "secret",
+    });
+  });
+
+  it("falls through to tty when no env value and stdin is a TTY", () => {
+    expect(choosePassphraseSource(undefined, true)).toEqual({ kind: "tty" });
+  });
+
+  it("errors when no env value and stdin is not a TTY", () => {
+    expect(choosePassphraseSource(undefined, false)).toEqual({
+      kind: "error",
+    });
+  });
+
+  it("treats an empty string env value as unusable (not a usable passphrase)", () => {
+    expect(choosePassphraseSource("", false)).toEqual({ kind: "error" });
   });
 });
 
@@ -479,6 +510,10 @@ describe("bake-all: bakeSelected — spawn args, passphrase safety, manifest upd
     expect(
       (opts as { env?: Record<string, string> }).env?.MRAM_PASSPHRASE,
     ).toBe(passphrase);
+    // CR-01 defense-in-depth: onFallback="continue" here means the child
+    // never needs interactive stdin (env-first passphrase resolution
+    // means no prompt is ever reached for continue/abort modes).
+    expect((opts as { stdio?: unknown[] }).stdio?.[0]).toBe("ignore");
   });
 
   it("records a manifest entry on success", async () => {
