@@ -322,6 +322,19 @@ export function selectSlugs(
   return all;
 }
 
+/**
+ * The one-line deprecation warning printed when --since is used. Pure
+ * function (returns the string rather than calling console.warn
+ * directly) so tests can assert its content without spying on console.
+ */
+export function sinceDeprecationWarning(): string {
+  return (
+    `[deprecated] --since is a compat alias for --changed-only; ` +
+    `git-ref semantics are impossible for gitignored dialogue files, ` +
+    `so the ref value is ignored and a content-hash manifest is used instead.`
+  );
+}
+
 // ============================================================
 // Validator gate — runs for EVERY selected ritual BEFORE any spawn.
 // Waste zero quota on corrupted pairs.
@@ -589,11 +602,7 @@ async function main(): Promise<void> {
   }
 
   if (flags.sinceFlagPresent) {
-    console.warn(
-      `[deprecated] --since is a compat alias for --changed-only; ` +
-        `git-ref semantics are impossible for gitignored dialogue files, ` +
-        `so the ref value is ignored and a content-hash manifest is used instead.`,
-    );
+    console.warn(sinceDeprecationWarning());
   }
 
   const slugs = selectSlugs(flags);

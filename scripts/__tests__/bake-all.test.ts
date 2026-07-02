@@ -28,6 +28,7 @@ import {
   checkParallelFallbackConflict,
   getAllRituals,
   selectSlugs,
+  sinceDeprecationWarning,
   validateOrFail,
   runValidatorGate,
   buildMramSpawnArgs,
@@ -277,6 +278,38 @@ describe("bake-all: selectSlugs (content-hash change detection)", () => {
     );
     expect(viaSince).toEqual(viaChangedOnly);
     expect(viaSince).toEqual(["ea-closing"]);
+  });
+
+  it("--since HEAD~1 with an explicit ref also produces identical selection (ref ignored)", () => {
+    writePair("ea-opening", "p1", "c1");
+    recordBaked(manifestPath, "ea-opening");
+    fs.writeFileSync(
+      path.join(ritualsDir, "ea-opening-dialogue.md"),
+      "p1 EDITED",
+    );
+    const flagsFromParsedSince = parseFlags([
+      "node",
+      "bake-all.ts",
+      "--since",
+      "HEAD~1",
+    ]);
+    const viaSince = selectSlugs(flagsFromParsedSince, ritualsDir, manifestPath);
+    const viaChangedOnly = selectSlugs(
+      { changedOnly: true, sinceFlagPresent: false },
+      ritualsDir,
+      manifestPath,
+    );
+    expect(viaSince).toEqual(viaChangedOnly);
+    expect(viaSince).toEqual(["ea-opening"]);
+  });
+});
+
+describe("bake-all: --since deprecation warning", () => {
+  it("sinceDeprecationWarning names both the deprecated flag and the replacement", () => {
+    const msg = sinceDeprecationWarning();
+    expect(msg).toContain("--since");
+    expect(msg).toContain("--changed-only");
+    expect(msg.toLowerCase()).toContain("ignored");
   });
 });
 
