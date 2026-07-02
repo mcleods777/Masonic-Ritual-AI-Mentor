@@ -22,7 +22,11 @@
  *
  * Cache keys are computed using the CANONICAL computeCacheKey export
  * from render-gemini-audio.ts, so keys match the bake path exactly
- * (including preamble rules and MIN_PREAMBLE_LINE_CHARS threshold).
+ * (including modelId (D-07) and preamble rules and the
+ * MIN_PREAMBLE_LINE_CHARS threshold). Cache lives at rituals/_bake-cache/
+ * (D-06) via the exported CACHE_DIR constant — this script never
+ * hardcodes the path itself, to stay drift-proof if the location ever
+ * moves again.
  *
  * Hard-skipped lines (below MIN_BAKE_LINE_CHARS at bake time) have
  * no cache entries; the script reports them as "not cached" — no
@@ -32,7 +36,13 @@
 import * as fs from "node:fs";
 import { parseDialogue } from "../src/lib/dialogue-format";
 import { buildFromDialogue } from "../src/lib/dialogue-to-mram";
-import { computeCacheKey, deleteCacheEntry } from "./render-gemini-audio";
+import {
+  computeCacheKey,
+  deleteCacheEntry,
+  CACHE_DIR,
+  DEFAULT_MODELS,
+  readModelsFromEnv,
+} from "./render-gemini-audio";
 import {
   buildPreamble,
   validateVoiceCast,
@@ -239,6 +249,12 @@ async function main() {
   );
   console.error("");
 
+  // Resolved model chain mirrors the bake path's lookup convention
+  // (renderLineAudio uses models[0] as the modelId for its cache-hit
+  // check) — the env override takes precedence, matching build-mram-
+  // from-dialogue.ts / render-gemini-audio.ts resolution order.
+  const modelId = (readModelsFromEnv() ?? DEFAULT_MODELS)[0];
+
   let foundInCache = 0;
   let notCached = 0;
   let deleted = 0;
@@ -263,7 +279,7 @@ async function main() {
         ? preambleByRole[line.role] ?? ""
         : "";
 
-    const cacheKey = computeCacheKey(cleanText, line.style, voice, preamble);
+    const cacheKey = computeCacheKey(cleanText, line.style, voice, modelId, preamble);
 
     // Check if cached without touching the cache dir ourselves — defer
     // to the deleteCacheEntry helper so we reuse its logic.
@@ -272,13 +288,10 @@ async function main() {
     // if the file exists (returns boolean), we can use its return value
     // to tell cache-hit vs cache-miss, but only after deciding to delete.
     //
-    // For dry-run we need a separate existence check. Mirror the path
-    // computation from deleteCacheEntry: CACHE_DIR/{key}.opus
-    const cacheDir =
-      process.env.XDG_CACHE_HOME
-        ? `${process.env.XDG_CACHE_HOME}/masonic-mram-audio`
-        : `${process.env.HOME}/.cache/masonic-mram-audio`;
-    const cachePath = `${cacheDir}/${cacheKey}.opus`;
+    // For dry-run we need a separate existence check. Use the exported
+    // CACHE_DIR constant so this script can never drift from the bake
+    // path's actual cache location (D-06: rituals/_bake-cache/).
+    const cachePath = `${CACHE_DIR}/${cacheKey}.opus`;
     const exists = fs.existsSync(cachePath);
 
     if (!exists) {
