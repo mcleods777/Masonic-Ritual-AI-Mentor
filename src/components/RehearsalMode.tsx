@@ -105,9 +105,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
 
   const engineRef = useRef<STTEngine | null>(null);
   const sttProviderRef = useRef<STTProvider>(sttProvider);
-  sttProviderRef.current = sttProvider;
   const transcriptRef = useRef<string>("");
-  transcriptRef.current = transcript;
   const voiceMapRef = useRef<Map<string, RoleVoiceProfile>>(new Map());
   const cancelledRef = useRef(false);
   const advanceGenRef = useRef(0); // generation counter to prevent overlapping advanceToLine chains
@@ -117,6 +115,11 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   const scriptContainerRef = useRef<HTMLDivElement>(null);
   const startListeningRef = useRef<() => void>(() => {});
   const stopListeningRef = useRef<() => void>(() => { });
+  const advanceInternalRef = useRef<((index: number, gen: number) => Promise<void>) | null>(null);
+
+  useEffect(() => {
+    sttProviderRef.current = sttProvider;
+  }, [sttProvider]);
   const sessionStartRef = useRef<string>(new Date().toISOString());
 
   // Extract unique roles from sections (only those with speaker lines)
@@ -214,11 +217,10 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
     setCurrentIndex(0);
     setLineResults([]);
     setRehearsalState("ready");
-    // Advance will be triggered by effect
+    stopSpeaking();
+    const gen = ++advanceGenRef.current;
+    void advanceInternalRef.current?.(0, gen);
   }, []);
-
-
-  const advanceInternalRef = useRef<((index: number, gen: number) => Promise<void>) | null>(null);
 
   // Internal advance — walks through lines with a generation guard.
   // Only the matching generation is allowed to continue; a new call
@@ -375,13 +377,6 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
     [currentIndex, advanceToLine],
   );
 
-  // Trigger first advance when rehearsal starts
-  useEffect(() => {
-    if (rehearsalState === "ready") {
-      advanceToLine(0);
-    }
-  }, [rehearsalState, advanceToLine]);
-
   // Start listening (voice input) — uses either Web Speech or Whisper engine
   const startListening = useCallback(() => {
     const provider = sttProviderRef.current;
@@ -397,6 +392,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
 
     setSttError(null);
     setTranscript("");
+    transcriptRef.current = "";
 
     try {
       const engine = provider === "whisper"
@@ -406,9 +402,13 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
       engineRef.current = engine;
 
       engine.onResult = (result) => {
+        transcriptRef.current = result.transcript;
         setTranscript(result.transcript);
-        // Whisper: the final transcript update triggers the "transcribing" → "checking"
-        // effect. No state change needed here — the effect handles the transition.
+        if (provider === "whisper" && result.isFinal && currentSection) {
+          engineRef.current = null;
+          const cleanRef = cleanRitualText(currentSection.text);
+          submitComparisonResult(compareTexts(result.transcript, cleanRef));
+        }
       };
 
       engine.onError = (error) => {
@@ -417,12 +417,14 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
       };
 
       engine.onEnd = () => {
-        // Browser engine: auto-stopped after silence — trigger accuracy check
-        if (provider === "browser" && transcriptRef.current) {
-          engineRef.current = null;
-          setRehearsalState("auto-checking");
+        if (provider !== "browser") return;
+        engineRef.current = null;
+        if (transcriptRef.current && currentSection) {
+          const cleanRef = cleanRitualText(currentSection.text);
+          submitComparisonResult(compareTexts(transcriptRef.current, cleanRef));
+        } else {
+          setRehearsalState("user-turn");
         }
-        // Whisper engine: recording stopped, transcript delivered via onResult
       };
 
       engine.onSilence = () => {
@@ -434,10 +436,12 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
     } catch (err) {
       setSttError(err instanceof Error ? err.message : "Failed to start speech recognition");
     }
-  }, []);
+  }, [currentSection, submitComparisonResult]);
 
   // Keep ref in sync so advanceToLine can call it without circular deps
-  startListeningRef.current = startListening;
+  useEffect(() => {
+    startListeningRef.current = startListening;
+  }, [startListening]);
 
   // Stop listening and check accuracy
   const stopListening = useCallback(() => {
@@ -464,30 +468,10 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
       }
     }
   }, [transcript, currentSection, submitComparisonResult]);
-  stopListeningRef.current = stopListening;
 
-  // When Whisper finishes transcribing, the transcript state updates.
-  // This effect detects that and moves from "transcribing" → submit.
   useEffect(() => {
-    if (rehearsalState === "transcribing" && transcript && currentSection) {
-      engineRef.current = null;
-      const cleanRef = cleanRitualText(currentSection.text);
-      const result = compareTexts(transcript, cleanRef);
-      submitComparisonResult(result);
-    }
-  }, [rehearsalState, transcript, currentSection, submitComparisonResult]);
-
-  // Browser STT auto-stopped after silence — compute comparison and submit.
-  useEffect(() => {
-    if (rehearsalState === "auto-checking" && transcript && currentSection) {
-      const cleanRef = cleanRitualText(currentSection.text);
-      const result = compareTexts(transcript, cleanRef);
-      submitComparisonResult(result);
-    } else if (rehearsalState === "auto-checking") {
-      // No transcript captured — go back to user-turn
-      setRehearsalState("user-turn");
-    }
-  }, [rehearsalState, transcript, currentSection, submitComparisonResult]);
+    stopListeningRef.current = stopListening;
+  }, [stopListening]);
 
   // Check typed input
   const handleCheckTyped = useCallback(() => {

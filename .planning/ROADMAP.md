@@ -12,8 +12,8 @@ Ship the invited-lodge v1: the pilot, hardened and extended so Shannon can perso
 ## Phases
 
 - [x] **Phase 1: Pre-invite Hygiene** — Small, zero-risk cleanup that must land before outside lodges are invited (completed 2026-04-21; 2 manual UAT items tracked in 01-HUMAN-UAT.md)
-- [ ] **Phase 2: Safety Floor (cost, abuse, auth hardening)** — Per-user rate limits, budget caps, audit log, client-token, kill switch — the layered defense against the three equal-weight fears
-- [x] **Phase 3: Authoring Throughput** — Bake cache, orchestrator, validators, preview server — Shannon-hours reduction so content work doesn't dominate calendar time (completed 2026-07-02)
+- [x] **Phase 2: Safety Floor (cost, abuse, auth hardening)** — Code-verified 2026-04-21 (9/9 requirements); human UAT remains 4 passed / 4 blocked
+- [x] **Phase 3: Authoring Throughput** — Code-verified 2026-07-02 (11/11 must-haves); 4 human UAT checks remain pending
 - [ ] **Phase 4: Content Coverage** — Bake EA, FC, MM, Installation, and officer lectures in Shannon's lodge's working, with per-line Opus verified
 - [ ] **Phase 5: Coach Quality Lift** — Structured, diff-grounded feedback with hallucination filter, gold eval set, dev-only eval UI — the headline pilot complaint addressed
 - [ ] **Phase 6: Admin Substrate & Distribution** — Admin dashboard, invite management, stateful revocation, stale-version banner — connective tissue for what Phases 2, 4, 5 emit
@@ -65,15 +65,15 @@ Plans:
 **Plans**: 9 plans
 Plans:
 
-- [ ] 02-01-PLAN.md — SAFETY-01: audit-log + pricing + spend-tally + ESLint PII guard (Wave 1)
-- [ ] 02-02-PLAN.md — SAFETY-02: rate-limit userKey keyspace + paid-route-guard skeleton (Wave 2)
-- [ ] 02-03-PLAN.md — SAFETY-03: wire guard + emit into all 9 paid routes (60/hr + 300/day caps) (Wave 6)
-- [ ] 02-04-PLAN.md — SAFETY-04: vercel.json cron + Resend spend-alert + lookup-hashed-user CLI (Wave 7)
-- [ ] 02-05-PLAN.md — SAFETY-05: client-token JWT endpoint + api-fetch Bearer + middleware verify (Wave 3)
-- [ ] 02-06-PLAN.md — SAFETY-06: RehearsalMode session step ceiling (client half; server half in Plan 03) (Wave 8)
-- [ ] 02-07-PLAN.md — SAFETY-07: screen-wake-lock inactivity auto-release (Wave 8)
-- [ ] 02-08-PLAN.md — SAFETY-08: kill-switch client degraded-mode UX + KILL-SWITCH.md runbook (Wave 4)
-- [ ] 02-09-PLAN.md — SAFETY-09: defense-in-depth route-level verification + regression tests (Wave 5)
+- [x] 02-01-PLAN.md — SAFETY-01: audit-log + pricing + spend-tally + ESLint PII guard (Wave 1)
+- [x] 02-02-PLAN.md — SAFETY-02: rate-limit userKey keyspace + paid-route-guard skeleton (Wave 2)
+- [x] 02-03-PLAN.md — SAFETY-03: wire guard + emit into all 9 paid routes (60/hr + 300/day caps) (Wave 6)
+- [x] 02-04-PLAN.md — SAFETY-04: vercel.json cron + Resend spend-alert + lookup-hashed-user CLI (Wave 7)
+- [x] 02-05-PLAN.md — SAFETY-05: client-token JWT endpoint + api-fetch Bearer + middleware verify (Wave 3)
+- [x] 02-06-PLAN.md — SAFETY-06: RehearsalMode session step ceiling (client half; server half in Plan 03) (Wave 8)
+- [x] 02-07-PLAN.md — SAFETY-07: screen-wake-lock inactivity auto-release (Wave 8)
+- [x] 02-08-PLAN.md — SAFETY-08: kill-switch client degraded-mode UX + KILL-SWITCH.md runbook (Wave 4)
+- [x] 02-09-PLAN.md — SAFETY-09: defense-in-depth route-level verification + regression tests (Wave 5)
 
 **UI hint**: no
 
@@ -194,10 +194,10 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Pre-invite Hygiene | 7/7 | Complete (UAT pending) | 2026-04-21 |
-| 2. Safety Floor | 0/9 | Not started | - |
-| 3. Authoring Throughput | 10/10 | Complete   | 2026-07-02 |
-| 4. Content Coverage | 0/0 | Not started | - |
+| 1. Pre-invite Hygiene | 7/7 | Code complete; 2 human UAT pending | 2026-04-21 |
+| 2. Safety Floor | 9/9 | Code complete; 4/8 human UAT blocked | 2026-04-21 |
+| 3. Authoring Throughput | 10/10 | Code complete; 4 human UAT pending | 2026-07-02 |
+| 4. Content Coverage | 0/TBD | Not started on current `main` | - |
 | 5. Coach Quality Lift | 0/0 | Not started | - |
 | 6. Admin Substrate & Distribution | 0/0 | Not started | - |
 | 7. Onboarding Polish | 0/0 | Not started | - |

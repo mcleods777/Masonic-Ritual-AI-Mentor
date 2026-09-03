@@ -3,51 +3,43 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-07-02T16:18:57.697Z"
+last_updated: "2026-09-02T20:21:48-05:00"
 progress:
   total_phases: 7
-  completed_phases: 2
-  total_plans: 24
-  completed_plans: 16
-  percent: 29
+  completed_phases: 3
+  total_plans: 26
+  completed_plans: 26
+  percent: 43
 ---
 
 # State: Masonic Ritual AI Mentor — v1 Invited-Lodge Milestone
 
-**Last updated:** 2026-04-21 (Phase 2 shipped — PR #68)
+**Last updated:** 2026-09-02 (repository stabilization and evidence reconciliation)
 
 ## Project Reference
 
 **Core Value:** A Masonic officer can reliably rehearse their ritual parts — at any hour, with no other brother available — and come out of the session more confident that their memorization is accurate to their lodge's working.
 
-**Current Focus:** Phase 03 — authoring-throughput
+**Current Focus:** Stabilize current `main`, close deferred UAT, then reimplement one clean Phase 4 vertical slice
 
 **Project type:** Brownfield — the pilot already ships and is in daily use by Shannon.
 
 ## Current Position
 
-Phase: 03 (authoring-throughput) — EXECUTING
-Plan: 1 of 8
 **Milestone:** v1 invited-lodge
-**Phase:** Phase 2 SHIPPED (PR #68 open against `main`)
-**Plan:** 9/9 complete (all SUMMARYs landed)
-**Status:** Executing Phase 03
-**Progress:** 2/7 phases shipped (1 merged, 1 PR open)
-
-```
-[█████░░░░░░░░░░░░░░░] 29% (2/7 phases)
-```
-
-**Next action:** Merge PR #68 (https://github.com/mcleods777/Masonic-Ritual-AI-Mentor/pull/68) when CI passes, then `/gsd-progress` to route to Phase 3 (Authoring Throughput). Amanda is actively using the production deploy on iPhone Safari as of 2026-04-21; Resend-domain-unverified bug caught + fixed (`masonicmentor.app` now verified with Resend; `MAGIC_LINK_FROM_EMAIL=mentor@masonicmentor.app`).
+**Code-verified phases:** 1, 2, and 3
+**Human verification:** still open; code-complete does not mean invite-ready
+**Repository state:** current `main` is backed up remotely; local tracked changes are not yet committed
+**Next action:** finish the stabilization checkpoint, add a complete private-tree guard and standalone TypeScript gate, then implement one clean Phase 4 manifest/diagnostics slice from current `main`. Do not merge or cherry-pick `gsd/phase4`.
 
 ## Phase Map
 
 | # | Phase | Requirements | Status |
 |---|-------|--------------|--------|
-| 1 | Pre-invite Hygiene | HYGIENE-01..07 (7) | ✓ Complete (UAT pending) |
-| 2 | Safety Floor | SAFETY-01..09 (9) | Not started |
-| 3 | Authoring Throughput | AUTHOR-01..10 (10) | Not started |
-| 4 | Content Coverage | CONTENT-01..07 (7) | Not started |
+| 1 | Pre-invite Hygiene | HYGIENE-01..07 (7) | Code complete; 2 human UAT pending |
+| 2 | Safety Floor | SAFETY-01..09 (9) | Code complete; 4/8 human UAT blocked |
+| 3 | Authoring Throughput | AUTHOR-01..10 (10) | Code complete; 4 human UAT pending |
+| 4 | Content Coverage | CONTENT-01..07 (7) | Not started on current `main` |
 | 5 | Coach Quality Lift | COACH-01..12 (12) | Not started |
 | 6 | Admin Substrate & Distribution | ADMIN-01..07 (7) | Not started |
 | 7 | Onboarding Polish | ONBOARD-01..05 (5) | Not started |
@@ -55,9 +47,10 @@ Plan: 1 of 8
 ## Performance Metrics
 
 **Requirements coverage:** 57/57 mapped (100%)
-**Phases planned:** 1/7
-**Plans executed:** 7/7 Phase 1
-**Plans verified:** 5/7 verified + 2/7 deferred-human (HYGIENE-05, HYGIENE-07 rehearsal)
+**Plans executed:** 26 across Phases 1-3
+**Phase 2 automated verification:** 9/9 requirements; 614-test current repository suite passes
+**Phase 3 automated verification:** 11/11 must-haves; 614-test current repository suite passes
+**Repository gates (2026-09-02):** lint 0 errors / 108 warnings; production build passes; standalone `tsc --noEmit` has 12 test-only typing errors
 
 ## Accumulated Context
 
@@ -76,14 +69,23 @@ Plan: 1 of 8
 
 ### Open Questions / Todos
 
-- Confirm Shannon-specific authoring bottleneck ordering inside Phase 3 during plan phase (line-level regen vs batch orchestrator vs preview-bake)
-- Freeze the gold-eval rubric ("stake my name on it" / "meh" / "wrong" + qualitative axes) as Phase 5 Task 1 artifact before any variant tuning
-- Decide whether Haiku 4.5 earns a production variant slot (assume "maybe" until Phase 5 eval measures it)
-- Revisit "does strong revocation need to ship earlier" based on the specific outside lodges in Shannon's invite queue (currently placed in Phase 6)
+- Freeze the gold-eval rubric ("stake my name on it" / "meh" / "wrong" + qualitative axes) as Phase 5 Task 1 artifact before any variant tuning.
+- Revisit whether strong revocation must ship before Phase 6 based on the specific outside lodges in Shannon's invite queue.
+- Reassess model variants during Phase 5 eval; do not reserve a production slot without measured evidence.
 
-### Blockers
+### Deferred Human UAT
 
-None.
+**Phase 1 (2):** iPhone + iCloud Private Relay magic-link verification; secret-rotation runbook rehearsal on a Vercel preview.
+
+**Phase 2 (4 blocked):** observe the 02:00 UTC cron and Resend delivery; verify client-token refresh after a Safari tab is backgrounded over 60 minutes; force a live runaway auto-advance to its ceiling; observe wake-lock release after 30 minutes idle on a real device.
+
+**Phase 3 (4 pending):** confirm a one-line edit re-bakes in under one minute; bake five rituals in parallel without babysitting; scrub baked audio through `localhost:8883`; confirm the EA rebake restores all 32 previously skipped short lines.
+
+### Readiness Blockers
+
+- Standalone `tsc --noEmit` reports 12 test-only typing errors; production build typecheck passes.
+- `rituals/` has extension-specific ignores but no complete directory guard; Git still reports private-tree content.
+- Phase 4's old branch is contaminated by a large unrelated tooling divergence and must not be merged or cherry-picked.
 
 ### Requirements Currently Validated (pre-v1, shipped pilot)
 
@@ -100,24 +102,20 @@ None.
 
 ## Session Continuity
 
-**Last significant action:** Phase 1 executed via `/gsd-execute-phase 1` on 2026-04-21. All 7 HYGIENE plans landed on branch `gsd/phase-1-pre-invite-hygiene` (13 commits: 7 `hygiene-NN:` + 5 `docs(01-NN):` metadata + 1 `test(01):` UAT). Verifier returned `human_needed` — 5/7 ✓ VERIFIED (HYGIENE-01, 02, 03, 04, 06), 2/7 ⏸ DEFERRED (HYGIENE-05 iPhone test, HYGIENE-07 runbook rehearsal). Shannon approved phase close on 2026-04-21. `01-HUMAN-UAT.md` tracks the 2 deferred items.
+**Last significant action (2026-09-02):** Resumed the project from the live `main` branch; ran the full quality baseline; obtained a paid Fable 5.1 plan review; removed all lint errors without changing the documented rehearsal behavior; and reconciled Phase 2/3 planning status against their verification artifacts.
 
-**Resumption cue:** Next action: `/gsd-discuss-phase 2` to begin Phase 2 (Safety Floor — SAFETY-01..09). The 2 deferred UAT items run at Shannon's pacing; they do NOT block Phase 2 planning or execution, but MUST close before outside-lodge invitations.
+**Verified current gates:**
 
-**Critical context for next agent:**
+- `npm run test:run`: 614/614 pass.
+- `npm run lint`: 0 errors, 108 warnings.
+- `npm run build`: pass.
+- `npx tsc --noEmit`: 12 test-only typing errors remain.
 
-1. Brownfield milestone — do NOT re-build existing pilot capability (see PROJECT.md Validated)
-2. Phase 2 (Safety Floor) introduces paid-route rate limiting, audit log, budget caps, emergency kill switch. Dependency: Phase 2 benefits from HYGIENE-02's AI SDK v6 bump (commit 005dc82) but does not require rewriting `/api/rehearsal-feedback` — that's Phase 5 COACH-02.
-3. Pending Phase 1 manual verification (both in `01-HUMAN-UAT.md`):
-   - HYGIENE-05: Shannon iPhone + iCloud Private Relay magic-link test (~2-3 min)
-   - HYGIENE-07: Rotation runbook rehearsal on Vercel preview (~15-30 min)
-4. Phase 1 left on branch `gsd/phase-1-pre-invite-hygiene` — decide merge-to-main strategy before Phase 2 OR create a fresh `gsd/phase-2-safety-floor` branch from main (Phase 1 commits travel via merge).
-5. Research findings from Phase 1 worth carrying forward: (a) codebase had zero AI SDK imports at Phase 1 start — Phase 5 COACH-02 will be the first consumer of v6 idioms; (b) current matcher is case-sensitive on .mram extension; (c) rotation runbook uses `vercel env update` atomically except for preview-branch (CLI v51.x limitation).
+**Resumption cue:** Complete the stabilization checkpoint without overwriting the pre-existing tracked changes. Then add a whole-tree `rituals/` guard plus a deterministic staged-file check, fix the 12 standalone TypeScript test errors, and begin a clean Phase 4 manifest/diagnostics slice on a fresh branch from current `main`.
+
+**Branch rule:** Treat `gsd/phase4` as read-only reference material. Do not merge or cherry-pick it; its product work is mixed with a large unrelated tooling divergence.
+
+**Approval boundary:** Do not push, merge, deploy, delete, or rewrite history without Shannon's explicit approval.
 
 ---
-*State initialized: 2026-04-20 after roadmap creation*
-*Phase 1 context gathered: 2026-04-20*
-*Phase 1 planned: 2026-04-20 (7 plans, verification passed iteration 2)*
-*Phase 1 executed: 2026-04-21 (7/7 plans landed, 5/7 verified + 2/7 deferred-human)*
-*Phase 2 context gathered: 2026-04-21*
-*Phase 2 planned: 2026-04-21 (9 plans, 8 waves, checker iteration 2 passed)*
+*State reconciled against Phase 2 and Phase 3 verification artifacts: 2026-09-02*
