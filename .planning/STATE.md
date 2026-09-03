@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-09-02T20:58:28-05:00"
+last_updated: "2026-09-03T09:30:16-05:00"
 progress:
   total_phases: 7
   completed_phases: 3
@@ -29,8 +29,8 @@ progress:
 **Milestone:** v1 invited-lodge
 **Code-verified phases:** 1, 2, and 3
 **Human verification:** still open; code-complete does not mean invite-ready
-**Repository state:** current `main` is backed up remotely; local tracked changes are not yet committed
-**Next action:** finish the stabilization checkpoint, add a complete private-tree guard and standalone TypeScript gate, then implement one clean Phase 4 manifest/diagnostics slice from current `main`. Do not merge or cherry-pick `gsd/phase4`.
+**Repository state:** Phase 4 work is isolated on `phase4/content-manifest-diagnostics`; the diagnostics slice is committed and the release-verifier slice is ready to checkpoint
+**Next action:** checkpoint the verified v3 release gate, then run it locally against the four private `.mram` assets and restore a valid bake manifest before human audio scrubbing. Do not merge or cherry-pick `gsd/phase4`.
 
 ## Phase Map
 
@@ -39,7 +39,7 @@ progress:
 | 1 | Pre-invite Hygiene | HYGIENE-01..07 (7) | Code complete; 2 human UAT pending |
 | 2 | Safety Floor | SAFETY-01..09 (9) | Code complete; 4/8 human UAT blocked |
 | 3 | Authoring Throughput | AUTHOR-01..10 (10) | Code complete; 4 human UAT pending |
-| 4 | Content Coverage | CONTENT-01..07 (7) | In progress; sanitized diagnostics slice complete |
+| 4 | Content Coverage | CONTENT-01..07 (7) | In progress; diagnostics + sanitized v3 release gate complete |
 | 5 | Coach Quality Lift | COACH-01..12 (12) | Not started |
 | 6 | Admin Substrate & Distribution | ADMIN-01..07 (7) | Not started |
 | 7 | Onboarding Polish | ONBOARD-01..05 (5) | Not started |
@@ -50,7 +50,7 @@ progress:
 **Plans executed:** 26 across Phases 1-3
 **Phase 2 automated verification:** 9/9 requirements; 615-test current repository suite passes
 **Phase 3 automated verification:** 11/11 must-haves; 615-test current repository suite passes
-**Repository gates (2026-09-02):** private-tree guard passes; standalone typecheck passes; lint 0 errors / 108 warnings; 621/621 tests pass; production build passes
+**Repository gates (2026-09-03):** private-tree guard passes; standalone typecheck passes; lint 0 errors / 107 warnings; 643/643 tests pass; production build passes
 
 ## Accumulated Context
 
@@ -85,8 +85,8 @@ progress:
 
 - Phase 4's old branch is contaminated by a large unrelated tooling divergence and must not be merged or cherry-picked.
 - Local diagnostics detect 4 `.mram` assets but no `_bake-cache/_manifest.json`; baked-source currentness is therefore unverified.
-- Current `scripts/verify-mram.ts` still accepts only format v1 and prints sample ritual lines; it is not yet a safe v3 release gate.
-- No CONTENT-01..07 requirement is complete until the v3 verifier, aggregate release gate, human scrub, and actual content coverage are verified.
+- The v3 release gate is implemented, but it has not been run against the four real private `.mram` assets because no passphrase was accessed during this slice.
+- No CONTENT-01..07 requirement is complete until the aggregate gate passes on the real assets, the bake manifest is restored/current, human audio scrubbing is complete, and actual content coverage is verified.
 
 ### Requirements Currently Validated (pre-v1, shipped pilot)
 
@@ -103,18 +103,18 @@ progress:
 
 ## Session Continuity
 
-**Last significant action (2026-09-02):** Completed the first clean Phase 4 vertical slice on `phase4/content-manifest-diagnostics`: strict bake-manifest schema validation, contained-filesystem and symlink guards, a sanitized diagnostic model, and a production-disabled localhost author endpoint. No old Phase 4 code was merged or cherry-picked.
+**Last significant action (2026-09-03):** Replaced the leaking v1-only verifier with a sanitized v3 binary/payload/audio verifier and aggregate `rituals/*.mram` release gate. Added fail-closed symlink, empty-document, checksum, metadata, Ogg/Opus, CLI-output, and passphrase-EOF coverage. Fable 5.1 returned GO with no blocking corrections; both explicit follow-ups were implemented.
 
 **Verified current gates:**
 
 - `npm run check:private-tree`: pass; an isolated-index probe confirms staged `rituals/` paths are rejected.
 - `npm run typecheck`: pass.
-- `npm run lint`: 0 errors, 108 warnings.
-- `npm run test:run`: 621/621 pass.
+- `npm run lint`: 0 errors, 107 warnings.
+- `npm run test:run`: 643/643 pass.
 - `npm run build`: pass.
 - Aggregate-only local smoke: schema v1, manifest missing, 4 ritual assets detected, 0 recorded/current entries.
 
-**Resumption cue:** Checkpoint the diagnostics slice, then extend `scripts/verify-mram.ts` into a non-leaking v3 audio-coverage verifier and build the aggregate content release gate with tests first. Use the old branch only as read-only design input.
+**Resumption cue:** Run `npm run verify:content` locally with the private passphrase (interactive or `MRAM_PASSPHRASE`), record only the sanitized aggregate result, then restore/validate `_bake-cache/_manifest.json` and proceed to human audio scrubbing. Use the old branch only as read-only design input.
 
 **Branch rule:** Treat `gsd/phase4` as read-only reference material. Do not merge or cherry-pick it; its product work is mixed with a large unrelated tooling divergence.
 

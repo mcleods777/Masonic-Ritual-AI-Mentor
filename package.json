@@ -9,6 +9,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "check:private-tree": "tsx scripts/check-private-tree.ts",
+    "verify:content": "tsx scripts/verify-content-release.ts",
     "test": "vitest",
     "test:run": "vitest run"
   },
