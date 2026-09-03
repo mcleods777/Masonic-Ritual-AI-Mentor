@@ -186,7 +186,7 @@ function parseDocument(content: string): MRAMDocument {
   // Collect paired lines: each speaker line appears twice (cipher then plain)
   const speakerLines: { cipher: ParsedLine; plain: ParsedLine; section: string }[] = [];
   // Buffer for collecting non-speaker blocks (PRAYER text, etc.)
-  let specialBuffer: { cipher: string[]; plain: string[]; section: string; role: string } | null = null;
+  const specialBuffer: { cipher: string[]; plain: string[]; section: string; role: string } | null = null;
 
   // First pass: identify sections and collect all lines
   const rawParsedLines: {

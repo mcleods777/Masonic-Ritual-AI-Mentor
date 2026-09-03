@@ -28,7 +28,21 @@ export default function PerformanceTracker() {
   };
 
   useEffect(() => {
-    loadData();
+    let cancelled = false;
+    Promise.all([getPerformanceSummary(), getAllSessions()])
+      .then(([s, sess]) => {
+        if (!cancelled) {
+          setSummary(s);
+          setSessions(sess);
+        }
+      })
+      .catch(console.error)
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleClearHistory = async () => {

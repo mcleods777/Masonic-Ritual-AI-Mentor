@@ -218,6 +218,8 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   }, []);
 
 
+  const advanceInternalRef = useRef<((index: number, gen: number) => Promise<void>) | null>(null);
+
   // Internal advance — walks through lines with a generation guard.
   // Only the matching generation is allowed to continue; a new call
   // to advanceToLine() bumps the generation so any old chain exits.
@@ -304,7 +306,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
         // Small gap between lines to avoid hammering the TTS API
         await new Promise((r) => setTimeout(r, 150));
         // Auto-advance to next line (same generation — not a new entry)
-        advanceInternal(index + 1, gen);
+        advanceInternalRef.current?.(index + 1, gen);
       }
     } else {
       // silent-advance: stage direction, structural cue, or speaker-performed
@@ -312,10 +314,14 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
       // the user isn't stuck waiting for a recitation that doesn't exist.
       await new Promise((r) => setTimeout(r, 150));
       if (!stale()) {
-        advanceInternal(index + 1, gen);
+        advanceInternalRef.current?.(index + 1, gen);
       }
     }
   }, [sections, selectedRole]);
+
+  useEffect(() => {
+    advanceInternalRef.current = advanceInternal;
+  }, [advanceInternal]);
 
   // Public entry point — bumps generation to cancel any running chain
   const advanceToLine = useCallback((index: number) => {

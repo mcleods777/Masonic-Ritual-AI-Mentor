@@ -38,6 +38,7 @@ const eslintConfig = defineConfig([
   ...nextTs,
   {
     files: ["src/**/*.ts", "src/**/*.tsx"],
+    ignores: ["src/lib/__tests__/fixtures/banned-emit.ts"],
     rules: {
       "no-restricted-syntax": [
         "error",
@@ -59,6 +60,7 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "public/pdf.worker.min.mjs",
   ]),
 ]);
 

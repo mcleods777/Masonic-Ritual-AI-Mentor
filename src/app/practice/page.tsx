@@ -46,7 +46,6 @@ function PracticeContent() {
   // Load sections when document changes
   useEffect(() => {
     if (!selectedDocId) return;
-    setLoading(true);
     getDocumentSections(selectedDocId)
       .then(setSections)
       .catch(console.error)
@@ -111,7 +110,10 @@ function PracticeContent() {
         {documents.length > 1 && (
           <select
             value={selectedDocId || ""}
-            onChange={(e) => setSelectedDocId(e.target.value)}
+            onChange={(e) => {
+              setLoading(true);
+              setSelectedDocId(e.target.value);
+            }}
             className="px-4 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-200 text-sm focus:outline-none focus:border-amber-500 flex-shrink-0"
           >
             {documents.map((doc) => (
