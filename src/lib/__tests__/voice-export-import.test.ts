@@ -82,7 +82,7 @@ describe("validateVoiceImport", () => {
 
   it("rejects voice missing name", () => {
     const voice = makeVoice();
-    delete (voice as Record<string, unknown>).name;
+    delete (voice as unknown as Record<string, unknown>).name;
     const result = validateVoiceImport(makeExportJson([voice]));
     expect(result.valid).toBe(false);
     if (!result.valid) expect(result.error).toContain("missing required field 'name'");
@@ -90,7 +90,7 @@ describe("validateVoiceImport", () => {
 
   it("rejects voice missing audioBase64", () => {
     const voice = makeVoice();
-    delete (voice as Record<string, unknown>).audioBase64;
+    delete (voice as unknown as Record<string, unknown>).audioBase64;
     const result = validateVoiceImport(makeExportJson([voice]));
     expect(result.valid).toBe(false);
     if (!result.valid) expect(result.error).toContain("audioBase64");
@@ -98,7 +98,7 @@ describe("validateVoiceImport", () => {
 
   it("rejects voice missing duration", () => {
     const voice = makeVoice();
-    delete (voice as Record<string, unknown>).duration;
+    delete (voice as unknown as Record<string, unknown>).duration;
     const result = validateVoiceImport(makeExportJson([voice]));
     expect(result.valid).toBe(false);
     if (!result.valid) expect(result.error).toContain("duration");
@@ -125,7 +125,7 @@ describe("validateVoiceImport", () => {
 
   it("identifies which voice entry has the error", () => {
     const voices = [makeVoice({ name: "Good" }), makeVoice()];
-    delete (voices[1] as Record<string, unknown>).mimeType;
+    delete (voices[1] as unknown as Record<string, unknown>).mimeType;
     const result = validateVoiceImport(makeExportJson(voices));
     expect(result.valid).toBe(false);
     if (!result.valid) expect(result.error).toContain("Voice entry 2");

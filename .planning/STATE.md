@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-09-02T20:21:48-05:00"
+last_updated: "2026-09-02T20:33:14-05:00"
 progress:
   total_phases: 7
   completed_phases: 3
@@ -48,9 +48,9 @@ progress:
 
 **Requirements coverage:** 57/57 mapped (100%)
 **Plans executed:** 26 across Phases 1-3
-**Phase 2 automated verification:** 9/9 requirements; 614-test current repository suite passes
-**Phase 3 automated verification:** 11/11 must-haves; 614-test current repository suite passes
-**Repository gates (2026-09-02):** lint 0 errors / 108 warnings; production build passes; standalone `tsc --noEmit` has 12 test-only typing errors
+**Phase 2 automated verification:** 9/9 requirements; 615-test current repository suite passes
+**Phase 3 automated verification:** 11/11 must-haves; 615-test current repository suite passes
+**Repository gates (2026-09-02):** private-tree guard passes; standalone typecheck passes; lint 0 errors / 108 warnings; 615/615 tests pass; production build passes
 
 ## Accumulated Context
 
@@ -81,11 +81,9 @@ progress:
 
 **Phase 3 (4 pending):** confirm a one-line edit re-bakes in under one minute; bake five rituals in parallel without babysitting; scrub baked audio through `localhost:8883`; confirm the EA rebake restores all 32 previously skipped short lines.
 
-### Readiness Blockers
+### Remaining Readiness Risk
 
-- Standalone `tsc --noEmit` reports 12 test-only typing errors; production build typecheck passes.
-- `rituals/` has extension-specific ignores but no complete directory guard; Git still reports private-tree content.
-- Phase 4's old branch is contaminated by a large unrelated tooling divergence and must not be merged or cherry-picked.
+- Phase 4's old branch is contaminated by a large unrelated tooling divergence and must not be merged or cherry-picked. Reimplement the first Phase 4 slice from current `main` with tests first.
 
 ### Requirements Currently Validated (pre-v1, shipped pilot)
 
@@ -102,16 +100,17 @@ progress:
 
 ## Session Continuity
 
-**Last significant action (2026-09-02):** Resumed the project from the live `main` branch; ran the full quality baseline; obtained a paid Fable 5.1 plan review; removed all lint errors without changing the documented rehearsal behavior; and reconciled Phase 2/3 planning status against their verification artifacts.
+**Last significant action (2026-09-02):** Completed Milestones 1 and 2 from the Fable-reviewed recovery plan: stabilized the rehearsal state flow, reconciled Phase 2/3 evidence, added and activated a whole-tree private-ritual pre-commit guard, and made standalone TypeScript checking green.
 
 **Verified current gates:**
 
-- `npm run test:run`: 614/614 pass.
+- `npm run check:private-tree`: pass; an isolated-index probe confirms staged `rituals/` paths are rejected.
+- `npm run typecheck`: pass.
 - `npm run lint`: 0 errors, 108 warnings.
+- `npm run test:run`: 615/615 pass.
 - `npm run build`: pass.
-- `npx tsc --noEmit`: 12 test-only typing errors remain.
 
-**Resumption cue:** Complete the stabilization checkpoint without overwriting the pre-existing tracked changes. Then add a whole-tree `rituals/` guard plus a deterministic staged-file check, fix the 12 standalone TypeScript test errors, and begin a clean Phase 4 manifest/diagnostics slice on a fresh branch from current `main`.
+**Resumption cue:** Review and checkpoint Milestone 2, then begin a clean Phase 4 content-manifest and diagnostics slice on a fresh branch from current `main`, using the old branch only as read-only design input.
 
 **Branch rule:** Treat `gsd/phase4` as read-only reference material. Do not merge or cherry-pick it; its product work is mixed with a large unrelated tooling divergence.
 

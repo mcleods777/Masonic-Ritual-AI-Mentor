@@ -7,7 +7,7 @@ function setNodeEnv(value: string | undefined) {
   if (value === undefined) {
     delete (process.env as Record<string, string | undefined>).NODE_ENV;
   } else {
-    process.env.NODE_ENV = value;
+    (process.env as Record<string, string | undefined>).NODE_ENV = value;
   }
 }
 
