@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-09-02T20:33:14-05:00"
+last_updated: "2026-09-02T20:58:28-05:00"
 progress:
   total_phases: 7
   completed_phases: 3
@@ -20,7 +20,7 @@ progress:
 
 **Core Value:** A Masonic officer can reliably rehearse their ritual parts — at any hour, with no other brother available — and come out of the session more confident that their memorization is accurate to their lodge's working.
 
-**Current Focus:** Stabilize current `main`, close deferred UAT, then reimplement one clean Phase 4 vertical slice
+**Current Focus:** Phase 4 — clean content diagnostics and release verification
 
 **Project type:** Brownfield — the pilot already ships and is in daily use by Shannon.
 
@@ -39,7 +39,7 @@ progress:
 | 1 | Pre-invite Hygiene | HYGIENE-01..07 (7) | Code complete; 2 human UAT pending |
 | 2 | Safety Floor | SAFETY-01..09 (9) | Code complete; 4/8 human UAT blocked |
 | 3 | Authoring Throughput | AUTHOR-01..10 (10) | Code complete; 4 human UAT pending |
-| 4 | Content Coverage | CONTENT-01..07 (7) | Not started on current `main` |
+| 4 | Content Coverage | CONTENT-01..07 (7) | In progress; sanitized diagnostics slice complete |
 | 5 | Coach Quality Lift | COACH-01..12 (12) | Not started |
 | 6 | Admin Substrate & Distribution | ADMIN-01..07 (7) | Not started |
 | 7 | Onboarding Polish | ONBOARD-01..05 (5) | Not started |
@@ -50,7 +50,7 @@ progress:
 **Plans executed:** 26 across Phases 1-3
 **Phase 2 automated verification:** 9/9 requirements; 615-test current repository suite passes
 **Phase 3 automated verification:** 11/11 must-haves; 615-test current repository suite passes
-**Repository gates (2026-09-02):** private-tree guard passes; standalone typecheck passes; lint 0 errors / 108 warnings; 615/615 tests pass; production build passes
+**Repository gates (2026-09-02):** private-tree guard passes; standalone typecheck passes; lint 0 errors / 108 warnings; 621/621 tests pass; production build passes
 
 ## Accumulated Context
 
@@ -83,7 +83,10 @@ progress:
 
 ### Remaining Readiness Risk
 
-- Phase 4's old branch is contaminated by a large unrelated tooling divergence and must not be merged or cherry-picked. Reimplement the first Phase 4 slice from current `main` with tests first.
+- Phase 4's old branch is contaminated by a large unrelated tooling divergence and must not be merged or cherry-picked.
+- Local diagnostics detect 4 `.mram` assets but no `_bake-cache/_manifest.json`; baked-source currentness is therefore unverified.
+- Current `scripts/verify-mram.ts` still accepts only format v1 and prints sample ritual lines; it is not yet a safe v3 release gate.
+- No CONTENT-01..07 requirement is complete until the v3 verifier, aggregate release gate, human scrub, and actual content coverage are verified.
 
 ### Requirements Currently Validated (pre-v1, shipped pilot)
 
@@ -100,17 +103,18 @@ progress:
 
 ## Session Continuity
 
-**Last significant action (2026-09-02):** Completed Milestones 1 and 2 from the Fable-reviewed recovery plan: stabilized the rehearsal state flow, reconciled Phase 2/3 evidence, added and activated a whole-tree private-ritual pre-commit guard, and made standalone TypeScript checking green.
+**Last significant action (2026-09-02):** Completed the first clean Phase 4 vertical slice on `phase4/content-manifest-diagnostics`: strict bake-manifest schema validation, contained-filesystem and symlink guards, a sanitized diagnostic model, and a production-disabled localhost author endpoint. No old Phase 4 code was merged or cherry-picked.
 
 **Verified current gates:**
 
 - `npm run check:private-tree`: pass; an isolated-index probe confirms staged `rituals/` paths are rejected.
 - `npm run typecheck`: pass.
 - `npm run lint`: 0 errors, 108 warnings.
-- `npm run test:run`: 615/615 pass.
+- `npm run test:run`: 621/621 pass.
 - `npm run build`: pass.
+- Aggregate-only local smoke: schema v1, manifest missing, 4 ritual assets detected, 0 recorded/current entries.
 
-**Resumption cue:** Review and checkpoint Milestone 2, then begin a clean Phase 4 content-manifest and diagnostics slice on a fresh branch from current `main`, using the old branch only as read-only design input.
+**Resumption cue:** Checkpoint the diagnostics slice, then extend `scripts/verify-mram.ts` into a non-leaking v3 audio-coverage verifier and build the aggregate content release gate with tests first. Use the old branch only as read-only design input.
 
 **Branch rule:** Treat `gsd/phase4` as read-only reference material. Do not merge or cherry-pick it; its product work is mixed with a large unrelated tooling divergence.
 
