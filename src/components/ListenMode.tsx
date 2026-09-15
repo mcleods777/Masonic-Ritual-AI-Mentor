@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import type { RitualSectionWithCipher } from "@/lib/storage";
-import { ROLE_DISPLAY_NAMES, cleanRitualText } from "@/lib/document-parser";
+import { cleanRitualText } from "@/lib/document-parser";
 import { getRoleIcon } from "./MasonicIcons";
 import {
   speakAsRole,
@@ -14,6 +14,7 @@ import {
 import { playGavelKnocks, countGavelMarks, warmAudioContext } from "@/lib/gavel-sound";
 import { preloadGeminiRitual } from "@/lib/tts-cloud";
 import { keepScreenAwake, allowScreenSleep } from "@/lib/screen-wake-lock";
+import { getRoleDisplayName, isListenLineSpeaking } from "@/lib/ui-polish";
 
 interface ListenModeProps {
   sections: RitualSectionWithCipher[];
@@ -80,10 +81,6 @@ export default function ListenMode({ sections }: ListenModeProps) {
     }
   }, [currentIndex]);
 
-  // Get display name for a role
-  const getRoleDisplayName = useCallback((role: string): string => {
-    return ROLE_DISPLAY_NAMES[role] || role;
-  }, []);
 
   // Walk through every line, speaking each one
   const playFrom = useCallback(
@@ -338,7 +335,7 @@ export default function ListenMode({ sections }: ListenModeProps) {
   }, [sections]);
 
   return (
-    <div className="space-y-4">
+    <div className="practice-mode space-y-4">
       {/* Header */}
       <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-5">
         <div className="flex items-center justify-between mb-3">
@@ -359,7 +356,9 @@ export default function ListenMode({ sections }: ListenModeProps) {
         </div>
 
         {/* Roles legend */}
-        <div className="flex flex-wrap gap-2 mb-4">
+        <details className="role-legend mb-3">
+          <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wider text-zinc-500">Officer voices</summary>
+          <div className="flex flex-wrap gap-2 mt-2">
           {availableRoles.map((role) => {
             const Icon = getRoleIcon(role);
             return (
@@ -368,15 +367,18 @@ export default function ListenMode({ sections }: ListenModeProps) {
                 className="flex items-center gap-2 px-3 py-1.5 bg-zinc-900 rounded-md text-xs text-zinc-400 border border-zinc-700/50 shadow-sm"
               >
                 {Icon && <Icon className="w-4 h-4 text-amber-500/80" />}
-                <span className="font-serif font-bold tracking-wide text-zinc-300">{role}</span>
-                <span className="text-zinc-500 ml-1">{getRoleDisplayName(role)}</span>
+                <span className="flex flex-col items-start leading-tight">
+                  <span className="speaker-name">{getRoleDisplayName(role)}</span>
+                  <span className="speaker-abbrev">{role}</span>
+                </span>
               </span>
             );
           })}
-        </div>
+          </div>
+        </details>
 
         {/* Transport controls */}
-        <div className="flex items-center gap-3">
+        <div className="sticky-transport flex items-center gap-3">
           {playState === "playing" ? (
             <button
               onClick={handlePause}
@@ -417,7 +419,7 @@ export default function ListenMode({ sections }: ListenModeProps) {
           )}
 
           {/* Status text */}
-          <span className="text-sm text-zinc-500 ml-auto">
+          <span className="text-sm text-zinc-500 ml-auto" role="status" aria-live="polite">
             {playState === "playing" && (
               <span className="flex items-center gap-2">
                 <span className="flex gap-0.5">
@@ -450,11 +452,12 @@ export default function ListenMode({ sections }: ListenModeProps) {
       {/* Script view — simple scrollable list */}
       <div
         ref={scriptContainerRef}
-        className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 max-h-[28rem] overflow-y-auto"
+        className="script-panel bg-zinc-900 rounded-xl border border-zinc-800 p-4 max-h-[28rem] overflow-y-auto"
       >
         {sections.map((section, i) => {
           const isPast = i < currentIndex && playState !== "idle";
           const isCurrent = i === currentIndex && playState !== "idle";
+          const isSpeaking = isListenLineSpeaking(playState) && isCurrent;
           const gavels = section.gavels > 0 ? section.gavels : countGavelMarks(section.text);
           const cleanText = cleanRitualText(section.text);
           const displayText = section.cipherText || cleanText;
@@ -468,16 +471,22 @@ export default function ListenMode({ sections }: ListenModeProps) {
                 flex gap-3 px-3 py-2 rounded-lg mb-1 transition-all cursor-pointer
                 hover:bg-white/5
                 ${isPast ? "opacity-30" : ""}
-                ${isCurrent ? "bg-amber-500/10 border border-amber-500/30" : ""}
+                ${isCurrent ? "active-speaker bg-amber-500/10 border border-amber-500/30" : ""}
+                ${isSpeaking ? "now-speaking" : ""}
               `}
             >
               <span
                 className={`
-                  text-xs font-mono font-bold w-10 flex-shrink-0 pt-0.5 text-right
+                  text-xs font-mono font-bold w-28 flex-shrink-0 pt-0.5 text-right
                   ${isCurrent ? "text-amber-400" : "text-zinc-600"}
                 `}
               >
-                {section.speaker || "---"}
+                {section.speaker ? (
+                  <span className="flex flex-col items-end leading-tight">
+                    <span className="speaker-name">{getRoleDisplayName(section.speaker)}</span>
+                    <span className="speaker-abbrev">{section.speaker}</span>
+                  </span>
+                ) : "---"}
               </span>
               <span
                 className={`
