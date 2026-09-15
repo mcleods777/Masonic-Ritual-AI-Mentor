@@ -15,13 +15,13 @@ export default function Navigation() {
   const pathname = usePathname();
 
   return (
-    <nav className="ritual-navigation fixed bottom-0 left-0 right-0 md:top-0 md:bottom-auto bg-zinc-950 border-t md:border-t-0 md:border-b border-zinc-800 z-50">
+    <nav className="fixed bottom-0 left-0 right-0 md:top-0 md:bottom-auto bg-zinc-950 border-t md:border-t-0 md:border-b border-zinc-800 z-50">
       <div className="max-w-5xl mx-auto px-4">
         <div className="flex items-center justify-between h-16">
           {/* Logo - hidden on mobile */}
           <Link
             href="/"
-            className="ritual-navigation__logo hidden md:flex items-center gap-2 font-semibold"
+            className="hidden md:flex items-center gap-2 text-amber-500 font-semibold"
           >
             <svg className="w-6 h-6" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
@@ -37,7 +37,14 @@ export default function Navigation() {
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`ritual-navigation__item flex flex-col md:flex-row items-center gap-0.5 md:gap-2 px-1.5 md:px-3 py-2 md:py-3 rounded-lg transition-colors ${isActive ? "ritual-navigation__item--active" : "ritual-navigation__item--inactive"}`}
+                  className={`
+                    flex flex-col md:flex-row items-center gap-0.5 md:gap-2 px-1.5 md:px-3 py-2 md:py-3 rounded-lg transition-colors
+                    ${
+                      isActive
+                        ? "text-amber-400 bg-amber-500/10"
+                        : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50"
+                    }
+                  `}
                 >
                   <svg
                     className="w-5 h-5"

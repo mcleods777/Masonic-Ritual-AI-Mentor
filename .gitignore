@@ -40,9 +40,15 @@ bake.log
 *.tsbuildinfo
 next-env.d.ts
 
-# private ritual material — never commit, regardless of file extension
-/rituals/
+# ritual files (lodge-specific, should not be committed)
+# only encrypted .mram may exist in the rituals dir; plaintext is local-only
 *.mram
+rituals/*.md
+rituals/*.txt
+rituals/*.json
+rituals/*.jsonl
+rituals/*.yaml
+rituals/*.yml
 
 # credentials — never commit
 gitkey

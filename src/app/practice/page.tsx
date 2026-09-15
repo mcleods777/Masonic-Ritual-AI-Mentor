@@ -23,25 +23,8 @@ function PracticeContent() {
   const [sections, setSections] = useState<RitualSectionWithCipher[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<PracticeTab>("rehearsal");
-  const tabOrder: PracticeTab[] = ["rehearsal", "listen"];
-
-  const handleTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
-    const currentIndex = tabOrder.indexOf(activeTab);
-    let nextIndex: number | null = null;
-    if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % tabOrder.length;
-    if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + tabOrder.length) % tabOrder.length;
-    if (event.key === "Home") nextIndex = 0;
-    if (event.key === "End") nextIndex = tabOrder.length - 1;
-    if (nextIndex === null) return;
-    event.preventDefault();
-    const nextTab = tabOrder[nextIndex];
-    setActiveTab(nextTab);
-    document.getElementById(`practice-tab-${nextTab}`)?.focus();
-  };
 
   // Check if document has multiple speakers (needed for rehearsal)
-  const selectedDocument = documents.find((d) => d.id === selectedDocId);
-
   const hasMultipleSpeakers = new Set(
     sections.filter((s) => s.speaker).map((s) => s.speaker)
   ).size > 1;
@@ -63,6 +46,7 @@ function PracticeContent() {
   // Load sections when document changes
   useEffect(() => {
     if (!selectedDocId) return;
+    setLoading(true);
     getDocumentSections(selectedDocId)
       .then(setSections)
       .catch(console.error)
@@ -113,30 +97,21 @@ function PracticeContent() {
   }
 
   return (
-    <div className="practice-workspace space-y-5">
-      <div className="practice-header flex flex-col gap-4">
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-          <div>
-            <p className="practice-eyebrow">Practice workspace</p>
-            <p className="text-xs text-zinc-500 mt-1">Practice / {selectedDocument?.title}</p>
-            <h1 className="mt-2 text-3xl font-bold text-zinc-100">{selectedDocument?.title}</h1>
-            <p className="text-zinc-400 mt-2 max-w-2xl">
-              {activeTab === "rehearsal"
-                ? "Rehearse your part with the ceremony script in view."
-                : "Listen through the ceremony with each officer clearly identified."}
-            </p>
-          </div>
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-zinc-100">Practice</h1>
+          <p className="text-zinc-500 mt-1">
+            {activeTab === "rehearsal"
+              ? "Pick your role and rehearse the full ceremony with AI reading the other parts."
+              : "Listen to the full ceremony read aloud, each officer in a distinct voice."}
+          </p>
+        </div>
 
         {documents.length > 1 && (
-          <label className="document-switcher">
-            <span>Switch document</span>
-            <select
-            aria-label="Switch ritual document"
+          <select
             value={selectedDocId || ""}
-            onChange={(e) => {
-              setLoading(true);
-              setSelectedDocId(e.target.value);
-            }}
+            onChange={(e) => setSelectedDocId(e.target.value)}
             className="px-4 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-200 text-sm focus:outline-none focus:border-amber-500 flex-shrink-0"
           >
             {documents.map((doc) => (
@@ -145,21 +120,12 @@ function PracticeContent() {
               </option>
             ))}
           </select>
-          </label>
         )}
-          </div>
-        </div>
-
+      </div>
 
       {/* Mode Toggle */}
-      <div role="tablist" aria-label="Practice mode" className="practice-tabs flex bg-zinc-800/50 rounded-lg p-1 w-fit">
+      <div className="flex bg-zinc-800/50 rounded-lg p-1 w-fit">
         <button
-          id="practice-tab-rehearsal"
-          role="tab"
-          aria-controls="practice-panel-rehearsal"
-          aria-selected={activeTab === "rehearsal"}
-          tabIndex={activeTab === "rehearsal" ? 0 : -1}
-          onKeyDown={handleTabKeyDown}
           onClick={() => setActiveTab("rehearsal")}
           className={`
             px-5 py-2 rounded-md text-sm font-medium transition-all
@@ -176,12 +142,6 @@ function PracticeContent() {
           </span>
         </button>
         <button
-          id="practice-tab-listen"
-          role="tab"
-          aria-controls="practice-panel-listen"
-          aria-selected={activeTab === "listen"}
-          tabIndex={activeTab === "listen" ? 0 : -1}
-          onKeyDown={handleTabKeyDown}
           onClick={() => setActiveTab("listen")}
           className={`
             px-5 py-2 rounded-md text-sm font-medium transition-all
@@ -199,12 +159,6 @@ function PracticeContent() {
         </button>
       </div>
 
-      <div
-        id={`practice-panel-${activeTab}`}
-        role="tabpanel"
-        aria-labelledby={`practice-tab-${activeTab}`}
-        tabIndex={0}
-      >
       {sections.length > 0 ? (
         activeTab === "rehearsal" && hasMultipleSpeakers ? (
           <RehearsalMode sections={sections} documentId={selectedDocId || undefined} documentTitle={documents.find(d => d.id === selectedDocId)?.title} />
@@ -244,13 +198,6 @@ function PracticeContent() {
           </p>
         </div>
       )}
-      </div>
-      <div
-        id={`practice-panel-${activeTab === "rehearsal" ? "listen" : "rehearsal"}`}
-        role="tabpanel"
-        aria-labelledby={`practice-tab-${activeTab === "rehearsal" ? "listen" : "rehearsal"}`}
-        hidden
-      />
     </div>
   );
 }

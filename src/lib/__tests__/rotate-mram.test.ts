@@ -56,7 +56,7 @@ function makeDoc(expiresAt?: string): MRAMDocument {
 }
 
 function bufferToArrayBuffer(buf: Buffer): ArrayBuffer {
-  return Uint8Array.from(buf).buffer;
+  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
 }
 
 const repoRoot = path.resolve(__dirname, "..", "..", "..");

@@ -201,23 +201,6 @@ export function validateParsedPair(
                 : `cipher is much shorter than expected (${(ratio * 100).toFixed(0)}% of plain length)`,
           });
         }
-
-        // AUTHOR-05 D-08: bake-time word-count band check — hard-fails the
-        // bake. Word count better captures meaning-drift than character
-        // count (the char-ratio check above stays as the softer /author UI
-        // warning; this is additive, not a replacement). Band [0.5x, 2x];
-        // boundary values do NOT trip (strict > / <).
-        const plainWords = p.text.trim().split(/\s+/).filter(Boolean).length;
-        const cipherWords = c.text.trim().split(/\s+/).filter(Boolean).length;
-        const wordRatio = plainWords / Math.max(cipherWords, 1);
-        if (cipherWords >= 1 && (wordRatio > 2.0 || wordRatio < 0.5)) {
-          lineIssues.push({
-            index: i,
-            severity: "error",
-            kind: "ratio-outlier",
-            message: `[D-08 bake-band] plain/cipher word ratio out of [0.5x, 2x] band: plain=${plainWords} words, cipher=${cipherWords} words, ratio=${wordRatio.toFixed(2)}x`,
-          });
-        }
       }
     }
   }

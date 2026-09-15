@@ -28,25 +28,6 @@ export interface STTEngine {
 
 export type STTProvider = "browser" | "whisper";
 
-interface BrowserSpeechRecognitionAlternative {
-  transcript: string;
-  confidence: number;
-}
-
-interface BrowserSpeechRecognitionResult {
-  readonly isFinal: boolean;
-  readonly [index: number]: BrowserSpeechRecognitionAlternative;
-}
-
-interface BrowserSpeechRecognitionEvent {
-  readonly results: ArrayLike<BrowserSpeechRecognitionResult>;
-}
-
-interface BrowserSpeechRecognitionErrorEvent {
-  readonly error: string;
-  readonly message?: string;
-}
-
 // ============================================================
 // Availability checks
 // ============================================================
@@ -133,7 +114,7 @@ export function createWebSpeechEngine(): STTEngine {
     },
   };
 
-  recognition.onresult = (event: BrowserSpeechRecognitionEvent) => {
+  recognition.onresult = (event: any) => {
     if (!engine.onResult) return;
 
     let finalTranscript = "";
@@ -164,7 +145,7 @@ export function createWebSpeechEngine(): STTEngine {
     });
   };
 
-  recognition.onerror = (event: BrowserSpeechRecognitionErrorEvent) => {
+  recognition.onerror = (event: any) => {
     if (event.error === "no-speech") return;
     if (event.error === "aborted") return;
     listening = false;

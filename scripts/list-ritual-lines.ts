@@ -20,10 +20,7 @@
  * Output columns:
  *   ID     MRAM line id (what invalidate-mram-cache.ts takes)
  *   ROLE   Officer role code
- *   CACHE  ✓ if cached (Gemini premium tier), ✓g if cached via the D-02
- *          Google Cloud TTS fallback tier only, · if not cached at all.
- *          D-01: there is no more hard-skip state — every line eventually
- *          gets baked audio via one tier or the other.
+ *   CACHE  ✓ if cached, · if not, ⨯ if hard-skipped (too short to bake)
  *   TEXT   First 80 chars of the line's plain text
  */
 
@@ -38,16 +35,12 @@ import {
 } from "../src/lib/voice-cast";
 import { getGeminiVoiceForRole } from "../src/lib/tts-cloud";
 import type { StylesFile } from "../src/lib/styles";
-import {
-  SHORT_LINE_MAX_CHARS,
-  buildShortLinePrompt,
-  resolveGoogleVoice,
-} from "./build-mram-from-dialogue";
 
 // Must stay in sync with build-mram-from-dialogue.ts defaults.
 const MIN_PREAMBLE_LINE_CHARS = Number(
   process.env.VOICE_CAST_MIN_LINE_CHARS ?? "40",
 );
+const MIN_BAKE_LINE_CHARS = Number(process.env.MIN_BAKE_LINE_CHARS ?? "5");
 
 async function main() {
   const argv = process.argv.slice(2);
@@ -173,23 +166,13 @@ async function main() {
     if (grep && !(text.toLowerCase().includes(grep) || (line.action ?? "").toLowerCase().includes(grep))) continue;
     if (role && line.role !== role) continue;
 
-    // Determine cache status. Matches the bake's decision logic (D-01:
-    // no more hard-skip — short lines are checked against BOTH the
-    // Gemini padded-prompt tier and the Google fallback tier).
+    // Determine cache status. Matches the bake's decision logic.
     let cacheSymbol: string;
     let isCachedNow = false;
     if (!line.role || !text) {
       cacheSymbol = "—";
-    } else if (text.length < SHORT_LINE_MAX_CHARS) {
-      const voice = getGeminiVoiceForRole(line.role);
-      const paddedText = buildShortLinePrompt(text);
-      const cachedPremium = isLineCached(paddedText, undefined, voice, "");
-      const googleVoice = resolveGoogleVoice(voiceCast, line.role);
-      const cachedFallback =
-        !cachedPremium &&
-        isLineCached(text, undefined, googleVoice, "", undefined, [`google:${googleVoice}`]);
-      isCachedNow = cachedPremium || cachedFallback;
-      cacheSymbol = cachedPremium ? "✓" : cachedFallback ? "✓g" : "·";
+    } else if (text.length < MIN_BAKE_LINE_CHARS) {
+      cacheSymbol = "⨯"; // hard-skip
     } else {
       const voice = getGeminiVoiceForRole(line.role);
       const preamble =

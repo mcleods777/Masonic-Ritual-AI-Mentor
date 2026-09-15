@@ -65,6 +65,7 @@ describe("screen-wake-lock SAFETY-07 inactivity release", () => {
     if (originalWakeLockDescriptor) {
       Object.defineProperty(navigator, "wakeLock", originalWakeLockDescriptor);
     } else {
+      // @ts-expect-error — removing dynamically-added property
       delete (navigator as unknown as { wakeLock?: unknown }).wakeLock;
     }
   });

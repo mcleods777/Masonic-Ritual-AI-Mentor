@@ -90,7 +90,7 @@ describe("POST /api/transcribe (SAFETY-03 guard + audit)", () => {
     const body = (await res.json()) as { transcript: string };
     expect(body.transcript).toBe("so mote it be");
 
-    const auditCalls = logSpy.mock.calls.filter((c: unknown[]) => c[0] === "[AUDIT]");
+    const auditCalls = logSpy.mock.calls.filter((c) => c[0] === "[AUDIT]");
     expect(auditCalls.length).toBe(1);
     const record = JSON.parse(auditCalls[0][1] as string);
     expect(record.kind).toBe("stt");
@@ -134,7 +134,7 @@ describe("POST /api/transcribe (SAFETY-03 guard + audit)", () => {
     const req = await makeAuthedRequest({ hashedUser: "stterr123456789a" });
     const res = await POST(req);
     expect(res.status).toBe(502);
-    const auditCalls = logSpy.mock.calls.filter((c: unknown[]) => c[0] === "[AUDIT]");
+    const auditCalls = logSpy.mock.calls.filter((c) => c[0] === "[AUDIT]");
     expect(auditCalls.length).toBe(0);
   });
 });

@@ -12,11 +12,15 @@ export default function SignInForm({
   const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">(
     "idle",
   );
-  const [errorMessage, setErrorMessage] = useState<string | null>(() =>
-    searchParams.error === "invalid-link"
-      ? "That sign-in link is no longer valid. Links expire after 24 hours. Request a new one below."
-      : null,
-  );
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (searchParams.error === "invalid-link") {
+      setErrorMessage(
+        "That sign-in link is no longer valid. Links expire after 24 hours. Request a new one below.",
+      );
+    }
+  }, [searchParams.error]);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();

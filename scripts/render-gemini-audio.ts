@@ -12,6 +12,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as os from "node:os";
 import * as crypto from "node:crypto";
 import { spawn } from "node:child_process";
 
@@ -23,7 +24,7 @@ import { spawn } from "node:child_process";
  * Models tried in order. Same chain as src/app/api/tts/gemini/route.ts.
  * Overridable via GEMINI_TTS_MODELS env var (comma-separated).
  */
-export const DEFAULT_MODELS = [
+const DEFAULT_MODELS = [
   "gemini-3.1-flash-tts-preview",
   "gemini-2.5-flash-preview-tts",
   "gemini-2.5-pro-preview-tts",
@@ -32,15 +33,11 @@ export const DEFAULT_MODELS = [
 /** Opus encoding target — 32 kbps mono is transparent for speech. */
 const OPUS_BITRATE = "32k";
 
-/**
- * Cache directory. Canonical in-repo location (D-06) — lives next to the
- * content it belongs to, survives OS cache-cleaners, and rides along with
- * Shannon's existing rituals/ backup habit. Gitignored (see .gitignore
- * rituals/_bake-cache/* rules). Retired the old `~/.cache/masonic-mram-audio`
- * (or `XDG_CACHE_HOME`) location — `scripts/migrate-bake-cache.ts` is the
- * one-time migration path from there to here.
- */
-export const CACHE_DIR = path.resolve("rituals/_bake-cache");
+/** Cache directory. Honor XDG_CACHE_HOME if set. */
+const CACHE_DIR = path.join(
+  process.env.XDG_CACHE_HOME ?? path.join(os.homedir(), ".cache"),
+  "masonic-mram-audio",
+);
 
 /** Cache format version. Bump when we change the Opus encoding params
  *  or the prompt-assembly rules so old cached entries miss instead of
@@ -49,13 +46,8 @@ export const CACHE_DIR = path.resolve("rituals/_bake-cache");
  *  - v2: adds optional director's-notes preamble in the prompt.
  *        Cache key incorporates the preamble so changes in the
  *        voice-cast sidecar invalidate just the affected lines.
- *  - v3: adds modelId (D-07) so premium and fallback-tier renders never
- *        collide under the same key, and relocates CACHE_DIR to the
- *        in-repo rituals/_bake-cache (D-06). `scripts/migrate-bake-cache.ts`
- *        re-keys existing v2 entries in place assuming
- *        gemini-3.1-flash-tts-preview provenance — zero re-render cost.
  */
-const CACHE_KEY_VERSION = "v3";
+const CACHE_KEY_VERSION = "v2";
 
 // ============================================================
 // Types
@@ -96,7 +88,7 @@ export interface RenderProgress {
  * Render a single (text, style, voice) combination to Opus bytes.
  * Returns the raw Opus binary. Callers base64-encode for .mram embedding.
  *
- * Caches to rituals/_bake-cache/{sha256}.opus (D-06) so re-runs skip the
+ * Caches to ~/.cache/masonic-mram-audio/{sha256}.opus so re-runs skip the
  * Gemini API entirely. Safe to interrupt with Ctrl-C and resume — each
  * line's cache entry lands atomically or not at all.
  *
@@ -116,20 +108,15 @@ export async function renderLineAudio(
   const cacheDir = options.cacheDir ?? CACHE_DIR;
   fs.mkdirSync(cacheDir, { recursive: true });
 
-  // Resolve the model chain up front (D-07) — the LOOKUP cache key is
-  // keyed to the preferred/primary model (models[0]) since that's what
-  // a fresh render will attempt first. If a prior run already rendered
-  // this exact line on the preferred model, this is a cache hit.
-  const models = options.models ?? readModelsFromEnv() ?? DEFAULT_MODELS;
-  const lookupModelId = models[0];
-  const lookupCacheKey = computeCacheKey(text, style, voice, lookupModelId, preamble);
-  const lookupCachePath = path.join(cacheDir, `${lookupCacheKey}.opus`);
+  const cacheKey = computeCacheKey(text, style, voice, preamble);
+  const cachePath = path.join(cacheDir, `${cacheKey}.opus`);
 
-  if (fs.existsSync(lookupCachePath)) {
-    options.onProgress?.({ status: "cache-hit", cacheKey: lookupCacheKey });
-    return fs.readFileSync(lookupCachePath);
+  if (fs.existsSync(cachePath)) {
+    options.onProgress?.({ status: "cache-hit", cacheKey });
+    return fs.readFileSync(cachePath);
   }
 
+  const models = options.models ?? readModelsFromEnv() ?? DEFAULT_MODELS;
   const waitHandler = options.onAllModelsExhausted ?? sleepUntilMidnightPT;
 
   // Retry loop: try each model, on all-models-429 wait for quota reset
@@ -145,13 +132,6 @@ export async function renderLineAudio(
         preamble,
       );
       const opus = await encodeWavToOpus(wav);
-
-      // Write under the ACTUAL model that rendered this line (D-07/D-08)
-      // — not necessarily the preferred lookup model above. This keeps
-      // premium and fallback-tier renders under distinct keys so a
-      // fallback-tier entry never masquerades as a premium cache hit.
-      const cacheKey = computeCacheKey(text, style, voice, model, preamble);
-      const cachePath = path.join(cacheDir, `${cacheKey}.opus`);
 
       // Atomic write: stage to .tmp then rename. Prevents corrupt cache
       // entries if the script is killed mid-write.
@@ -171,7 +151,7 @@ export async function renderLineAudio(
         const waitUntil = nextMidnightPT();
         options.onProgress?.({
           status: "waiting-for-quota-reset",
-          cacheKey: lookupCacheKey,
+          cacheKey,
           waitUntil,
         });
         await waitHandler();
@@ -209,12 +189,6 @@ export function deleteCacheEntry(cacheKey: string, cacheDir?: string): boolean {
  * typically the per-role voice-cast preamble when the line is long
  * enough to use it, or empty string when the line is short or the
  * voice-cast is missing.
- *
- * `models` mirrors RenderOptions.models — the resolved chain's first
- * entry (models[0]) is used for the lookup key, matching the "preferred
- * model" cache check renderLineAudio performs (D-07). Defaults to the
- * same env/DEFAULT_MODELS resolution renderLineAudio uses when the
- * caller doesn't pass an explicit chain.
  */
 export function isLineCached(
   text: string,
@@ -222,11 +196,9 @@ export function isLineCached(
   voice: string,
   preamble: string = "",
   cacheDir?: string,
-  models?: string[],
 ): boolean {
   const dir = cacheDir ?? CACHE_DIR;
-  const resolvedModels = models ?? readModelsFromEnv() ?? DEFAULT_MODELS;
-  const cacheKey = computeCacheKey(text, style, voice, resolvedModels[0], preamble);
+  const cacheKey = computeCacheKey(text, style, voice, preamble);
   const cachePath = path.join(dir, `${cacheKey}.opus`);
   return fs.existsSync(cachePath);
 }
@@ -607,28 +579,23 @@ async function encodeWavToOpus(wav: Buffer): Promise<Buffer> {
 
 /**
  * Canonical cache key computation. Exported so external tools
- * (invalidate-mram-cache.ts, migrate-bake-cache.ts, diagnostic scripts)
- * produce IDENTICAL keys to the bake path — any drift between the two
- * would mean the invalidation/migration tool misses the entry or deletes
- * the wrong one. Keep this in sync with any cache-layout changes; bump
+ * (invalidate-mram-cache.ts, diagnostic scripts) produce IDENTICAL
+ * keys to the bake path — any drift between the two would mean the
+ * invalidation tool misses the entry or deletes the wrong one.
+ * Keep this in sync with any cache-layout changes; bump
  * CACHE_KEY_VERSION on structural changes.
- *
- * `modelId` is required (D-07) — premium and fallback-tier renders of
- * the exact same (text, style, voice, preamble) must produce distinct
- * keys so they can coexist in the cache (D-08 keep-and-upgrade).
  */
 export function computeCacheKey(
   text: string,
   style: string | undefined,
   voice: string,
-  modelId: string,
   preamble: string = "",
 ): string {
-  const material = `${CACHE_KEY_VERSION}\x00${text}\x00${style ?? ""}\x00${voice}\x00${modelId}\x00${preamble}`;
+  const material = `${CACHE_KEY_VERSION}\x00${text}\x00${style ?? ""}\x00${voice}\x00${preamble}`;
   return crypto.createHash("sha256").update(material).digest("hex");
 }
 
-export function readModelsFromEnv(): string[] | null {
+function readModelsFromEnv(): string[] | null {
   const env = process.env.GEMINI_TTS_MODELS?.trim();
   if (!env) return null;
   const parsed = env.split(",").map((s) => s.trim()).filter(Boolean);
