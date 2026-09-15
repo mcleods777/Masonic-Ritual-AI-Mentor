@@ -30,6 +30,40 @@ body {
   font-family: var(--font-lato), Arial, Helvetica, sans-serif;
 }
 
+/* Shared navigation uses the approved muted-gold accent on every viewport. */
+.ritual-navigation {
+  --nav-gold: #c8a96b;
+  --nav-gold-strong: #dfc58b;
+}
+
+.ritual-navigation__logo,
+.ritual-navigation__item--active {
+  color: var(--nav-gold-strong);
+}
+
+.ritual-navigation__item--active {
+  background-color: rgba(200, 169, 107, 0.14);
+}
+
+.ritual-navigation__item--inactive {
+  color: #a1a1aa;
+}
+
+.ritual-navigation__item--inactive:hover {
+  color: #e4e4e7;
+  background-color: rgba(63, 63, 70, 0.5);
+}
+
+.ritual-navigation__logo:hover {
+  color: #f0dca9;
+}
+
+.ritual-navigation__logo:focus-visible,
+.ritual-navigation__item:focus-visible {
+  outline: 2px solid var(--nav-gold);
+  outline-offset: 2px;
+}
+
 h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-cinzel), serif;
 }

@@ -468,7 +468,7 @@ export default function ListenMode({ sections }: ListenModeProps) {
               id={`listen-line-${i}`}
               onClick={() => handleLineClick(i)}
               className={`
-                flex gap-3 px-3 py-2 rounded-lg mb-1 transition-all cursor-pointer
+                script-line flex gap-3 px-3 py-2 rounded-lg mb-1 transition-all cursor-pointer
                 hover:bg-white/5
                 ${isPast ? "opacity-30" : ""}
                 ${isCurrent ? "active-speaker bg-amber-500/10 border border-amber-500/30" : ""}
