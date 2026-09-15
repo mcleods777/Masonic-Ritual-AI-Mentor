@@ -133,9 +133,15 @@ describe("auth helpers", () => {
 
     it("rejects a tampered token", async () => {
       const token = await signMagicLinkToken("brother.one@example.com");
-      // Flip the last character of the signature
-      const tampered = token.slice(0, -1) + (token.slice(-1) === "a" ? "b" : "a");
-      const result = await verifyMagicLinkToken(tampered);
+      // Flip the first signature character. Unlike the final Base64URL
+      // character of a 32-byte HS256 signature, all six bits here are
+      // significant; changing it always changes the decoded signature.
+      const [header, payload, signature] = token.split(".");
+      const tamperedSignature =
+        (signature[0] === "a" ? "b" : "a") + signature.slice(1);
+      const result = await verifyMagicLinkToken(
+        `${header}.${payload}.${tamperedSignature}`,
+      );
       expect(result).toBeNull();
     });
 

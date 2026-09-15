@@ -61,7 +61,10 @@ const ENGINE_OPTIONS: EngineOption[] = [
  * marked as unavailable.
  */
 export default function TTSEngineSelector() {
-  const [selected, setSelected] = useState<TTSEngineName>("voxtral");
+  const [selected, setSelected] = useState<TTSEngineName>(() => {
+    if (typeof window === "undefined") return "voxtral";
+    return getTTSEngine();
+  });
   const [availability, setAvailability] = useState<{
     elevenlabs: boolean;
     google: boolean;
@@ -73,9 +76,8 @@ export default function TTSEngineSelector() {
   const [loaded, setLoaded] = useState(false);
   const [voxtralWarning, setVoxtralWarning] = useState(false);
 
-  // Load current engine + check server availability
+  // Load server availability
   useEffect(() => {
-    setSelected(getTTSEngine());
     fetchEngineAvailability().then((a) => {
       setAvailability(a);
       setLoaded(true);

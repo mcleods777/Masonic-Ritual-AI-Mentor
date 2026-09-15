@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import Link from "next/link";
 import type { RitualSectionWithCipher } from "@/lib/storage";
-import { ROLE_DISPLAY_NAMES, cleanRitualText } from "@/lib/document-parser";
+import { cleanRitualText } from "@/lib/document-parser";
 import { compareTexts, type ComparisonResult } from "@/lib/text-comparison";
 import { getRoleIcon } from "./MasonicIcons";
 import {
@@ -28,6 +28,7 @@ import {
 import { playGavelKnocks, countGavelMarks, warmAudioContext } from "@/lib/gavel-sound";
 import { preloadGeminiRitual } from "@/lib/tts-cloud";
 import { keepScreenAwake, allowScreenSleep } from "@/lib/screen-wake-lock";
+import { getRoleDisplayName, isRehearsalLineSpeaking } from "@/lib/ui-polish";
 import {
   decideLineAction,
   planComparisonAction,
@@ -105,9 +106,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
 
   const engineRef = useRef<STTEngine | null>(null);
   const sttProviderRef = useRef<STTProvider>(sttProvider);
-  sttProviderRef.current = sttProvider;
   const transcriptRef = useRef<string>("");
-  transcriptRef.current = transcript;
   const voiceMapRef = useRef<Map<string, RoleVoiceProfile>>(new Map());
   const cancelledRef = useRef(false);
   const advanceGenRef = useRef(0); // generation counter to prevent overlapping advanceToLine chains
@@ -117,6 +116,11 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
   const scriptContainerRef = useRef<HTMLDivElement>(null);
   const startListeningRef = useRef<() => void>(() => {});
   const stopListeningRef = useRef<() => void>(() => { });
+  const advanceInternalRef = useRef<((index: number, gen: number) => Promise<void>) | null>(null);
+
+  useEffect(() => {
+    sttProviderRef.current = sttProvider;
+  }, [sttProvider]);
   const sessionStartRef = useRef<string>(new Date().toISOString());
 
   // Extract unique roles from sections (only those with speaker lines)
@@ -191,10 +195,6 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
     return Math.round(total / lineResults.length);
   }, [lineResults]);
 
-  // Get display name for a role
-  const getRoleDisplayName = useCallback((role: string): string => {
-    return ROLE_DISPLAY_NAMES[role] || role;
-  }, []);
 
   // Start the rehearsal — begin advancing through sections.
   // IMPORTANT: warmAudioContext() MUST be called here, in the synchronous
@@ -214,9 +214,10 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
     setCurrentIndex(0);
     setLineResults([]);
     setRehearsalState("ready");
-    // Advance will be triggered by effect
+    stopSpeaking();
+    const gen = ++advanceGenRef.current;
+    void advanceInternalRef.current?.(0, gen);
   }, []);
-
 
   // Internal advance — walks through lines with a generation guard.
   // Only the matching generation is allowed to continue; a new call
@@ -304,7 +305,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
         // Small gap between lines to avoid hammering the TTS API
         await new Promise((r) => setTimeout(r, 150));
         // Auto-advance to next line (same generation — not a new entry)
-        advanceInternal(index + 1, gen);
+        advanceInternalRef.current?.(index + 1, gen);
       }
     } else {
       // silent-advance: stage direction, structural cue, or speaker-performed
@@ -312,10 +313,14 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
       // the user isn't stuck waiting for a recitation that doesn't exist.
       await new Promise((r) => setTimeout(r, 150));
       if (!stale()) {
-        advanceInternal(index + 1, gen);
+        advanceInternalRef.current?.(index + 1, gen);
       }
     }
   }, [sections, selectedRole]);
+
+  useEffect(() => {
+    advanceInternalRef.current = advanceInternal;
+  }, [advanceInternal]);
 
   // Public entry point — bumps generation to cancel any running chain
   const advanceToLine = useCallback((index: number) => {
@@ -369,13 +374,6 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
     [currentIndex, advanceToLine],
   );
 
-  // Trigger first advance when rehearsal starts
-  useEffect(() => {
-    if (rehearsalState === "ready") {
-      advanceToLine(0);
-    }
-  }, [rehearsalState, advanceToLine]);
-
   // Start listening (voice input) — uses either Web Speech or Whisper engine
   const startListening = useCallback(() => {
     const provider = sttProviderRef.current;
@@ -391,6 +389,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
 
     setSttError(null);
     setTranscript("");
+    transcriptRef.current = "";
 
     try {
       const engine = provider === "whisper"
@@ -400,9 +399,13 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
       engineRef.current = engine;
 
       engine.onResult = (result) => {
+        transcriptRef.current = result.transcript;
         setTranscript(result.transcript);
-        // Whisper: the final transcript update triggers the "transcribing" → "checking"
-        // effect. No state change needed here — the effect handles the transition.
+        if (provider === "whisper" && result.isFinal && currentSection) {
+          engineRef.current = null;
+          const cleanRef = cleanRitualText(currentSection.text);
+          submitComparisonResult(compareTexts(result.transcript, cleanRef));
+        }
       };
 
       engine.onError = (error) => {
@@ -411,12 +414,14 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
       };
 
       engine.onEnd = () => {
-        // Browser engine: auto-stopped after silence — trigger accuracy check
-        if (provider === "browser" && transcriptRef.current) {
-          engineRef.current = null;
-          setRehearsalState("auto-checking");
+        if (provider !== "browser") return;
+        engineRef.current = null;
+        if (transcriptRef.current && currentSection) {
+          const cleanRef = cleanRitualText(currentSection.text);
+          submitComparisonResult(compareTexts(transcriptRef.current, cleanRef));
+        } else {
+          setRehearsalState("user-turn");
         }
-        // Whisper engine: recording stopped, transcript delivered via onResult
       };
 
       engine.onSilence = () => {
@@ -428,10 +433,12 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
     } catch (err) {
       setSttError(err instanceof Error ? err.message : "Failed to start speech recognition");
     }
-  }, []);
+  }, [currentSection, submitComparisonResult]);
 
   // Keep ref in sync so advanceToLine can call it without circular deps
-  startListeningRef.current = startListening;
+  useEffect(() => {
+    startListeningRef.current = startListening;
+  }, [startListening]);
 
   // Stop listening and check accuracy
   const stopListening = useCallback(() => {
@@ -458,30 +465,10 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
       }
     }
   }, [transcript, currentSection, submitComparisonResult]);
-  stopListeningRef.current = stopListening;
 
-  // When Whisper finishes transcribing, the transcript state updates.
-  // This effect detects that and moves from "transcribing" → submit.
   useEffect(() => {
-    if (rehearsalState === "transcribing" && transcript && currentSection) {
-      engineRef.current = null;
-      const cleanRef = cleanRitualText(currentSection.text);
-      const result = compareTexts(transcript, cleanRef);
-      submitComparisonResult(result);
-    }
-  }, [rehearsalState, transcript, currentSection, submitComparisonResult]);
-
-  // Browser STT auto-stopped after silence — compute comparison and submit.
-  useEffect(() => {
-    if (rehearsalState === "auto-checking" && transcript && currentSection) {
-      const cleanRef = cleanRitualText(currentSection.text);
-      const result = compareTexts(transcript, cleanRef);
-      submitComparisonResult(result);
-    } else if (rehearsalState === "auto-checking") {
-      // No transcript captured — go back to user-turn
-      setRehearsalState("user-turn");
-    }
-  }, [rehearsalState, transcript, currentSection, submitComparisonResult]);
+    stopListeningRef.current = stopListening;
+  }, [stopListening]);
 
   // Check typed input
   const handleCheckTyped = useCallback(() => {
@@ -789,7 +776,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
           <h2 className="text-lg font-semibold text-zinc-200 mb-2">
             Choose Your Role
           </h2>
-          <p className="text-sm text-zinc-500 mb-6">
+          <p className="text-sm text-zinc-500 mb-4 max-w-2xl">
             Select the officer role you want to practice. The AI will read all
             other parts aloud with distinct voices, and pause when it&apos;s your
             turn to recite.
@@ -827,9 +814,9 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
 
                   {/* Text Area */}
                   <div>
-                    <span className="font-serif font-bold tracking-wider text-lg block">{role}</span>
-                    <span className="block text-sm text-zinc-400 mt-1 font-medium">
-                      {getRoleDisplayName(role)}
+                    <span className="font-serif font-bold tracking-wider text-lg block">{getRoleDisplayName(role)}</span>
+                    <span className="block text-sm text-zinc-400 mt-1 font-mono">
+                      {role}
                     </span>
                     <span className="block text-xs text-zinc-600 mt-1 uppercase tracking-widest font-semibold">
                       {lineCount} Line{lineCount !== 1 ? "s" : ""}
@@ -991,8 +978,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
 
   // Active rehearsal (ai-speaking, user-turn, listening, transcribing, checking)
   return (
-    <div className="space-y-4">
-      {/* TTS fallback toast */}
+    <div className="practice-mode space-y-4">
       {ttsToast && (
         <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3 flex items-center justify-between">
           <p className="text-amber-400 text-xs">{ttsToast}</p>
@@ -1010,7 +996,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold text-zinc-200">
-            Rehearsal — <span className="text-amber-400">{selectedRole}</span>
+            Rehearsal — <span className="text-amber-400">{getRoleDisplayName(selectedRole || "")}</span>
           </h2>
           <p className="text-xs text-zinc-500">
             Line {currentIndex + 1} of {sections.length} &middot;{" "}
@@ -1036,11 +1022,12 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
       {/* Script view — simple scrollable list */}
       <div
         ref={scriptContainerRef}
-        className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 max-h-60 overflow-y-auto"
+        className="script-panel bg-zinc-900 rounded-xl border border-zinc-800 p-4 max-h-60 overflow-y-auto"
       >
         {sections.map((section, i) => {
           const isPast = i < currentIndex;
           const isCurrent = i === currentIndex;
+          const isSpeaking = isCurrent && isRehearsalLineSpeaking(rehearsalState);
           const isUserSection = section.speaker === selectedRole;
           const gavels = section.gavels > 0 ? section.gavels : countGavelMarks(section.text);
           const cleanText = cleanRitualText(section.text);
@@ -1058,8 +1045,10 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
               id={`rehearsal-line-${i}`}
               onClick={() => !isCurrent && jumpToLine(i)}
               className={`
-                flex gap-3 px-3 py-2 rounded-lg mb-1 transition-all
+                script-line flex gap-3 px-3 py-2 rounded-lg mb-1 transition-all
                 ${!isCurrent ? "cursor-pointer hover:bg-white/5" : ""}
+                ${isCurrent && !isAutoAdvancing ? "active-speaker" : ""}
+                ${isSpeaking ? "now-speaking" : ""}
                 ${isPast ? "opacity-30" : ""}
                 ${isAutoAdvancing ? "bg-green-500/15 border border-green-500/40" : ""}
                 ${isCurrent && !isAutoAdvancing && isUserSection ? "bg-amber-500/10 border border-amber-500/30" : ""}
@@ -1069,14 +1058,19 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
             >
               <span
                 className={`
-                  text-xs font-mono font-bold w-10 flex-shrink-0 pt-0.5 text-right
+                  text-xs font-mono font-bold w-28 flex-shrink-0 pt-0.5 text-right
                   ${isAutoAdvancing ? "text-green-400" : ""}
                   ${isCurrent && !isAutoAdvancing && isUserSection ? "text-amber-400" : ""}
                   ${isCurrent && !isAutoAdvancing && !isUserSection ? "text-blue-400" : ""}
                   ${!isCurrent ? "text-zinc-600" : ""}
                 `}
               >
-                {section.speaker || "---"}
+                {section.speaker ? (
+                  <span className="flex flex-col items-end leading-tight">
+                    <span className="speaker-name">{getRoleDisplayName(section.speaker)}</span>
+                    <span className="speaker-abbrev">{section.speaker}</span>
+                  </span>
+                ) : "---"}
               </span>
               <span
                 className={`
