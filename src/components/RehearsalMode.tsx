@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import Link from "next/link";
 import type { RitualSectionWithCipher } from "@/lib/storage";
-import { ROLE_DISPLAY_NAMES, cleanRitualText } from "@/lib/document-parser";
+import { cleanRitualText } from "@/lib/document-parser";
 import { compareTexts, type ComparisonResult } from "@/lib/text-comparison";
 import { getRoleIcon } from "./MasonicIcons";
 import {
@@ -28,6 +28,7 @@ import {
 import { playGavelKnocks, countGavelMarks, warmAudioContext } from "@/lib/gavel-sound";
 import { preloadGeminiRitual } from "@/lib/tts-cloud";
 import { keepScreenAwake, allowScreenSleep } from "@/lib/screen-wake-lock";
+import { getRoleDisplayName, isRehearsalLineSpeaking } from "@/lib/ui-polish";
 import {
   decideLineAction,
   planComparisonAction,
@@ -191,10 +192,6 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
     return Math.round(total / lineResults.length);
   }, [lineResults]);
 
-  // Get display name for a role
-  const getRoleDisplayName = useCallback((role: string): string => {
-    return ROLE_DISPLAY_NAMES[role] || role;
-  }, []);
 
   // Start the rehearsal — begin advancing through sections.
   // IMPORTANT: warmAudioContext() MUST be called here, in the synchronous
@@ -789,7 +786,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
           <h2 className="text-lg font-semibold text-zinc-200 mb-2">
             Choose Your Role
           </h2>
-          <p className="text-sm text-zinc-500 mb-6">
+          <p className="text-sm text-zinc-500 mb-4 max-w-2xl">
             Select the officer role you want to practice. The AI will read all
             other parts aloud with distinct voices, and pause when it&apos;s your
             turn to recite.
@@ -827,9 +824,9 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
 
                   {/* Text Area */}
                   <div>
-                    <span className="font-serif font-bold tracking-wider text-lg block">{role}</span>
-                    <span className="block text-sm text-zinc-400 mt-1 font-medium">
-                      {getRoleDisplayName(role)}
+                    <span className="font-serif font-bold tracking-wider text-lg block">{getRoleDisplayName(role)}</span>
+                    <span className="block text-sm text-zinc-400 mt-1 font-mono">
+                      {role}
                     </span>
                     <span className="block text-xs text-zinc-600 mt-1 uppercase tracking-widest font-semibold">
                       {lineCount} Line{lineCount !== 1 ? "s" : ""}
@@ -991,8 +988,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
 
   // Active rehearsal (ai-speaking, user-turn, listening, transcribing, checking)
   return (
-    <div className="space-y-4">
-      {/* TTS fallback toast */}
+    <div className="practice-mode space-y-4">
       {ttsToast && (
         <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3 flex items-center justify-between">
           <p className="text-amber-400 text-xs">{ttsToast}</p>
@@ -1010,7 +1006,7 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold text-zinc-200">
-            Rehearsal — <span className="text-amber-400">{selectedRole}</span>
+            Rehearsal — <span className="text-amber-400">{getRoleDisplayName(selectedRole || "")}</span>
           </h2>
           <p className="text-xs text-zinc-500">
             Line {currentIndex + 1} of {sections.length} &middot;{" "}
@@ -1036,11 +1032,12 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
       {/* Script view — simple scrollable list */}
       <div
         ref={scriptContainerRef}
-        className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 max-h-60 overflow-y-auto"
+        className="script-panel bg-zinc-900 rounded-xl border border-zinc-800 p-4 max-h-60 overflow-y-auto"
       >
         {sections.map((section, i) => {
           const isPast = i < currentIndex;
           const isCurrent = i === currentIndex;
+          const isSpeaking = isCurrent && isRehearsalLineSpeaking(rehearsalState);
           const isUserSection = section.speaker === selectedRole;
           const gavels = section.gavels > 0 ? section.gavels : countGavelMarks(section.text);
           const cleanText = cleanRitualText(section.text);
@@ -1058,8 +1055,10 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
               id={`rehearsal-line-${i}`}
               onClick={() => !isCurrent && jumpToLine(i)}
               className={`
-                flex gap-3 px-3 py-2 rounded-lg mb-1 transition-all
+                script-line flex gap-3 px-3 py-2 rounded-lg mb-1 transition-all
                 ${!isCurrent ? "cursor-pointer hover:bg-white/5" : ""}
+                ${isCurrent && !isAutoAdvancing ? "active-speaker" : ""}
+                ${isSpeaking ? "now-speaking" : ""}
                 ${isPast ? "opacity-30" : ""}
                 ${isAutoAdvancing ? "bg-green-500/15 border border-green-500/40" : ""}
                 ${isCurrent && !isAutoAdvancing && isUserSection ? "bg-amber-500/10 border border-amber-500/30" : ""}
@@ -1069,14 +1068,19 @@ export default function RehearsalMode({ sections, documentId, documentTitle }: R
             >
               <span
                 className={`
-                  text-xs font-mono font-bold w-10 flex-shrink-0 pt-0.5 text-right
+                  text-xs font-mono font-bold w-28 flex-shrink-0 pt-0.5 text-right
                   ${isAutoAdvancing ? "text-green-400" : ""}
                   ${isCurrent && !isAutoAdvancing && isUserSection ? "text-amber-400" : ""}
                   ${isCurrent && !isAutoAdvancing && !isUserSection ? "text-blue-400" : ""}
                   ${!isCurrent ? "text-zinc-600" : ""}
                 `}
               >
-                {section.speaker || "---"}
+                {section.speaker ? (
+                  <span className="flex flex-col items-end leading-tight">
+                    <span className="speaker-name">{getRoleDisplayName(section.speaker)}</span>
+                    <span className="speaker-abbrev">{section.speaker}</span>
+                  </span>
+                ) : "---"}
               </span>
               <span
                 className={`
