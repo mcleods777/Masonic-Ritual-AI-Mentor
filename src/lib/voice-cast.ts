@@ -44,14 +44,6 @@ export interface VoiceCastRole {
   accent?: string;
   /** Freeform additional notes — delivery quirks, breath, register. */
   other?: string;
-  /**
-   * Pinned Google Cloud TTS voice name (e.g. "en-US-Neural2-D") used as
-   * the fallback engine for ultra-short lines that fail the Gemini
-   * padded-prompt validation gate (AUTHOR-04 D-02/D-04). This is an
-   * engine-routing hint only — it must never be read by buildPreamble
-   * or assemblePrompt, and must never appear in a Gemini prompt string.
-   */
-  googleVoice?: string;
 }
 
 /**
@@ -177,7 +169,7 @@ export function validateVoiceCast(
     }
     const card = cardRaw as Record<string, unknown>;
     const narrowed: VoiceCastRole = {};
-    for (const field of ["profile", "style", "pacing", "accent", "other", "googleVoice"] as const) {
+    for (const field of ["profile", "style", "pacing", "accent", "other"] as const) {
       const v = card[field];
       if (v === undefined) continue;
       if (typeof v !== "string") {

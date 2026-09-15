@@ -133,7 +133,7 @@ describe("POST /api/tts/gemini (SAFETY-03 guard + audit)", () => {
     expect(contentType).toBe("audio/wav");
 
     // Find the [AUDIT] log call.
-    const auditCalls = logSpy.mock.calls.filter((c: unknown[]) => c[0] === "[AUDIT]");
+    const auditCalls = logSpy.mock.calls.filter((c) => c[0] === "[AUDIT]");
     expect(auditCalls.length).toBe(1);
     const record = JSON.parse(auditCalls[0][1] as string);
     expect(record.kind).toBe("tts");
@@ -200,7 +200,7 @@ describe("POST /api/tts/gemini (SAFETY-03 guard + audit)", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
 
     // No audit emitted on denied request.
-    const auditCalls = logSpy.mock.calls.filter((c: unknown[]) => c[0] === "[AUDIT]");
+    const auditCalls = logSpy.mock.calls.filter((c) => c[0] === "[AUDIT]");
     expect(auditCalls.length).toBe(0);
   });
 
@@ -222,7 +222,7 @@ describe("POST /api/tts/gemini (SAFETY-03 guard + audit)", () => {
     const res = await POST(req);
 
     expect(res.status).toBe(502);
-    const auditCalls = logSpy.mock.calls.filter((c: unknown[]) => c[0] === "[AUDIT]");
+    const auditCalls = logSpy.mock.calls.filter((c) => c[0] === "[AUDIT]");
     expect(auditCalls.length).toBe(0);
   });
 });

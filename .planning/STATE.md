@@ -1,45 +1,37 @@
----
-gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
-status: executing
-last_updated: "2026-09-03T09:30:16-05:00"
-progress:
-  total_phases: 7
-  completed_phases: 3
-  total_plans: 26
-  completed_plans: 26
-  percent: 43
----
-
 # State: Masonic Ritual AI Mentor — v1 Invited-Lodge Milestone
 
-**Last updated:** 2026-09-02 (repository stabilization and evidence reconciliation)
+**Last updated:** 2026-04-21 (Phase 2 shipped — PR #68)
 
 ## Project Reference
 
 **Core Value:** A Masonic officer can reliably rehearse their ritual parts — at any hour, with no other brother available — and come out of the session more confident that their memorization is accurate to their lodge's working.
 
-**Current Focus:** Phase 4 — clean content diagnostics and release verification
+**Current Focus:** Ship the v1 invited-lodge milestone: harden and extend the shipping pilot so Shannon can personally invite 1-3 outside lodges' officers without exposure to surprise AI bills, LLM hallucinations against authoritative ritual text, or an inability to revoke access cleanly.
 
 **Project type:** Brownfield — the pilot already ships and is in daily use by Shannon.
 
 ## Current Position
 
 **Milestone:** v1 invited-lodge
-**Code-verified phases:** 1, 2, and 3
-**Human verification:** still open; code-complete does not mean invite-ready
-**Repository state:** Phase 4 work is isolated on `phase4/content-manifest-diagnostics`; the diagnostics slice is committed and the release-verifier slice is ready to checkpoint
-**Next action:** checkpoint the verified v3 release gate, then run it locally against the four private `.mram` assets and restore a valid bake manifest before human audio scrubbing. Do not merge or cherry-pick `gsd/phase4`.
+**Phase:** Phase 2 SHIPPED (PR #68 open against `main`)
+**Plan:** 9/9 complete (all SUMMARYs landed)
+**Status:** Phase 2 code-complete + 4 UAT passed + 4 UAT blocked (real-use-pending); Phase 1 UAT: 2 items still deferred
+**Progress:** 2/7 phases shipped (1 merged, 1 PR open)
+
+```
+[█████░░░░░░░░░░░░░░░] 29% (2/7 phases)
+```
+
+**Next action:** Merge PR #68 (https://github.com/mcleods777/Masonic-Ritual-AI-Mentor/pull/68) when CI passes, then `/gsd-progress` to route to Phase 3 (Authoring Throughput). Amanda is actively using the production deploy on iPhone Safari as of 2026-04-21; Resend-domain-unverified bug caught + fixed (`masonicmentor.app` now verified with Resend; `MAGIC_LINK_FROM_EMAIL=mentor@masonicmentor.app`).
 
 ## Phase Map
 
 | # | Phase | Requirements | Status |
 |---|-------|--------------|--------|
-| 1 | Pre-invite Hygiene | HYGIENE-01..07 (7) | Code complete; 2 human UAT pending |
-| 2 | Safety Floor | SAFETY-01..09 (9) | Code complete; 4/8 human UAT blocked |
-| 3 | Authoring Throughput | AUTHOR-01..10 (10) | Code complete; 4 human UAT pending |
-| 4 | Content Coverage | CONTENT-01..07 (7) | In progress; diagnostics + sanitized v3 release gate complete |
+| 1 | Pre-invite Hygiene | HYGIENE-01..07 (7) | ✓ Complete (UAT pending) |
+| 2 | Safety Floor | SAFETY-01..09 (9) | Not started |
+| 3 | Authoring Throughput | AUTHOR-01..10 (10) | Not started |
+| 4 | Content Coverage | CONTENT-01..07 (7) | Not started |
 | 5 | Coach Quality Lift | COACH-01..12 (12) | Not started |
 | 6 | Admin Substrate & Distribution | ADMIN-01..07 (7) | Not started |
 | 7 | Onboarding Polish | ONBOARD-01..05 (5) | Not started |
@@ -47,10 +39,9 @@ progress:
 ## Performance Metrics
 
 **Requirements coverage:** 57/57 mapped (100%)
-**Plans executed:** 26 across Phases 1-3
-**Phase 2 automated verification:** 9/9 requirements; 615-test current repository suite passes
-**Phase 3 automated verification:** 11/11 must-haves; 615-test current repository suite passes
-**Repository gates (2026-09-03):** private-tree guard passes; standalone typecheck passes; lint 0 errors / 107 warnings; 643/643 tests pass; production build passes
+**Phases planned:** 1/7
+**Plans executed:** 7/7 Phase 1
+**Plans verified:** 5/7 verified + 2/7 deferred-human (HYGIENE-05, HYGIENE-07 rehearsal)
 
 ## Accumulated Context
 
@@ -69,24 +60,14 @@ progress:
 
 ### Open Questions / Todos
 
-- Freeze the gold-eval rubric ("stake my name on it" / "meh" / "wrong" + qualitative axes) as Phase 5 Task 1 artifact before any variant tuning.
-- Revisit whether strong revocation must ship before Phase 6 based on the specific outside lodges in Shannon's invite queue.
-- Reassess model variants during Phase 5 eval; do not reserve a production slot without measured evidence.
+- Confirm Shannon-specific authoring bottleneck ordering inside Phase 3 during plan phase (line-level regen vs batch orchestrator vs preview-bake)
+- Freeze the gold-eval rubric ("stake my name on it" / "meh" / "wrong" + qualitative axes) as Phase 5 Task 1 artifact before any variant tuning
+- Decide whether Haiku 4.5 earns a production variant slot (assume "maybe" until Phase 5 eval measures it)
+- Revisit "does strong revocation need to ship earlier" based on the specific outside lodges in Shannon's invite queue (currently placed in Phase 6)
 
-### Deferred Human UAT
+### Blockers
 
-**Phase 1 (2):** iPhone + iCloud Private Relay magic-link verification; secret-rotation runbook rehearsal on a Vercel preview.
-
-**Phase 2 (4 blocked):** observe the 02:00 UTC cron and Resend delivery; verify client-token refresh after a Safari tab is backgrounded over 60 minutes; force a live runaway auto-advance to its ceiling; observe wake-lock release after 30 minutes idle on a real device.
-
-**Phase 3 (4 pending):** confirm a one-line edit re-bakes in under one minute; bake five rituals in parallel without babysitting; scrub baked audio through `localhost:8883`; confirm the EA rebake restores all 32 previously skipped short lines.
-
-### Remaining Readiness Risk
-
-- Phase 4's old branch is contaminated by a large unrelated tooling divergence and must not be merged or cherry-picked.
-- Local diagnostics detect 4 `.mram` assets but no `_bake-cache/_manifest.json`; baked-source currentness is therefore unverified.
-- The v3 release gate is implemented, but it has not been run against the four real private `.mram` assets because no passphrase was accessed during this slice.
-- No CONTENT-01..07 requirement is complete until the aggregate gate passes on the real assets, the bake manifest is restored/current, human audio scrubbing is complete, and actual content coverage is verified.
+None.
 
 ### Requirements Currently Validated (pre-v1, shipped pilot)
 
@@ -103,22 +84,23 @@ progress:
 
 ## Session Continuity
 
-**Last significant action (2026-09-03):** Replaced the leaking v1-only verifier with a sanitized v3 binary/payload/audio verifier and aggregate `rituals/*.mram` release gate. Added fail-closed symlink, empty-document, checksum, metadata, Ogg/Opus, CLI-output, and passphrase-EOF coverage. Fable 5.1 returned GO with no blocking corrections; both explicit follow-ups were implemented.
+**Last significant action:** Phase 1 executed via `/gsd-execute-phase 1` on 2026-04-21. All 7 HYGIENE plans landed on branch `gsd/phase-1-pre-invite-hygiene` (13 commits: 7 `hygiene-NN:` + 5 `docs(01-NN):` metadata + 1 `test(01):` UAT). Verifier returned `human_needed` — 5/7 ✓ VERIFIED (HYGIENE-01, 02, 03, 04, 06), 2/7 ⏸ DEFERRED (HYGIENE-05 iPhone test, HYGIENE-07 runbook rehearsal). Shannon approved phase close on 2026-04-21. `01-HUMAN-UAT.md` tracks the 2 deferred items.
 
-**Verified current gates:**
+**Resumption cue:** Next action: `/gsd-discuss-phase 2` to begin Phase 2 (Safety Floor — SAFETY-01..09). The 2 deferred UAT items run at Shannon's pacing; they do NOT block Phase 2 planning or execution, but MUST close before outside-lodge invitations.
 
-- `npm run check:private-tree`: pass; an isolated-index probe confirms staged `rituals/` paths are rejected.
-- `npm run typecheck`: pass.
-- `npm run lint`: 0 errors, 107 warnings.
-- `npm run test:run`: 643/643 pass.
-- `npm run build`: pass.
-- Aggregate-only local smoke: schema v1, manifest missing, 4 ritual assets detected, 0 recorded/current entries.
-
-**Resumption cue:** Run `npm run verify:content` locally with the private passphrase (interactive or `MRAM_PASSPHRASE`), record only the sanitized aggregate result, then restore/validate `_bake-cache/_manifest.json` and proceed to human audio scrubbing. Use the old branch only as read-only design input.
-
-**Branch rule:** Treat `gsd/phase4` as read-only reference material. Do not merge or cherry-pick it; its product work is mixed with a large unrelated tooling divergence.
-
-**Approval boundary:** Do not push, merge, deploy, delete, or rewrite history without Shannon's explicit approval.
+**Critical context for next agent:**
+1. Brownfield milestone — do NOT re-build existing pilot capability (see PROJECT.md Validated)
+2. Phase 2 (Safety Floor) introduces paid-route rate limiting, audit log, budget caps, emergency kill switch. Dependency: Phase 2 benefits from HYGIENE-02's AI SDK v6 bump (commit 005dc82) but does not require rewriting `/api/rehearsal-feedback` — that's Phase 5 COACH-02.
+3. Pending Phase 1 manual verification (both in `01-HUMAN-UAT.md`):
+   - HYGIENE-05: Shannon iPhone + iCloud Private Relay magic-link test (~2-3 min)
+   - HYGIENE-07: Rotation runbook rehearsal on Vercel preview (~15-30 min)
+4. Phase 1 left on branch `gsd/phase-1-pre-invite-hygiene` — decide merge-to-main strategy before Phase 2 OR create a fresh `gsd/phase-2-safety-floor` branch from main (Phase 1 commits travel via merge).
+5. Research findings from Phase 1 worth carrying forward: (a) codebase had zero AI SDK imports at Phase 1 start — Phase 5 COACH-02 will be the first consumer of v6 idioms; (b) current matcher is case-sensitive on .mram extension; (c) rotation runbook uses `vercel env update` atomically except for preview-branch (CLI v51.x limitation).
 
 ---
-*State reconciled against Phase 2 and Phase 3 verification artifacts: 2026-09-02*
+*State initialized: 2026-04-20 after roadmap creation*
+*Phase 1 context gathered: 2026-04-20*
+*Phase 1 planned: 2026-04-20 (7 plans, verification passed iteration 2)*
+*Phase 1 executed: 2026-04-21 (7/7 plans landed, 5/7 verified + 2/7 deferred-human)*
+*Phase 2 context gathered: 2026-04-21*
+*Phase 2 planned: 2026-04-21 (9 plans, 8 waves, checker iteration 2 passed)*

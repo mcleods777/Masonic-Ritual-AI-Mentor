@@ -66,16 +66,16 @@ All baked in Shannon's lodge's working; all ship with pre-baked Opus per line so
 
 Solo-author tooling so Shannon can bake five rituals worth of content without spending weekends on it.
 
-- [x] **AUTHOR-01**: Content-addressed bake cache at `rituals/_bake-cache/` keyed on `sha256(voice + style + text + modelId + KEY_VERSION)`; single-line edits rebake 1 line, not 155
-- [x] **AUTHOR-02**: `scripts/bake-all.ts` orchestrator with `--since <git-ref>`, `--dry-run`, `--resume`, `--parallel N` flags
-- [x] **AUTHOR-03**: `gemini-3.1-flash-tts-preview` prioritized in `GEMINI_TTS_MODELS` fallback chain; older previews retained as fallback
-- [x] **AUTHOR-04**: Bake pipeline fixes the ultra-short-line silent-skip bug recorded in `bake.log` — lines below the Gemini minimum route to an alternate engine, never silently drop
-- [x] **AUTHOR-05**: `src/lib/author-validation.ts` cipher/plain parity validator enforces same speaker, same action tags, and a word-count ratio band per line — bake refuses on failure
-- [x] **AUTHOR-06**: Audio-duration-anomaly detector flags any baked line whose duration is implausibly short or long given its text length (catches voice-cast preamble leak into the audio)
-- [x] **AUTHOR-07**: Optional STT round-trip diff per line in bake pipeline — cheap last-line-of-defense against audio that doesn't match the text
-- [x] **AUTHOR-08**: `scripts/preview-bake.ts` localhost-only server streams cached Opus for in-editor scrubbing before re-encrypting `.mram`; dev-guard identical to `/author/_guard.ts`
-- [x] **AUTHOR-09**: `p-limit` concurrency cap on parallel Gemini TTS calls in `build-mram-from-dialogue.ts`
-- [x] **AUTHOR-10**: `src/lib/idb-schema.ts` extracted as the single source of truth for `DB_VERSION` shared between `storage.ts` and `voice-storage.ts`; also houses the new `feedbackTraces` store
+- [ ] **AUTHOR-01**: Content-addressed bake cache at `rituals/_bake-cache/` keyed on `sha256(voice + style + text + modelId + KEY_VERSION)`; single-line edits rebake 1 line, not 155
+- [ ] **AUTHOR-02**: `scripts/bake-all.ts` orchestrator with `--since <git-ref>`, `--dry-run`, `--resume`, `--parallel N` flags
+- [ ] **AUTHOR-03**: `gemini-3.1-flash-tts-preview` prioritized in `GEMINI_TTS_MODELS` fallback chain; older previews retained as fallback
+- [ ] **AUTHOR-04**: Bake pipeline fixes the ultra-short-line silent-skip bug recorded in `bake.log` — lines below the Gemini minimum route to an alternate engine, never silently drop
+- [ ] **AUTHOR-05**: `src/lib/author-validation.ts` cipher/plain parity validator enforces same speaker, same action tags, and a word-count ratio band per line — bake refuses on failure
+- [ ] **AUTHOR-06**: Audio-duration-anomaly detector flags any baked line whose duration is implausibly short or long given its text length (catches voice-cast preamble leak into the audio)
+- [ ] **AUTHOR-07**: Optional STT round-trip diff per line in bake pipeline — cheap last-line-of-defense against audio that doesn't match the text
+- [ ] **AUTHOR-08**: `scripts/preview-bake.ts` localhost-only server streams cached Opus for in-editor scrubbing before re-encrypting `.mram`; dev-guard identical to `/author/_guard.ts`
+- [ ] **AUTHOR-09**: `p-limit` concurrency cap on parallel Gemini TTS calls in `build-mram-from-dialogue.ts`
+- [ ] **AUTHOR-10**: `src/lib/idb-schema.ts` extracted as the single source of truth for `DB_VERSION` shared between `storage.ts` and `voice-storage.ts`; also houses the new `feedbackTraces` store
 
 ### Admin (Shannon-facing visibility + distribution)
 
@@ -193,16 +193,16 @@ Each v1 requirement maps to exactly one phase. Populated by `gsd-roadmapper` on 
 | CONTENT-05 | Phase 4 | Pending |
 | CONTENT-06 | Phase 4 | Pending |
 | CONTENT-07 | Phase 4 | Pending |
-| AUTHOR-01 | Phase 3 | ✓ Validated (2026-07-02, re-verification 03-VERIFICATION.md) |
-| AUTHOR-02 | Phase 3 | ✓ Validated (2026-07-02, re-verification 03-VERIFICATION.md — CR-01/02/WR-02 closed) |
-| AUTHOR-03 | Phase 3 | ✓ Validated (2026-07-02, re-verification 03-VERIFICATION.md) |
-| AUTHOR-04 | Phase 3 | ✓ Validated (2026-07-02, re-verification 03-VERIFICATION.md) |
-| AUTHOR-05 | Phase 3 | ✓ Validated (2026-07-02, re-verification 03-VERIFICATION.md) |
-| AUTHOR-06 | Phase 3 | ✓ Validated (2026-07-02, re-verification 03-VERIFICATION.md) |
-| AUTHOR-07 | Phase 3 | ✓ Validated (2026-07-02, re-verification 03-VERIFICATION.md) |
-| AUTHOR-08 | Phase 3 | ✓ Validated (2026-07-02, re-verification 03-VERIFICATION.md) |
-| AUTHOR-09 | Phase 3 | ✓ Validated (2026-07-02, re-verification 03-VERIFICATION.md — CR-03 closed) |
-| AUTHOR-10 | Phase 3 | ✓ Validated (2026-07-02, re-verification 03-VERIFICATION.md) |
+| AUTHOR-01 | Phase 3 | Pending |
+| AUTHOR-02 | Phase 3 | Pending |
+| AUTHOR-03 | Phase 3 | Pending |
+| AUTHOR-04 | Phase 3 | Pending |
+| AUTHOR-05 | Phase 3 | Pending |
+| AUTHOR-06 | Phase 3 | Pending |
+| AUTHOR-07 | Phase 3 | Pending |
+| AUTHOR-08 | Phase 3 | Pending |
+| AUTHOR-09 | Phase 3 | Pending |
+| AUTHOR-10 | Phase 3 | Pending |
 | ADMIN-01 | Phase 6 | Pending |
 | ADMIN-02 | Phase 6 | Pending |
 | ADMIN-03 | Phase 6 | Pending |

@@ -7,13 +7,10 @@
  * until it's sent with a TTS request.
  */
 
-import {
-  openDB,
-  VOICES_STORE,
-  AUDIO_CACHE_STORE,
-} from "./idb-schema";
-
-export { AUDIO_CACHE_STORE };
+const DB_NAME = "masonic-ritual-mentor";
+const DB_VERSION = 4; // bumped from 3 to add audioCache store
+const VOICES_STORE = "voices";
+export const AUDIO_CACHE_STORE = "audioCache";
 
 export interface LocalVoice {
   id: string;
@@ -33,6 +30,54 @@ export interface LocalVoice {
    * still carry a version stamp. Currently ignored by all readers.
    */
   version?: number;
+}
+
+// ============================================================
+// IndexedDB helpers
+// ============================================================
+
+function openDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result);
+
+    request.onupgradeneeded = (event) => {
+      const db = (event.target as IDBOpenDBRequest).result;
+
+      // Existing stores from storage.ts (recreate if missing)
+      if (!db.objectStoreNames.contains("documents")) {
+        db.createObjectStore("documents", { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains("sections")) {
+        const sectionStore = db.createObjectStore("sections", {
+          keyPath: "id",
+        });
+        sectionStore.createIndex("documentId", "documentId", { unique: false });
+        sectionStore.createIndex("degree", "degree", { unique: false });
+      }
+      if (!db.objectStoreNames.contains("settings")) {
+        db.createObjectStore("settings", { keyPath: "key" });
+      }
+
+      // New: voices store
+      if (!db.objectStoreNames.contains(VOICES_STORE)) {
+        db.createObjectStore(VOICES_STORE, { keyPath: "id" });
+      }
+
+      // New in v4: audioCache for Gemini TTS output caching.
+      // Keyed by sha256(text|style|voice) to avoid re-rendering identical
+      // lines. Per eng-review decision 1A — client-side, not server-side
+      // (Vercel Fluid Compute's filesystem is ephemeral).
+      if (!db.objectStoreNames.contains(AUDIO_CACHE_STORE)) {
+        const cacheStore = db.createObjectStore(AUDIO_CACHE_STORE, {
+          keyPath: "key",
+        });
+        cacheStore.createIndex("createdAt", "createdAt", { unique: false });
+      }
+    };
+  });
 }
 
 // ============================================================
